@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main, Dev]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: DirnexCore (swift test)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 26
+        run: sudo xcode-select -switch /Applications/Xcode_26.app
+      - name: Swift version
+        run: swift --version
+      - name: Test DirnexCore
+        run: swift test --package-path DirnexCore
+
+  app:
+    name: App (xcodebuild test)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 26
+        run: sudo xcode-select -switch /Applications/Xcode_26.app
+      - name: Build & test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Dirnex.xcodeproj \
+            -scheme Dirnex \
+            -destination 'platform=macOS' \
+            -resultBundlePath TestResults.xcresult
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcresult
+          path: TestResults.xcresult
+          if-no-files-found: ignore
+
+  lint:
+    name: Lint (SwiftFormat + SwiftLint)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: brew install swiftformat swiftlint
+      - name: SwiftFormat (lint mode)
+        run: swiftformat --lint .
+      - name: SwiftLint
+        run: swiftlint --strict

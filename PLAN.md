@@ -96,13 +96,21 @@ Each milestone ends in something runnable; no milestone depends on a later one.
 
 Goal: empty but real project; every later PR lands on green CI.
 
-- [ ] Xcode project + `DirnexCore` SwiftPM package, Swift 6 strict concurrency
-- [ ] SwiftFormat/SwiftLint config; CI (GitHub Actions: build + tests on macOS runner)
-- [ ] Fixture generator: script that builds test directory trees (deep nesting,
+- [x] Xcode project + `DirnexCore` SwiftPM package, Swift 6 strict concurrency
+- [x] SwiftFormat/SwiftLint config; CI (GitHub Actions: build + tests on macOS runner)
+- [x] Fixture generator: script that builds test directory trees (deep nesting,
       100k files, weird names: emoji, NFD/NFC unicode, 1000-char paths, symlinks)
-- [ ] App icon placeholder, Developer ID signing set up locally
+- [x] App icon placeholder; ad-hoc signing for local/CI (Developer ID deferred to M7)
 
-Exit: `xcodebuild test` green in CI; app launches to an empty window.
+Exit: `xcodebuild test` green in CI; app launches to an empty window. ✅ met locally
+(CI configured; Developer ID signing intentionally deferred to M7 per §2 "distributed
+outside MAS" — ad-hoc signing runs everywhere without a team).
+
+Notes:
+- Xcode project uses file-system-synchronized groups (objectVersion 77) so no file
+  generator (XcodeGen/Tuist) is needed — `git clone && xcodebuild test` just works.
+- `DirnexCore` is a standalone SwiftPM package tested via `swift test`. It is wired
+  into the app target as a local package dependency in M1, when the app first needs it.
 
 ### M1 — Read-only dual-pane browser (L)
 
