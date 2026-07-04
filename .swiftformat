@@ -11,6 +11,7 @@
 --wrapparameters before-first
 --wrapcollections before-first
 --commas inline
+--ranges nospace
 --trimwhitespace always
 --self remove
 --importgrouping testable-bottom

@@ -97,6 +97,7 @@ if fm.fileExists(atPath: root) {
     do { try fm.removeItem(atPath: root) }
     catch { fail("clean \(root): \(error.localizedDescription)") }
 }
+
 makeDir(root)
 
 // 1. A plain, friendly directory.
@@ -105,6 +106,7 @@ makeDir(plain)
 for i in 1...20 {
     writeFile(plain + "/file-\(String(format: "%03d", i)).txt", contents: "hello \(i)\n")
 }
+
 makeDir(plain + "/subfolder")
 writeFile(plain + "/subfolder/readme.md", contents: "# Subfolder\n")
 
@@ -116,6 +118,7 @@ for level in 1...100 {
     deep += "/d\(level)"
     makeDir(deep)
 }
+
 writeFile(deep + "/bottom.txt", contents: "you made it\n")
 
 // 2b. A deliberately long path (~1000 chars) built from many segments, since a
@@ -130,6 +133,7 @@ while longPath.utf8.count + segment.utf8.count < longPathCeiling {
     longPath += segment
     makeDir(longPath)
 }
+
 writeFile(longPath + "/leaf.txt", contents: "deep in a long path\n")
 
 // 3. Pathological names.
@@ -138,16 +142,16 @@ makeDir(weird)
 let weirdNames: [String] = [
     "emoji 🗂️📁🔥.txt",
     "with spaces and    tabs.txt",
-    "with\nnewline.txt",              // newline in filename
-    "café-NFC.txt",                    // é as single precomposed scalar (U+00E9)
-    "cafe\u{0301}-NFD.txt",           // e + combining acute accent
+    "with\nnewline.txt", // newline in filename
+    "café-NFC.txt", // é as single precomposed scalar (U+00E9)
+    "cafe\u{0301}-NFD.txt", // e + combining acute accent
     "UPPER.TXT",
-    "upper.txt",                       // case-only sibling difference
+    "upper.txt", // case-only sibling difference
     ".hidden-dotfile",
     "trailing.dots...",
     "-leading-dash.txt",
     "quote'and\"double.txt",
-    String(repeating: "long", count: 60) + ".txt", // ~240-char name
+    String(repeating: "long", count: 60) + ".txt" // ~240-char name
 ]
 for name in weirdNames {
     writeFile(weird + "/" + name, contents: "weird\n")

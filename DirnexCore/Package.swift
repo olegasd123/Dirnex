@@ -8,10 +8,10 @@ import PackageDescription
 let package = Package(
     name: "DirnexCore",
     platforms: [
-        .macOS(.v14),
+        .macOS(.v14)
     ],
     products: [
-        .library(name: "DirnexCore", targets: ["DirnexCore"]),
+        .library(name: "DirnexCore", targets: ["DirnexCore"])
     ],
     targets: [
         .target(
@@ -20,7 +20,7 @@ let package = Package(
         .testTarget(
             name: "DirnexCoreTests",
             dependencies: ["DirnexCore"]
-        ),
+        )
     ],
     swiftLanguageModes: [.v6]
 )
