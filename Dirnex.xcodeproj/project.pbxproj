@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		1000000000000000000000201 /* DirnexCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1000000000000000000000202 /* DirnexCore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		1000000000000000000000D1 /* Dirnex */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -31,6 +35,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1000000000000000000000201 /* DirnexCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -83,6 +88,9 @@
 				1000000000000000000000D1 /* Dirnex */,
 			);
 			name = Dirnex;
+			packageProductDependencies = (
+				1000000000000000000000202 /* DirnexCore */,
+			);
 			productName = Dirnex;
 			productReference = 1000000000000000000000C1 /* Dirnex.app */;
 			productType = "com.apple.product-type.application";
@@ -136,6 +144,9 @@
 			);
 			mainGroup = 1000000000000000000000A2;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1000000000000000000000203 /* XCLocalSwiftPackageReference "DirnexCore" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1000000000000000000000A3 /* Products */;
 			projectDirPath = "";
@@ -439,6 +450,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		1000000000000000000000203 /* XCLocalSwiftPackageReference "DirnexCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = DirnexCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1000000000000000000000202 /* DirnexCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DirnexCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1000000000000000000000A1 /* Project object */;
 }

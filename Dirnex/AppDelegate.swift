@@ -2,27 +2,20 @@ import AppKit
 
 /// Application lifecycle owner.
 ///
-/// M0 scope: bring up a single empty window and a minimal main menu so the app
-/// behaves like a real macOS citizen (Cmd+Q quits, About works). The dual-pane
-/// browser itself arrives in M1.
+/// Brings up the dual-pane browser window (M1) and a minimal main menu so the app
+/// behaves like a real macOS citizen (Cmd+Q quits, About works). The action-registry
+/// driven menu replaces the hand-built one in M3.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var window: NSWindow?
+    private var browserWindowController: BrowserWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         buildMainMenu()
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Dirnex"
-        window.setFrameAutosaveName("MainWindow")
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        self.window = window
+        let controller = BrowserWindowController()
+        controller.showWindow(nil)
+        browserWindowController = controller
 
         NSApp.activate(ignoringOtherApps: true)
     }

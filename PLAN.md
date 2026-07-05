@@ -118,12 +118,15 @@ Goal: the app already feels good with zero file operations. This milestone defin
 the product's feel; do not rush it.
 
 - [x] `LocalBackend` + `DirectoryModel`: list, stat, sort (name/size/date/ext), hidden-files toggle
-- [ ] Panel view: `NSTableView`, virtualized, 60fps on 100k rows; columns: name, size, date
-- [ ] Two panels + splitter; active-panel highlight; Tab switches
-- [ ] Keyboard core: arrows/Home/End, Enter (open dir / launch file), Backspace (up),
-      Cmd+Down/Up, type-to-filter with live narrowing (Esc clears)
-- [ ] Selection model: Space/Insert toggles mark, Space on dir also computes size in place,
-      Cmd+A, invert, pattern select (`+`/`-` → glob)
+- [x] Panel view: `NSTableView`, virtualized (view reuse + per-extension icon cache), columns:
+      name, size, date; header-click sort with direction indicator. 60fps/100k budget not yet
+      measured — deferred to the M1 exit gate / M7 perf pass.
+- [x] Two panels + splitter; active-panel highlight; Tab switches
+- [~] Keyboard core: arrows/Home/End/PageUp/PageDown, Enter (open dir / launch file),
+      Backspace (up), Cmd+Down/Up done. **type-to-filter** (live narrowing, Esc clears) not yet.
+- [~] Selection model: Space/Insert toggle-and-advance, Cmd+A (mark all), `*` invert done.
+      **Space-on-dir in-place size** and **`+`/`-` glob select UI** not yet (glob select exists
+      in `Panel`, just unwired).
 - [ ] Tabs per panel: new/close/reorder, restored on relaunch
 - [ ] Path bar: clickable breadcrumbs, Cmd+L to edit as text with completion
 - [ ] Volumes/places strip (replaces TC's drive letters); eject
@@ -142,10 +145,19 @@ in `DirnexCore` (38 tests, SwiftLint/SwiftFormat clean) — see `Sources/DirnexC
   `fnmatch`), and identity-preserving same-directory refresh (cursor + marks survive a
   live reload). All I/O stays in the caller, so the model is unit-tested headless.
 
-Remaining for M1 is the UI/OS integration layered on top: the `NSTableView` panels,
-splitter + Tab switching, keyboard/navigation wiring, path bar, volumes/places strip,
-live FSEvents refresh, Quick Look, drag-out, per-tab sort/column persistence, and the
-Space-on-directory in-place size computation.
+Update (2026-07-05, later): `DirnexCore` is now wired into the app target (local SwiftPM
+package) and the dual-pane browser is runnable. `Dirnex/Browser/` holds the thin UI over
+`Panel`: `BrowserWindowController` (two panes in an `NSSplitViewController`, active-pane
+tracking, Tab focus routing), `PanelViewController` (`NSTableView` data source/delegate,
+async directory loads via `DirectoryLoader` off the main thread, cursor⇄table-selection
+mirror with loop guard + stale-load token, header-click sort, error sheets), plus
+`FileTableView` (TC key model), `FileCellView` (cursor = blue selection, mark = bold red
+text), and `FileFormatting`/`FileIconProvider`. Verified live: home dir lists correctly,
+active/inactive highlight, sort, marks all render.
+
+Remaining for M1: type-to-filter, tabs per panel, clickable breadcrumb path bar + Cmd+L,
+volumes/places strip + eject, live FSEvents refresh, Quick Look, drag-out, per-tab
+sort/column persistence, `+`/`-` glob-select UI, and Space-on-directory in-place sizing.
 
 Exit: can live in it for browsing all day; 100k-dir opens < 150 ms warm; scroll never
 drops frames; unicode/symlink fixtures render correctly.
