@@ -14,8 +14,19 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     init() {
         let backend = LocalBackend()
         let home = VFSPath.local(NSHomeDirectory())
-        leftPanel = PanelViewController(backend: backend, path: home)
-        rightPanel = PanelViewController(backend: backend, path: home)
+        // Each pane restores its own tabs from the last session, keyed by side.
+        leftPanel = PanelViewController(
+            backend: backend,
+            restoration: TabPersistence.load(paneKey: "left"),
+            defaultPath: home,
+            restorationKey: "left"
+        )
+        rightPanel = PanelViewController(
+            backend: backend,
+            restoration: TabPersistence.load(paneKey: "right"),
+            defaultPath: home,
+            restorationKey: "right"
+        )
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 680),

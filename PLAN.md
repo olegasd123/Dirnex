@@ -128,14 +128,17 @@ the product's feel; do not rush it.
 - [~] Selection model: Space/Insert toggle-and-advance, Cmd+A (mark all), `*` invert done.
       **Space-on-dir in-place size** and **`+`/`-` glob select UI** not yet (glob select exists
       in `Panel`, just unwired).
-- [ ] Tabs per panel: new/close/reorder, restored on relaunch
+- [x] Tabs per panel: new (Cmd+T)/close (Cmd+W)/switch (Cmd+Shift+[ / ])/drag-reorder,
+      restored on relaunch. Tab bar auto-hides at a single tab.
 - [x] Path bar: clickable breadcrumbs, Cmd+L to edit as text with completion
 - [ ] Volumes/places strip (replaces TC's drive letters); eject
 - [x] FSEvents: panels refresh live, preserving cursor and selection
 - [x] Quick Look on Cmd+Y (Space stays reserved for selection, per §7); previews the marked
       set or the cursor file, tracks the cursor live
 - [ ] Drag out to other apps; drag in = reveal only (real drop lands in M2)
-- [ ] Sort/column state per tab, persisted
+- [~] Sort/column state per tab, persisted. Per-tab **sort** (key + direction) now lives in
+      each tab and persists across launches; per-tab **column widths/order** not yet (columns
+      are still shared across a pane's tabs).
 
 Progress (2026-07-05): the headless core for this milestone is complete and tested
 in `DirnexCore` (38 tests, SwiftLint/SwiftFormat clean) — see `Sources/DirnexCore/VFS/`:
@@ -213,8 +216,38 @@ and `+QuickLook` (the main file is now 443 lines; `panel`/`isSyncingSelection`/
 live via computer-use: `..` at the top of non-root dirs, absent at `/`, Enter-up lands on
 the child you came from, count excludes it, and the filter-empty→Enter-up case works.
 
-Remaining for M1: tabs per panel, volumes/places strip + eject, drag-out, per-tab
-sort/column persistence, `+`/`-` glob-select UI, and Space-on-directory in-place sizing.
+Update (2026-07-05, 7th pass): tabs per panel landed. Each pane now owns an array of
+`PanelTab`s (a `PanelTab` = the value-type `Panel` — directory/cursor/marks/sort/filter —
+plus the two UI bits kept outside it: `cursorOnParentRow` and a lazy-load flag) and renders
+whichever is active; `PanelViewController.panel`/`cursorOnParentRow` became computed forwards
+to the active tab, so every existing `panel.…` call transparently targets it. A new
+`TabBarView` (chips with an accent-filled active tab, per-chip close ✕, a `+`, click-select
+and drag-reorder) sits above the path bar and auto-hides at a single tab. Keyboard/menu:
+Cmd+T new, Cmd+W close (closing the last tab closes the window), Cmd+Shift+[ / ] switch —
+driven by a new File menu + Window-menu items whose nil-target actions dispatch through the
+responder chain to the focused pane (`PanelViewController+Tabs`); Window ▸ Close Window moved
+to Cmd+Shift+W. Tabs restore on relaunch via `TabPersistence` (boring JSON in UserDefaults,
+per §2), including **per-tab sort** (`FileSort.Key` raw values were already documented as the
+on-disk format); a restored tab whose directory has vanished is dropped so launch never lands
+on a dead path. Switching to a tab renders its stored state instantly, then background-refreshes
+(it went unwatched while inactive); a never-loaded (freshly restored) tab loads from scratch.
+Files: new `PanelTab`, `TabBarView`, `TabPersistence`, `PanelViewController+Tabs`; edits to
+the controller (multi-tab storage + init restoration + tab-bar layout), `+Table` (sort now
+persists), `BrowserWindowController` (per-side restoration keys), `AppDelegate` (File/Window
+menus). App builds clean (no warnings); DirnexCore untouched (still 48 tests green); touched
+files swiftformat/swiftlint-strict clean. Verified live via computer-use (keyboard-driven):
+Cmd+T reveals the bar with a second tab of the same dir, each tab holds its own directory,
+Cmd+Shift+[ / ] switch both ways preserving per-tab state, Cmd+W closes and re-hides the bar,
+the active chip accents only in the focused pane, and a relaunch restored both panes (left
+`[oleg, Downloads]` active-index 1, right `[oleg]`) with per-tab sort. GOTCHA (unchanged): the
+LanguageTool-for-Desktop overlay still gates every mouse click on the Dirnex window onto
+itself, so chip click-select, the `+`/✕ buttons, and drag-reorder are unverified-live — but
+they route through the same `selectTab`/`addTab`/`closeTab`/`moveTab` exercised via keyboard.
+Also: the harness didn't deliver the Command modifier with arrow keys (`Cmd+Up` acted as plain
+Up), unrelated to tabs.
+
+Remaining for M1: volumes/places strip + eject, drag-out, per-tab **column** width/order
+persistence, `+`/`-` glob-select UI, and Space-on-directory in-place sizing.
 
 Exit: can live in it for browsing all day; 100k-dir opens < 150 ms warm; scroll never
 drops frames; unicode/symlink fixtures render correctly.

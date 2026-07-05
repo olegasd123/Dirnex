@@ -38,9 +38,23 @@ final class PanelViewController: NSViewController {
         }
     }
 
-    private let backend: any VFSBackend
-    // Only this controller and its own extension files mutate the panel value.
-    var panel: Panel
+    // Internal so the tab-management extension in its own file can list directories.
+    let backend: any VFSBackend
+    /// This pane's open tabs and which one is showing. Only the tab code in
+    /// `PanelViewController+Tabs` mutates these directly; everything else goes through
+    /// `panel`, which forwards to the active tab.
+    var tabs: [PanelTab]
+    var activeTabIndex: Int
+    /// The active tab's pane state. A computed forward, so every existing `panel.…`
+    /// read and mutation transparently targets the current tab.
+    var panel: Panel {
+        get { tabs[activeTabIndex].panel }
+        set { tabs[activeTabIndex].panel = newValue }
+    }
+
+    /// Stable identifier ("left"/"right") under which this pane's tabs are persisted
+    /// across launches; `nil` disables persistence.
+    var restorationKey: String?
     weak var host: PanelHost?
 
     var isActivePanel = false {
@@ -54,6 +68,8 @@ final class PanelViewController: NSViewController {
     // Internal so `PanelViewController+Chrome` can update them from its own file.
     let pathBar = PathBarView()
     let statusLabel = NSTextField(labelWithString: "")
+    // The tab strip above the path bar; hidden until the pane has more than one tab.
+    let tabBar = TabBarView()
 
     /// Guards the cursor⇄table-selection mirror against feedback loops: when we push
     /// `panel.cursor` into the table, the resulting selection-changed callback must
@@ -61,19 +77,34 @@ final class PanelViewController: NSViewController {
     var isSyncingSelection = false
     /// Bumped on every navigation so a slow listing that resolves after the user has
     /// already moved on is discarded instead of clobbering the current directory.
-    private var loadToken = 0
+    /// Internal so `PanelViewController+Tabs` can discard a stale load on tab switch.
+    var loadToken = 0
     /// FSEvents watcher for the directory on screen — live-refreshes the pane when the
     /// folder changes underneath us. Replaced on every navigation; `nil` for backends
     /// without the `.watch` capability.
     private var watcher: DirectoryWatcher?
     /// The visible cursor sits on the synthetic `..` row (which has no backing entry).
     /// Tracked in the UI only — `Panel` stays unaware of the parent row. Internal so the
-    /// Quick Look extension can suppress previews while the cursor is on `..`.
-    var cursorOnParentRow = false
+    /// Quick Look extension can suppress previews while the cursor is on `..`; forwards
+    /// to the active tab so each tab remembers whether it was parked on `..`.
+    var cursorOnParentRow: Bool {
+        get { tabs[activeTabIndex].cursorOnParentRow }
+        set { tabs[activeTabIndex].cursorOnParentRow = newValue }
+    }
 
-    init(backend: any VFSBackend, path: VFSPath) {
+    init(
+        backend: any VFSBackend,
+        restoration: PersistedPane?,
+        defaultPath: VFSPath,
+        restorationKey: String?
+    ) {
         self.backend = backend
-        panel = Panel(path: path)
+        self.restorationKey = restorationKey
+        let restored = PanelViewController.restoredTabs(from: restoration)
+        tabs = restored.isEmpty ? [PanelTab(path: defaultPath)] : restored
+        activeTabIndex = restored.isEmpty
+            ? 0
+            : min(max(restoration?.activeIndex ?? 0, 0), restored.count - 1)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -93,16 +124,18 @@ final class PanelViewController: NSViewController {
         scrollView.borderType = .noBorder
 
         pathBar.delegate = self
+        tabBar.delegate = self
 
         statusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.lineBreakMode = .byTruncatingTail
 
-        let stack = NSStackView(views: [pathBar, scrollView, statusLabel])
+        let stack = NSStackView(views: [tabBar, pathBar, scrollView, statusLabel])
         stack.orientation = .vertical
         stack.spacing = 4
         stack.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
         stack.setHuggingPriority(.defaultLow, for: .vertical)
+        tabBar.setContentHuggingPriority(.required, for: .vertical)
         pathBar.setContentHuggingPriority(.required, for: .vertical)
         statusLabel.setContentHuggingPriority(.required, for: .vertical)
         scrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
@@ -151,7 +184,7 @@ final class PanelViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        navigate(to: panel.path)
+        activateTab()
     }
 
     // MARK: - Focus
@@ -163,16 +196,19 @@ final class PanelViewController: NSViewController {
 
     private func updateActiveAppearance() {
         pathBar.isActive = isActivePanel
+        tabBar.isActivePane = isActivePanel
     }
 
     // MARK: - Navigation
 
-    /// Load `path` and install it. When `focus` names a child that still exists (used
-    /// when walking up), the cursor lands on it — the expected "go up, land on where I
-    /// came from" behavior.
-    private func navigate(to path: VFSPath, focus child: VFSPath? = nil) {
+    /// Load `path` and install it in the active tab. When `focus` names a child that
+    /// still exists (used when walking up), the cursor lands on it — the expected "go up,
+    /// land on where I came from" behavior. Internal so `PanelViewController+Tabs` can
+    /// load a freshly opened tab.
+    func navigate(to path: VFSPath, focus child: VFSPath? = nil) {
         loadToken += 1
         let token = loadToken
+        let tabIndex = activeTabIndex
         Task {
             do {
                 let listing = try await DirectoryLoader.list(backend, at: path)
@@ -188,8 +224,11 @@ final class PanelViewController: NSViewController {
                 }
                 // Land on a real entry; only an empty directory parks the cursor on `..`.
                 cursorOnParentRow = panel.isEmpty && panel.parentPath != nil
+                tabs[tabIndex].hasLoaded = true
                 reloadEverything()
+                refreshTabBar()
                 startWatching(path)
+                persistState()
             } catch {
                 guard token == loadToken else { return }
                 presentLoadFailure(error, path: path)
@@ -201,7 +240,8 @@ final class PanelViewController: NSViewController {
 
     /// Watch `path` for changes, tearing down the previous watcher. The onChange closure
     /// runs on a background queue, so it hops to the main actor before touching the pane.
-    private func startWatching(_ path: VFSPath) {
+    /// Internal so a tab switch can re-establish the watcher for the newly active tab.
+    func startWatching(_ path: VFSPath) {
         guard backend.capabilities.contains(.watch) else {
             watcher = nil
             return
@@ -250,8 +290,9 @@ final class PanelViewController: NSViewController {
 
     /// Re-render after a live FSEvents refresh. Unlike a navigation, this must not yank
     /// the view: the cursor is re-applied but not scrolled to, so a background change
-    /// leaves the user's scroll position (and reading spot) where it was.
-    private func renderRefresh() {
+    /// leaves the user's scroll position (and reading spot) where it was. Internal so a
+    /// tab switch can re-render the newly active tab without disturbing its scroll.
+    func renderRefresh() {
         tableView.reloadData()
         syncCursorToTable(scroll: false)
         updateChrome()

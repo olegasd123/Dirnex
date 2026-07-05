@@ -62,5 +62,7 @@ extension PanelViewController: NSTableViewDelegate {
         panel.setSort(sort)
         reloadEverything()
         updateSortIndicators()
+        // Sort is per-tab and persisted (PLAN.md §M1).
+        persistState()
     }
 }

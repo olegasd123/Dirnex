@@ -62,6 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: "q"
         )
 
+        buildFileMenu(into: mainMenu)
+
         let windowMenuItem = NSMenuItem()
         mainMenu.addItem(windowMenuItem)
         let windowMenu = NSMenu(title: "Window")
@@ -71,13 +73,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(NSWindow.performMiniaturize(_:)),
             keyEquivalent: "m"
         )
-        windowMenu.addItem(
-            withTitle: "Close",
+        // Cmd+W closes a tab (see the File menu); the window keeps Cmd+Shift+W, matching
+        // Safari/Terminal's tabbed-window convention.
+        let closeWindow = windowMenu.addItem(
+            withTitle: "Close Window",
             action: #selector(NSWindow.performClose(_:)),
             keyEquivalent: "w"
         )
+        closeWindow.keyEquivalentModifierMask = [.command, .shift]
+        windowMenu.addItem(.separator())
+        let previousTab = windowMenu.addItem(
+            withTitle: "Show Previous Tab",
+            action: #selector(PanelViewController.showPreviousTab(_:)),
+            keyEquivalent: "["
+        )
+        previousTab.keyEquivalentModifierMask = [.command, .shift]
+        let nextTab = windowMenu.addItem(
+            withTitle: "Show Next Tab",
+            action: #selector(PanelViewController.showNextTab(_:)),
+            keyEquivalent: "]"
+        )
+        nextTab.keyEquivalentModifierMask = [.command, .shift]
         NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
+    }
+
+    /// The File menu — just tab commands for now. Nil targets dispatch through the
+    /// responder chain to whichever pane is focused (see `PanelViewController+Tabs`).
+    private func buildFileMenu(into mainMenu: NSMenu) {
+        let fileMenuItem = NSMenuItem()
+        mainMenu.addItem(fileMenuItem)
+        let fileMenu = NSMenu(title: "File")
+        fileMenuItem.submenu = fileMenu
+        fileMenu.addItem(
+            withTitle: "New Tab",
+            action: #selector(PanelViewController.newTab(_:)),
+            keyEquivalent: "t"
+        )
+        fileMenu.addItem(
+            withTitle: "Close Tab",
+            action: #selector(PanelViewController.closeCurrentTab(_:)),
+            keyEquivalent: "w"
+        )
     }
 }
