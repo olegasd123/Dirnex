@@ -8,7 +8,10 @@ undo.
 See [PLAN.md](PLAN.md) for the full product plan, architecture decisions, and
 milestone breakdown.
 
-**Status:** M0 (scaffolding) complete. M1 (read-only dual-pane browser) next.
+**Status:** M0 (scaffolding) complete. M1 (read-only dual-pane browser) in
+progress — the headless core is done and tested (`LocalBackend`, `DirectoryModel`,
+and the `Panel` cursor/selection state machine in `DirnexCore`); the AppKit panel
+UI is next.
 
 ## Requirements
 

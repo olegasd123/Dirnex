@@ -117,7 +117,7 @@ Notes:
 Goal: the app already feels good with zero file operations. This milestone defines
 the product's feel; do not rush it.
 
-- [ ] `LocalBackend` + `DirectoryModel`: list, stat, sort (name/size/date/ext), hidden-files toggle
+- [x] `LocalBackend` + `DirectoryModel`: list, stat, sort (name/size/date/ext), hidden-files toggle
 - [ ] Panel view: `NSTableView`, virtualized, 60fps on 100k rows; columns: name, size, date
 - [ ] Two panels + splitter; active-panel highlight; Tab switches
 - [ ] Keyboard core: arrows/Home/End, Enter (open dir / launch file), Backspace (up),
@@ -131,6 +131,21 @@ the product's feel; do not rush it.
 - [ ] Quick Look on Space-with-modifier or Cmd+Y (Space is taken by selection — verify feel)
 - [ ] Drag out to other apps; drag in = reveal only (real drop lands in M2)
 - [ ] Sort/column state per tab, persisted
+
+Progress (2026-07-05): the headless core for this milestone is complete and tested
+in `DirnexCore` (38 tests, SwiftLint/SwiftFormat clean) — see `Sources/DirnexCore/VFS/`:
+- `LocalBackend` (POSIX `readdir`/`fstatat`; resolves symlink target kind and broken
+  links; errno-normalized errors) + `DirectoryModel` (natural-order sort by
+  name/size/date/ext, directories-first, hidden toggle, type-to-filter). ✅ first item.
+- `Panel` — pure value-type state machine backing one pane: cursor movement, selection
+  by identity (Space/Insert toggle-and-advance, Cmd+A, invert, `+`/`-` glob select via
+  `fnmatch`), and identity-preserving same-directory refresh (cursor + marks survive a
+  live reload). All I/O stays in the caller, so the model is unit-tested headless.
+
+Remaining for M1 is the UI/OS integration layered on top: the `NSTableView` panels,
+splitter + Tab switching, keyboard/navigation wiring, path bar, volumes/places strip,
+live FSEvents refresh, Quick Look, drag-out, per-tab sort/column persistence, and the
+Space-on-directory in-place size computation.
 
 Exit: can live in it for browsing all day; 100k-dir opens < 150 ms warm; scroll never
 drops frames; unicode/symlink fixtures render correctly.
