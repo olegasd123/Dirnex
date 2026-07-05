@@ -16,7 +16,9 @@ protocol PanelHost: AnyObject {
 /// mirrors that state into AppKit and pushes user input back into it.
 @MainActor
 final class PanelViewController: NSViewController {
-    private enum Column: String, CaseIterable {
+    /// A file-list column. Internal (not private) so the chrome/parent-row extensions
+    /// in their own files can build cells and sort indicators for it.
+    enum Column: String, CaseIterable {
         case name, size, date
 
         var title: String {
@@ -37,7 +39,8 @@ final class PanelViewController: NSViewController {
     }
 
     private let backend: any VFSBackend
-    private(set) var panel: Panel
+    // Only this controller and its own extension files mutate the panel value.
+    var panel: Panel
     weak var host: PanelHost?
 
     var isActivePanel = false {
@@ -48,13 +51,14 @@ final class PanelViewController: NSViewController {
     /// cursor row to a source frame for the zoom animation.
     let tableView = FileTableView()
     private let scrollView = NSScrollView()
-    private let pathBar = PathBarView()
-    private let statusLabel = NSTextField(labelWithString: "")
+    // Internal so `PanelViewController+Chrome` can update them from its own file.
+    let pathBar = PathBarView()
+    let statusLabel = NSTextField(labelWithString: "")
 
     /// Guards the cursor⇄table-selection mirror against feedback loops: when we push
     /// `panel.cursor` into the table, the resulting selection-changed callback must
-    /// not write it straight back.
-    private var isSyncingSelection = false
+    /// not write it straight back. Internal for the table delegate in its own file.
+    var isSyncingSelection = false
     /// Bumped on every navigation so a slow listing that resolves after the user has
     /// already moved on is discarded instead of clobbering the current directory.
     private var loadToken = 0
@@ -62,6 +66,10 @@ final class PanelViewController: NSViewController {
     /// folder changes underneath us. Replaced on every navigation; `nil` for backends
     /// without the `.watch` capability.
     private var watcher: DirectoryWatcher?
+    /// The visible cursor sits on the synthetic `..` row (which has no backing entry).
+    /// Tracked in the UI only — `Panel` stays unaware of the parent row. Internal so the
+    /// Quick Look extension can suppress previews while the cursor is on `..`.
+    var cursorOnParentRow = false
 
     init(backend: any VFSBackend, path: VFSPath) {
         self.backend = backend
@@ -178,6 +186,8 @@ final class PanelViewController: NSViewController {
                 if let child, let index = panel.model.index(ofID: child) {
                     panel.moveCursor(to: index)
                 }
+                // Land on a real entry; only an empty directory parks the cursor on `..`.
+                cursorOnParentRow = panel.isEmpty && panel.parentPath != nil
                 reloadEverything()
                 startWatching(path)
             } catch {
@@ -232,7 +242,7 @@ final class PanelViewController: NSViewController {
 
     // MARK: - Rendering
 
-    private func reloadEverything() {
+    func reloadEverything() {
         tableView.reloadData()
         syncCursorToTable()
         updateChrome()
@@ -248,19 +258,32 @@ final class PanelViewController: NSViewController {
         refreshQuickLookIfVisible()
     }
 
-    /// Push `panel.cursor` into the table's selection (the visible cursor). Navigation
-    /// scrolls the cursor into view; a live refresh (`scroll: false`) does not.
+    /// Push the cursor into the table's selection (the visible cursor). Navigation
+    /// scrolls the cursor into view; a live refresh (`scroll: false`) does not. The
+    /// `..` position is honored via `cursorOnParentRow` so a refresh doesn't bump the
+    /// user off it, and an empty directory parks the cursor on `..` when one exists.
     private func syncCursorToTable(scroll: Bool = true) {
         isSyncingSelection = true
         defer { isSyncingSelection = false }
-        guard !panel.isEmpty else {
+        let targetRow: Int
+        if cursorOnParentRow, parentRowCount == 1 {
+            targetRow = 0
+        } else if panel.isEmpty {
+            targetRow = parentRowCount == 1 ? 0 : -1
+        } else {
+            targetRow = row(forEntryIndex: panel.cursor)
+        }
+        // Keep the flag consistent with where the selection actually landed — e.g. a
+        // filter that hides every entry parks the cursor on `..`, and Enter must then
+        // go up rather than treating a nonexistent entry as the target.
+        cursorOnParentRow = targetRow == 0 && parentRowCount == 1
+        guard targetRow >= 0 else {
             tableView.deselectAll(nil)
             return
         }
-        let row = panel.cursor
-        tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        tableView.selectRowIndexes(IndexSet(integer: targetRow), byExtendingSelection: false)
         if scroll {
-            tableView.scrollRowToVisible(row)
+            tableView.scrollRowToVisible(targetRow)
         }
     }
 
@@ -268,28 +291,6 @@ final class PanelViewController: NSViewController {
         guard row >= 0, row < tableView.numberOfRows else { return }
         let columns = IndexSet(integersIn: 0..<tableView.numberOfColumns)
         tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: columns)
-    }
-
-    private func updateChrome() {
-        pathBar.setPath(panel.path)
-        statusLabel.stringValue = statusText()
-    }
-
-    private func statusText() -> String {
-        let total = panel.count
-        let marked = panel.selectionCount
-        let counts: String
-        if marked > 0 {
-            let bytes = panel.selectedEntries.reduce(Int64(0)) { sum, entry in
-                sum + (entry.isDirectoryLike ? 0 : entry.byteSize)
-            }
-            counts = "\(marked) of \(total) selected · \(FileFormatting.byteString(bytes))"
-        } else {
-            counts = total == 1 ? "1 item" : "\(total) items"
-        }
-
-        let filter = panel.model.filter
-        return filter.isEmpty ? counts : "Filter “\(filter)” · \(counts)"
     }
 
     /// Replace the type-to-filter and re-render. `Panel`/`DirectoryModel` re-anchor the
@@ -301,84 +302,16 @@ final class PanelViewController: NSViewController {
         refreshQuickLookIfVisible()
     }
 
-    private func updateSortIndicators() {
-        let sort = panel.model.sort
-        for tableColumn in tableView.tableColumns {
-            guard let column = Column(rawValue: tableColumn.identifier.rawValue) else { continue }
-            let image: NSImage? = column.sortKey == sort.key
-                ? NSImage(
-                    named: sort.ascending ? "NSAscendingSortIndicator" : "NSDescendingSortIndicator"
-                )
-                : nil
-            tableView.setIndicatorImage(image, in: tableColumn)
-        }
-    }
-
     @objc private func handleDoubleClick() {
         let row = tableView.clickedRow
         guard row >= 0 else { return }
-        panel.moveCursor(to: row)
+        if isParentRow(row) {
+            goToParent()
+            return
+        }
+        guard let index = entryIndex(forRow: row) else { return }
+        panel.moveCursor(to: index)
         openCurrentEntry()
-    }
-}
-
-// MARK: - NSTableViewDataSource
-
-extension PanelViewController: NSTableViewDataSource {
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        panel.count
-    }
-}
-
-// MARK: - NSTableViewDelegate
-
-extension PanelViewController: NSTableViewDelegate {
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard let tableColumn,
-              let column = Column(rawValue: tableColumn.identifier.rawValue),
-              row < panel.count else { return nil }
-
-        let entry = panel.model[row]
-        let cell = tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? FileCellView
-            ?? FileCellView(showsImage: column == .name, identifier: tableColumn.identifier)
-
-        cell.marked = panel.isMarked(entry)
-        switch column {
-        case .name:
-            cell.imageView?.image = FileIconProvider.icon(for: entry)
-            cell.textField?.stringValue = entry.name
-            cell.textField?.alignment = .natural
-        case .size:
-            cell.textField?.stringValue = FileFormatting.sizeString(for: entry)
-            cell.textField?.alignment = .right
-        case .date:
-            cell.textField?.stringValue = FileFormatting.dateString(for: entry)
-            cell.textField?.alignment = .natural
-        }
-        cell.applyStyle()
-        return cell
-    }
-
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        guard !isSyncingSelection else { return }
-        let row = tableView.selectedRow
-        guard row >= 0 else { return }
-        panel.moveCursor(to: row)
-        updateChrome()
-        refreshQuickLookIfVisible()
-    }
-
-    func tableView(_ tableView: NSTableView, didClick tableColumn: NSTableColumn) {
-        guard let column = Column(rawValue: tableColumn.identifier.rawValue) else { return }
-        var sort = panel.model.sort
-        if sort.key == column.sortKey {
-            sort.ascending.toggle()
-        } else {
-            sort = FileSort(key: column.sortKey, ascending: true)
-        }
-        panel.setSort(sort)
-        reloadEverything()
-        updateSortIndicators()
     }
 }
 
@@ -386,7 +319,11 @@ extension PanelViewController: NSTableViewDelegate {
 
 extension PanelViewController: FileTableViewInput {
     func fileTableOpenSelection(_ tableView: FileTableView) {
-        openCurrentEntry()
+        if cursorOnParentRow {
+            goToParent()
+        } else {
+            openCurrentEntry()
+        }
     }
 
     func fileTableGoToParent(_ tableView: FileTableView) {
@@ -418,9 +355,19 @@ extension PanelViewController: FileTableViewInput {
 
     func fileTableToggleMarkAndAdvance(_ tableView: FileTableView) {
         guard !panel.isEmpty else { return }
-        let row = panel.cursor
+        // Space on `..` marks nothing (it isn't a real entry) — just step onto the
+        // first entry, matching the "advance" half of the gesture.
+        if cursorOnParentRow {
+            tableView.selectRowIndexes(
+                IndexSet(integer: parentRowCount),
+                byExtendingSelection: false
+            )
+            tableView.scrollRowToVisible(parentRowCount)
+            return
+        }
+        let markedRow = row(forEntryIndex: panel.cursor)
         panel.toggleMarkAtCursorAndAdvance()
-        redrawRow(row)
+        redrawRow(markedRow)
         syncCursorToTable()
         updateChrome()
         refreshQuickLookIfVisible()

@@ -1,0 +1,52 @@
+import AppKit
+import DirnexCore
+
+/// The synthetic `..` parent row (PLAN.md §M1 "a `..` parent row"). Total Commander
+/// shows it at the top of every non-root directory as a one-click way up.
+///
+/// It lives entirely in the UI: `Panel` never sees it, so selection counts, marks,
+/// sizing and glob-select stay clean. The table therefore has one more row than
+/// `panel.count` at non-root paths, and every row⇄entry mapping goes through the
+/// helpers here. All of this is read-only with respect to `Panel`.
+extension PanelViewController {
+    /// 1 when a `..` row is shown (any non-root directory), else 0 — also the offset
+    /// between a table row and its entry index.
+    var parentRowCount: Int {
+        panel.parentPath != nil ? 1 : 0
+    }
+
+    func isParentRow(_ row: Int) -> Bool {
+        parentRowCount == 1 && row == 0
+    }
+
+    /// The `panel` entry index a table row maps to, or `nil` for the `..` row / out of
+    /// range.
+    func entryIndex(forRow row: Int) -> Int? {
+        let index = row - parentRowCount
+        return index >= 0 && index < panel.count ? index : nil
+    }
+
+    /// The table row that shows a given entry index.
+    func row(forEntryIndex index: Int) -> Int {
+        index + parentRowCount
+    }
+
+    /// Build the cell for the `..` row: an up-to-the-folder label with no size or date,
+    /// never marked.
+    func parentRowCell(for column: Column, in tableView: NSTableView) -> FileCellView {
+        let identifier = NSUserInterfaceItemIdentifier(column.rawValue)
+        let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? FileCellView
+            ?? FileCellView(showsImage: column == .name, identifier: identifier)
+        cell.marked = false
+        switch column {
+        case .name:
+            cell.imageView?.image = FileIconProvider.parentIcon
+            cell.textField?.stringValue = ".."
+            cell.textField?.alignment = .natural
+        case .size, .date:
+            cell.textField?.stringValue = ""
+        }
+        cell.applyStyle()
+        return cell
+    }
+}

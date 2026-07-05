@@ -44,6 +44,10 @@ enum FileIconProvider {
     private static let folderIcon = NSWorkspace.shared.icon(for: .folder)
     private static let genericIcon = NSWorkspace.shared.icon(for: .data)
 
+    /// Icon for the synthetic `..` parent row. A plain folder icon — the `..` label
+    /// carries the meaning, matching how Finder and Total Commander render it.
+    static let parentIcon = folderIcon
+
     static func icon(for entry: FileEntry) -> NSImage {
         if entry.isDirectoryLike { return folderIcon }
 

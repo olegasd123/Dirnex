@@ -197,9 +197,24 @@ both panes instantly (19⇄20 items) and the cursor stayed on "Applications" ins
 jumping to the new top-sorted row. Core suite now 48 tests, all green; app builds; touched
 files swiftformat/swiftlint-strict clean.
 
+Update (2026-07-05, 6th pass): the `..` parent row landed. Every non-root directory now
+shows a synthetic `..` at the top (folder icon, Enter/double-click goes up landing on the
+directory you came from). It lives entirely in the UI — `Panel` never sees it — so item
+counts, marks, sizing and glob-select stay clean; the table simply has one extra row at
+non-root paths and all row⇄entry mapping goes through helpers in
+`PanelViewController+ParentRow.swift` (`parentRowCount`, `entryIndex(forRow:)`,
+`row(forEntryIndex:)`). The `..` is never counted, never markable (Space on it just
+advances), and stays visible under any type-to-filter — so a filter that hides every entry
+leaves `..` as the one row and Enter still walks up. To stay under SwiftLint's file/type
+length limits the controller was decomposed further: `+Table` (data source/delegate),
+`+Chrome` (path bar/status/sort indicators), `+ParentRow`, joining the existing `+Errors`
+and `+QuickLook` (the main file is now 443 lines; `panel`/`isSyncingSelection`/
+`reloadEverything` widened to internal so those same-type extensions compile). Verified
+live via computer-use: `..` at the top of non-root dirs, absent at `/`, Enter-up lands on
+the child you came from, count excludes it, and the filter-empty→Enter-up case works.
+
 Remaining for M1: tabs per panel, volumes/places strip + eject, drag-out, per-tab
-sort/column persistence, `+`/`-` glob-select UI, Space-on-directory in-place sizing, and a
-`..` parent row.
+sort/column persistence, `+`/`-` glob-select UI, and Space-on-directory in-place sizing.
 
 Exit: can live in it for browsing all day; 100k-dir opens < 150 ms warm; scroll never
 drops frames; unicode/symlink fixtures render correctly.

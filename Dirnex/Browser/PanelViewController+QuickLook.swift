@@ -65,7 +65,7 @@ extension PanelViewController: @preconcurrency QLPreviewPanelDataSource, @precon
     private func quickLookItems() -> [FileEntry] {
         let marked = panel.selectedEntries
         if !marked.isEmpty { return marked }
-        if let current = panel.currentEntry { return [current] }
+        if !cursorOnParentRow, let current = panel.currentEntry { return [current] }
         return []
     }
 }
