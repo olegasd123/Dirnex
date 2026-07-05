@@ -24,6 +24,10 @@ protocol FileTableViewInput: AnyObject {
     func fileTableMarkAll(_ tableView: FileTableView)
     /// `*` — invert the mark set.
     func fileTableInvertMarks(_ tableView: FileTableView)
+    /// Keypad `+` — add entries matching a wildcard to the marks (TC's "select group").
+    func fileTableSelectByPattern(_ tableView: FileTableView)
+    /// Keypad `-` — remove entries matching a wildcard from the marks (TC's "unselect group").
+    func fileTableDeselectByPattern(_ tableView: FileTableView)
     /// Cmd+Y — toggle the Quick Look preview panel.
     func fileTableToggleQuickLook(_ tableView: FileTableView)
     /// Cmd+L — edit the location as text in the path bar.
@@ -113,6 +117,12 @@ final class FileTableView: NSTableView {
             return true
         case 121: // Page Down
             moveCursor(by: visibleRowCount())
+            return true
+        case 69: // Keypad + — select by wildcard (TC's gray-plus)
+            inputDelegate?.fileTableSelectByPattern(self)
+            return true
+        case 78: // Keypad - — unselect by wildcard (TC's gray-minus)
+            inputDelegate?.fileTableDeselectByPattern(self)
             return true
         default:
             break

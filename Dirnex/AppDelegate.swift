@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         buildFileMenu(into: mainMenu)
+        buildSelectMenu(into: mainMenu)
         buildViewMenu(into: mainMenu)
 
         let windowMenuItem = NSMenuItem()
@@ -98,6 +99,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
+    }
+
+    /// The Select menu — mark-set commands. Nil targets dispatch through the responder
+    /// chain to the focused pane (see `PanelViewController+Select`). The keypad `+`/`-`
+    /// gesture that drives the pattern items lives in `FileTableView`; these menu items
+    /// carry no key equivalent so a bare `+`/`-` keeps reaching the type-to-filter, and
+    /// give laptops without a keypad a mouse-reachable path until M3's rebindable palette.
+    private func buildSelectMenu(into mainMenu: NSMenu) {
+        let selectMenuItem = NSMenuItem()
+        mainMenu.addItem(selectMenuItem)
+        let selectMenu = NSMenu(title: "Select")
+        selectMenuItem.submenu = selectMenu
+        selectMenu.addItem(
+            withTitle: "Invert Selection",
+            action: #selector(PanelViewController.invertSelectionFiles(_:)),
+            keyEquivalent: ""
+        )
+        selectMenu.addItem(.separator())
+        selectMenu.addItem(
+            withTitle: "Select by Pattern…",
+            action: #selector(PanelViewController.selectFilesByPattern(_:)),
+            keyEquivalent: ""
+        )
+        selectMenu.addItem(
+            withTitle: "Unselect by Pattern…",
+            action: #selector(PanelViewController.unselectFilesByPattern(_:)),
+            keyEquivalent: ""
+        )
     }
 
     /// The View menu — sidebar visibility for now. `toggleSidebar(_:)` dispatches through

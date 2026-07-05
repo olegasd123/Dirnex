@@ -426,10 +426,7 @@ extension PanelViewController: FileTableViewInput {
     }
 
     func fileTableInvertMarks(_ tableView: FileTableView) {
-        panel.invertSelection()
-        tableView.reloadData()
-        updateChrome()
-        refreshQuickLookIfVisible()
+        invertMarks()
     }
 
     func fileTableToggleQuickLook(_ tableView: FileTableView) {

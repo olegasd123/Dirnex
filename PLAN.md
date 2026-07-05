@@ -125,9 +125,8 @@ the product's feel; do not rush it.
 - [x] Keyboard core: arrows/Home/End/PageUp/PageDown, Enter (open dir / launch file),
       Cmd+Down/Up, and type-to-filter with live narrowing. Backspace is filter-aware (trims
       the filter, else goes up); Esc clears filter then marks (via `cancelOperation:`).
-- [~] Selection model: Space/Insert toggle-and-advance, Cmd+A (mark all), `*` invert done.
-      **Space-on-dir in-place size** and **`+`/`-` glob select UI** not yet (glob select exists
-      in `Panel`, just unwired).
+- [~] Selection model: Space/Insert toggle-and-advance, Cmd+A (mark all), `*` invert, and
+      `+`/`-` glob select UI done. **Space-on-dir in-place size** not yet.
 - [x] Tabs per panel: new (Cmd+T)/close (Cmd+W)/switch (Cmd+Shift+[ / ])/drag-reorder,
       restored on relaunch. Tab bar auto-hides at a single tab.
 - [x] Path bar: clickable breadcrumbs, Cmd+L to edit as text with completion
@@ -274,8 +273,31 @@ collapsed then re-showed the sidebar. (Eject itself is unexercised — no remova
 mounted — but the `canEject` gating is unit-tested and the workspace eject call is a
 one-liner.)
 
-Remaining for M1: drag-out, per-tab **column** width/order persistence, `+`/`-` glob-select
-UI, and Space-on-directory in-place sizing.
+Update (2026-07-05, 9th pass): the `+`/`-` glob-select UI landed, wiring the already-tested
+core (`Panel.selectMatching`/`deselectMatching` over `Glob`/`fnmatch`) into the pane. New
+`Dirnex/Browser/PanelViewController+Select.swift` owns the AppKit shell: a wildcard prompt
+(`NSAlert` + text field) that *adds* to (`+`) or *removes* from (`-`) the marks, prefilled
+with the cursor file's extension so "mark every JPEG" is `*.jpg` + Return. The gesture binds
+to the **numeric keypad's** `+`/`-` (`FileTableView` keyCodes 69/78) rather than the main-row
+keys, so a bare `-`/`+` keeps reaching the type-to-filter (both are common filename
+characters); the character-typing path is untouched. A new **Select** menu (Invert Selection,
+Select by Pattern…, Unselect by Pattern…) gives the same commands a mouse/laptop path — its
+nil-target actions dispatch through the responder chain to the focused pane, like the tab
+menus; no key equivalents, so nothing steals `+`/`-` from the filter. `fileTableInvertMarks`
+was refactored to share the menu's `invertMarks()` helper. App builds clean (no warnings);
+DirnexCore untouched (still 54 tests green); touched files swiftformat/swiftlint-strict clean.
+Verified live via computer-use (keyboard-driven, since the LanguageTool-for-Desktop overlay
+still gates every mouse click on the window — menus were driven via Ctrl+F2 menu-bar focus):
+in a fixture dir, Select ▸ Select by Pattern opened prefilled `*.jpg` and marked both JPEGs
+("2 of 7 selected"); a second `*.txt` select was additive (4 of 7), proving select never
+clears; Unselect ▸ `*.jpg` removed only the JPEGs, leaving the two `.txt` marks (2 of 7). All
+three menu items validated enabled through the responder chain; the Unselect dialog showed the
+right title/button. GOTCHA: the keypad `+`/`-` keys themselves are unexercised-live (no numpad
+on this machine / the harness has no keypad token), but they call the identical
+`promptForPatternSelection(deselect:)` the menu items do.
+
+Remaining for M1: drag-out, per-tab **column** width/order persistence, and Space-on-directory
+in-place sizing.
 
 Exit: can live in it for browsing all day; 100k-dir opens < 150 ms warm; scroll never
 drops frames; unicode/symlink fixtures render correctly.
