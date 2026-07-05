@@ -26,6 +26,8 @@ protocol FileTableViewInput: AnyObject {
     func fileTableInvertMarks(_ tableView: FileTableView)
     /// Cmd+Y — toggle the Quick Look preview panel.
     func fileTableToggleQuickLook(_ tableView: FileTableView)
+    /// Cmd+L — edit the location as text in the path bar.
+    func fileTableEditPath(_ tableView: FileTableView)
     /// The table became first responder — its pane should become the active one.
     func fileTableDidBecomeFirstResponder(_ tableView: FileTableView)
 }
@@ -62,6 +64,7 @@ final class FileTableView: NSTableView {
             switch event.charactersIgnoringModifiers {
             case "a": inputDelegate?.fileTableMarkAll(self); return
             case "y": inputDelegate?.fileTableToggleQuickLook(self); return
+            case "l": inputDelegate?.fileTableEditPath(self); return
             default: break
             }
         }
@@ -138,7 +141,7 @@ final class FileTableView: NSTableView {
               let scalar = chars.unicodeScalars.first,
               scalar.value > 0x20,
               scalar.value != 0x7F,
-              !(0xF700 ... 0xF8FF).contains(scalar.value) else {
+              !(0xF700...0xF8FF).contains(scalar.value) else {
             return false
         }
         inputDelegate?.fileTable(self, didType: chars)

@@ -48,7 +48,7 @@ final class PanelViewController: NSViewController {
     /// cursor row to a source frame for the zoom animation.
     let tableView = FileTableView()
     private let scrollView = NSScrollView()
-    private let pathLabel = NSTextField(labelWithString: "")
+    private let pathBar = PathBarView()
     private let statusLabel = NSTextField(labelWithString: "")
 
     /// Guards the cursor⇄table-selection mirror against feedback loops: when we push
@@ -80,20 +80,18 @@ final class PanelViewController: NSViewController {
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
 
-        pathLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        pathLabel.lineBreakMode = .byTruncatingMiddle
-        pathLabel.textColor = .secondaryLabelColor
+        pathBar.delegate = self
 
         statusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.lineBreakMode = .byTruncatingTail
 
-        let stack = NSStackView(views: [pathLabel, scrollView, statusLabel])
+        let stack = NSStackView(views: [pathBar, scrollView, statusLabel])
         stack.orientation = .vertical
         stack.spacing = 4
         stack.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
         stack.setHuggingPriority(.defaultLow, for: .vertical)
-        pathLabel.setContentHuggingPriority(.required, for: .vertical)
+        pathBar.setContentHuggingPriority(.required, for: .vertical)
         statusLabel.setContentHuggingPriority(.required, for: .vertical)
         scrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
 
@@ -107,7 +105,9 @@ final class PanelViewController: NSViewController {
 
     private func configureTable() {
         for column in Column.allCases {
-            let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.rawValue))
+            let tableColumn = NSTableColumn(
+                identifier: NSUserInterfaceItemIdentifier(column.rawValue)
+            )
             tableColumn.title = column.title
             switch column {
             case .name:
@@ -150,9 +150,7 @@ final class PanelViewController: NSViewController {
     }
 
     private func updateActiveAppearance() {
-        let size = NSFont.smallSystemFontSize
-        pathLabel.font = isActivePanel ? .boldSystemFont(ofSize: size) : .systemFont(ofSize: size)
-        pathLabel.textColor = isActivePanel ? .controlAccentColor : .secondaryLabelColor
+        pathBar.isActive = isActivePanel
     }
 
     // MARK: - Navigation
@@ -222,12 +220,12 @@ final class PanelViewController: NSViewController {
 
     private func redrawRow(_ row: Int) {
         guard row >= 0, row < tableView.numberOfRows else { return }
-        let columns = IndexSet(integersIn: 0 ..< tableView.numberOfColumns)
+        let columns = IndexSet(integersIn: 0..<tableView.numberOfColumns)
         tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: columns)
     }
 
     private func updateChrome() {
-        pathLabel.stringValue = panel.path.path
+        pathBar.setPath(panel.path)
         statusLabel.stringValue = statusText()
     }
 
@@ -262,7 +260,9 @@ final class PanelViewController: NSViewController {
         for tableColumn in tableView.tableColumns {
             guard let column = Column(rawValue: tableColumn.identifier.rawValue) else { continue }
             let image: NSImage? = column.sortKey == sort.key
-                ? NSImage(named: sort.ascending ? "NSAscendingSortIndicator" : "NSDescendingSortIndicator")
+                ? NSImage(
+                    named: sort.ascending ? "NSAscendingSortIndicator" : "NSDescendingSortIndicator"
+                )
                 : nil
             tableView.setIndicatorImage(image, in: tableColumn)
         }
@@ -437,7 +437,44 @@ extension PanelViewController: FileTableViewInput {
         }
     }
 
+    func fileTableEditPath(_ tableView: FileTableView) {
+        pathBar.beginEditing(base: panel.path)
+    }
+
     func fileTableDidBecomeFirstResponder(_ tableView: FileTableView) {
         host?.panelDidBecomeActive(self)
+    }
+}
+
+// MARK: - PathBarViewDelegate
+
+extension PanelViewController: PathBarViewDelegate {
+    func pathBar(_ bar: PathBarView, didActivate path: VFSPath) {
+        // Landing on the branch we came from (when the path is an ancestor of the
+        // current directory) makes a multi-level crumb jump feel like walking up.
+        let focus = path.child(towards: panel.path)
+        navigate(to: path, focus: focus)
+        focusTable()
+    }
+
+    func pathBarDidCancel(_ bar: PathBarView) {
+        focusTable()
+    }
+
+    func pathBarDidBeginEditing(_ bar: PathBarView) {
+        host?.panelDidBecomeActive(self)
+    }
+
+    func pathBar(_ bar: PathBarView, childDirectoriesOf directory: VFSPath) async -> [String] {
+        let showHidden = panel.model.showHidden
+        do {
+            let listing = try await DirectoryLoader.list(backend, at: directory)
+            return listing.entries
+                .filter { $0.isDirectoryLike && (showHidden || !$0.isHidden) }
+                .map(\.name)
+                .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        } catch {
+            return []
+        }
     }
 }

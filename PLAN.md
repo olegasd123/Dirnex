@@ -129,7 +129,7 @@ the product's feel; do not rush it.
       **Space-on-dir in-place size** and **`+`/`-` glob select UI** not yet (glob select exists
       in `Panel`, just unwired).
 - [ ] Tabs per panel: new/close/reorder, restored on relaunch
-- [ ] Path bar: clickable breadcrumbs, Cmd+L to edit as text with completion
+- [x] Path bar: clickable breadcrumbs, Cmd+L to edit as text with completion
 - [ ] Volumes/places strip (replaces TC's drive letters); eject
 - [ ] FSEvents: panels refresh live, preserving cursor and selection
 - [x] Quick Look on Cmd+Y (Space stays reserved for selection, per §7); previews the marked
@@ -166,9 +166,22 @@ as the cursor/marks move. Verified live: filter narrowing, Backspace edit, Cmd+Y
 (Note: Esc couldn't be exercised through the automation harness — synthetic Escape is
 swallowed by the OS before reaching the app — but the keyDown path it shares is verified.)
 
-Remaining for M1: tabs per panel, clickable breadcrumb path bar + Cmd+L, volumes/places
-strip + eject, live FSEvents refresh, drag-out, per-tab sort/column persistence, `+`/`-`
-glob-select UI, Space-on-directory in-place sizing, and a `..` parent row.
+Update (2026-07-05, 4th pass): the path bar landed. `PathBarView` renders clickable
+breadcrumbs (one button per ancestor, `›` separators, current crumb bold + accent when
+the pane is active) and switches to a text field on Cmd+L — prefilled and selected,
+Return navigates, Esc reverts, Tab completes against the child directories of what's
+typed (shell-style, cached async so the popup is Tab-triggered, not per-keystroke). Core
+support is `VFSPath.ancestorsFromRoot` (root→self crumb chain) and `child(towards:)` (the
+one-step-down descendant, so a multi-level crumb jump lands the cursor on the branch you
+came from), both unit-tested (`VFSPathTests`, 7 tests). Verified live via computer-use:
+breadcrumb rendering + active styling, Cmd+L edit, Tab completion dropdown, and
+commit-navigates-and-refocuses. (Crumb *mouse-click* couldn't be exercised — a
+LanguageTool overlay covered the path-bar band and the harness gates clicks onto it — but
+it reuses the verified `navigate(to:focus:)` path and the unit-tested `child(towards:)`.)
+
+Remaining for M1: tabs per panel, volumes/places strip + eject, live FSEvents refresh,
+drag-out, per-tab sort/column persistence, `+`/`-` glob-select UI, Space-on-directory
+in-place sizing, and a `..` parent row.
 
 Exit: can live in it for browsing all day; 100k-dir opens < 150 ms warm; scroll never
 drops frames; unicode/symlink fixtures render correctly.

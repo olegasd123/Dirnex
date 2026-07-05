@@ -68,6 +68,32 @@ public struct VFSPath: Sendable, Hashable, CustomStringConvertible {
         return VFSPath(backend: backend, path: base + "/" + component)
     }
 
+    /// The chain of locations from the backend root down to and including this path,
+    /// in order — the segments a breadcrumb bar renders left-to-right. The root `/` is
+    /// always first; for `/Users/oleg` the result is `[/, /Users, /Users/oleg]`.
+    public var ancestorsFromRoot: [VFSPath] {
+        var chain: [VFSPath] = []
+        var current: VFSPath? = self
+        while let node = current {
+            chain.append(node)
+            current = node.parent
+        }
+        return chain.reversed()
+    }
+
+    /// The immediate child of this path lying on the way to `descendant`, or `nil` if
+    /// `descendant` is not strictly beneath this path (or lives in another backend).
+    ///
+    /// Used to land the cursor on the branch you came from when jumping several levels
+    /// up via a breadcrumb click: clicking `/Users` while inside `/Users/oleg/Dev`
+    /// returns `/Users/oleg`, so the cursor settles on `oleg`.
+    public func child(towards descendant: VFSPath) -> VFSPath? {
+        guard backend == descendant.backend else { return nil }
+        let chain = descendant.ancestorsFromRoot
+        guard let index = chain.firstIndex(of: self), index + 1 < chain.count else { return nil }
+        return chain[index + 1]
+    }
+
     public var description: String { "\(backend):\(path)" }
 
     /// Collapse duplicate slashes, drop a trailing slash, and force an absolute
