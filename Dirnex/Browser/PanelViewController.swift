@@ -179,6 +179,7 @@ final class PanelViewController: NSViewController {
         tableView.inputDelegate = self
         tableView.target = self
         tableView.doubleAction = #selector(handleDoubleClick)
+        configureDragging()
         updateSortIndicators()
     }
 
@@ -266,21 +267,6 @@ final class PanelViewController: NSViewController {
         }
     }
 
-    private func openCurrentEntry() {
-        guard let entry = panel.currentEntry else { return }
-        if let target = panel.openTarget(for: entry) {
-            navigate(to: target)
-        } else {
-            NSWorkspace.shared.open(entry.path.localURL)
-        }
-    }
-
-    private func goToParent() {
-        let current = panel.path
-        guard let parent = panel.parentPath else { return }
-        navigate(to: parent, focus: current)
-    }
-
     // MARK: - Rendering
 
     func reloadEverything() {
@@ -366,18 +352,6 @@ final class PanelViewController: NSViewController {
         panel.setFilter(text)
         reloadEverything()
         refreshQuickLookIfVisible()
-    }
-
-    @objc private func handleDoubleClick() {
-        let row = tableView.clickedRow
-        guard row >= 0 else { return }
-        if isParentRow(row) {
-            goToParent()
-            return
-        }
-        guard let index = entryIndex(forRow: row) else { return }
-        panel.moveCursor(to: index)
-        openCurrentEntry()
     }
 }
 

@@ -134,7 +134,7 @@ the product's feel; do not rush it.
 - [x] FSEvents: panels refresh live, preserving cursor and selection
 - [x] Quick Look on Cmd+Y (Space stays reserved for selection, per §7); previews the marked
       set or the cursor file, tracks the cursor live
-- [ ] Drag out to other apps; drag in = reveal only (real drop lands in M2)
+- [x] Drag out to other apps; drag in = reveal only (real drop lands in M2)
 - [~] Sort/column state per tab, persisted. Per-tab **sort** (key + direction) now lives in
       each tab and persists across launches; per-tab **column widths/order** not yet (columns
       are still shared across a pane's tabs).
@@ -322,7 +322,26 @@ the total at "2 of 3 selected · 3,1 MB". (The size *column* value itself is unv
 the pane was too narrow to show it and the overlay gates every widen/scroll — but it renders
 through the same unit-tested `computedSize(of:)` the status total does.)
 
-Remaining for M1: drag-out and per-tab **column** width/order persistence.
+**Drag-out**. A file pane is now a drag *source* (PLAN.md §M1 "drag out to other apps"):
+`PanelViewController+Drag.swift` adds `pasteboardWriterForRow:` (each row → its file URL as an
+`NSURL`; `nil` for the synthetic `..` row so it can't be dragged) and advertises a copy-only
+source mask (`setDraggingSourceOperationMask(.copy, forLocal: false)` — external drags copy and
+can never move/delete the original; local pane-to-pane drops advertise nothing since real
+drop-in lands in M2, so no drag types are registered for receiving). Total Commander semantics:
+`draggingSession:willBeginAt:forRowIndexes:` widens the drag to the whole **marked set** when the
+grab starts on a marked file (the table is single-selection, so AppKit only offers the one cursor
+row) — a grab on an unmarked file drags just that file. Files: new `PanelViewController+Drag`;
+one-line hook in `PanelViewController.configureTable`. To keep the controller under SwiftLint's
+`--strict` file/type-body limits (it had drifted 12 lines over `file_length` and 4 over
+`type_body_length`), the three navigation helpers (`openCurrentEntry`/`goToParent`/
+`handleDoubleClick`) moved to a new `PanelViewController+Navigation.swift` (main file 512 → 486);
+whole repo is `swiftformat --lint` + `swiftlint --strict` clean again. App builds clean. Verified
+live via computer-use (LanguageTool overlay quit for the session so window mouse events land):
+dragging the unmarked `alpha.txt` from a pane to a Finder window copied just it; marking `beta`+
+`gamma` (status "2 of 3 selected · 29 bytes") then dragging the single `beta` row copied **both**
+into Finder — confirmed on disk.
+
+Remaining for M1: per-tab **column** width/order persistence.
 
 Exit: can live in it for browsing all day; 100k-dir opens < 150 ms warm; scroll never
 drops frames; unicode/symlink fixtures render correctly.
