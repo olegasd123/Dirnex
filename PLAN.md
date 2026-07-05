@@ -131,7 +131,7 @@ the product's feel; do not rush it.
 - [x] Tabs per panel: new (Cmd+T)/close (Cmd+W)/switch (Cmd+Shift+[ / ])/drag-reorder,
       restored on relaunch. Tab bar auto-hides at a single tab.
 - [x] Path bar: clickable breadcrumbs, Cmd+L to edit as text with completion
-- [ ] Volumes/places strip (replaces TC's drive letters); eject
+- [x] Volumes/places strip (replaces TC's drive letters); eject
 - [x] FSEvents: panels refresh live, preserving cursor and selection
 - [x] Quick Look on Cmd+Y (Space stays reserved for selection, per §7); previews the marked
       set or the cursor file, tracks the cursor live
@@ -246,8 +246,36 @@ they route through the same `selectTab`/`addTab`/`closeTab`/`moveTab` exercised 
 Also: the harness didn't deliver the Command modifier with arrow keys (`Cmd+Up` acted as plain
 Up), unrelated to tabs.
 
-Remaining for M1: volumes/places strip + eject, drag-out, per-tab **column** width/order
-persistence, `+`/`-` glob-select UI, and Space-on-directory in-place sizing.
+Update (2026-07-05, 8th pass): the volumes/places sidebar landed. A native source-list
+sidebar (`NSSplitViewItem(sidebarWithViewController:)`, vibrant + collapsible) leads the two
+panes and drives whichever is active. Its two sections come from new headless core
+`DirnexCore/…/VFS/Places.swift` (`SidebarLocations.favorites()` / `.volumes()`, Foundation
+only, no AppKit): **Favorites** = the standard home folders that actually exist on disk (Home
+always first, then Desktop/Documents/Downloads/Pictures/Music/Movies + /Applications, in
+Finder order), **Volumes** = browsable mounted volumes via `mountedVolumeURLs` (root
+filesystem pinned first, then by name; `canEject` = removable/ejectable and never root).
+Unit-tested (`PlacesTests`, 6 tests: favorites lead with Home, skip missing subfolders,
+keep declared order; volumes always include a browsable root that sorts first and can't
+eject; `canEject` follows the media flags). The app layer is a thin renderer:
+`SidebarViewController` (a `.sourceList` `NSTableView` of header/place/volume rows, real
+`NSWorkspace` folder/drive icons, group-row headers, capacity tooltips) + `SidebarCellView`/
+`SidebarHeaderView`; a row click routes through `SidebarViewControllerDelegate` to
+`BrowserWindowController`, which navigates the active pane and hands focus back to it.
+Ejectable volumes carry an eject button (`NSWorkspace.unmountAndEjectDevice`, errors surfaced
+in a sheet); the list live-rebuilds on `NSWorkspace` mount/unmount/rename notifications,
+keeping the selection on the same path. Added View ▸ Show Sidebar (Cmd+Ctrl+S) via
+`NSSplitViewController.toggleSidebar` through the responder chain. Core now 54 tests green;
+app builds clean; touched files swiftformat/swiftlint-strict clean. Verified live via
+computer-use: Favorites render with native icons; clicking Downloads navigated the active
+(left) pane while the right pane stayed put; Tab-then-click retargeted the right pane to
+Desktop; the Volumes section listed Macintosh HD (drive icon, no eject on root); clicking it
+navigated to `/`; the hover tooltip read "456,51 GB available of 2 TB"; and Cmd+Ctrl+S
+collapsed then re-showed the sidebar. (Eject itself is unexercised — no removable media was
+mounted — but the `canEject` gating is unit-tested and the workspace eject call is a
+one-liner.)
+
+Remaining for M1: drag-out, per-tab **column** width/order persistence, `+`/`-` glob-select
+UI, and Space-on-directory in-place sizing.
 
 Exit: can live in it for browsing all day; 100k-dir opens < 150 ms warm; scroll never
 drops frames; unicode/symlink fixtures render correctly.

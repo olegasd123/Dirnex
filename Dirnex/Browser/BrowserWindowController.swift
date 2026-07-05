@@ -8,6 +8,7 @@ import DirnexCore
 final class BrowserWindowController: NSWindowController, PanelHost {
     private let leftPanel: PanelViewController
     private let rightPanel: PanelViewController
+    private let sidebar = SidebarViewController()
     private let splitViewController = NSSplitViewController()
     private weak var activePanel: PanelViewController?
 
@@ -42,7 +43,17 @@ final class BrowserWindowController: NSWindowController, PanelHost {
 
         splitViewController.splitView.isVertical = true
         splitViewController.splitView.dividerStyle = .thin
-        splitViewController.splitView.autosaveName = "MainSplit"
+        splitViewController.splitView.autosaveName = "BrowserSplit"
+
+        // The places/volumes strip leads, then the two panes. It's a real macOS sidebar
+        // (vibrant, collapsible via View ▸ Show Sidebar) that drives the active pane.
+        sidebar.delegate = self
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
+        sidebarItem.minimumThickness = 150
+        sidebarItem.maximumThickness = 320
+        sidebarItem.canCollapse = true
+        splitViewController.addSplitViewItem(sidebarItem)
+
         for panel in [leftPanel, rightPanel] {
             let item = NSSplitViewItem(viewController: panel)
             item.holdingPriority = NSLayoutConstraint.Priority(250)
@@ -82,5 +93,17 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         activePanel?.isActivePanel = false
         panel.isActivePanel = true
         activePanel = panel
+    }
+}
+
+// MARK: - SidebarViewControllerDelegate
+
+extension BrowserWindowController: SidebarViewControllerDelegate {
+    /// A sidebar click points the active pane at the chosen place/volume, then hands
+    /// keyboard focus back to that pane so browsing continues without a mouse.
+    func sidebar(_ sidebar: SidebarViewController, didActivate path: VFSPath) {
+        let target = activePanel ?? leftPanel
+        target.navigate(to: path)
+        target.focusTable()
     }
 }

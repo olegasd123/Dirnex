@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         buildFileMenu(into: mainMenu)
+        buildViewMenu(into: mainMenu)
 
         let windowMenuItem = NSMenuItem()
         mainMenu.addItem(windowMenuItem)
@@ -97,6 +98,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
+    }
+
+    /// The View menu — sidebar visibility for now. `toggleSidebar(_:)` dispatches through
+    /// the responder chain to the window's `NSSplitViewController`, which owns the
+    /// collapsible places/volumes sidebar.
+    private func buildViewMenu(into mainMenu: NSMenu) {
+        let viewMenuItem = NSMenuItem()
+        mainMenu.addItem(viewMenuItem)
+        let viewMenu = NSMenu(title: "View")
+        viewMenuItem.submenu = viewMenu
+        let toggleSidebar = viewMenu.addItem(
+            withTitle: "Show Sidebar",
+            action: #selector(NSSplitViewController.toggleSidebar(_:)),
+            keyEquivalent: "s"
+        )
+        toggleSidebar.keyEquivalentModifierMask = [.command, .control]
     }
 
     /// The File menu — just tab commands for now. Nil targets dispatch through the
