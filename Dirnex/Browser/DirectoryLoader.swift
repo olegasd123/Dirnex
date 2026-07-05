@@ -15,4 +15,14 @@ enum DirectoryLoader {
             return DirectoryListing(path: path, entries: entries)
         }.value
     }
+
+    /// Recursively total a directory's size off the main thread (Space-on-dir sizing).
+    /// Returns `nil` only if the top-level walk fails outright; unreadable subtrees are
+    /// skipped inside `DirectorySizer`, not fatal. Runs at `.utility` — sizing is a
+    /// background nicety and must never contend with an interactive listing.
+    static func size(_ backend: any VFSBackend, of path: VFSPath) async -> Int64? {
+        await Task.detached(priority: .utility) {
+            try? DirectorySizer.size(of: path, using: backend)
+        }.value
+    }
 }

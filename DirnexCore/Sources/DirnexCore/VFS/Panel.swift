@@ -103,6 +103,13 @@ public struct Panel: Sendable {
         mutatingPreservingCursor { $0.model.filter = filter }
     }
 
+    /// Record a recursively-computed size for the directory at `id` (Space-on-dir),
+    /// keeping the cursor anchored on its entry by identity since size-sorting may
+    /// reorder rows once the total lands.
+    public mutating func setDirectorySize(_ id: VFSPath, bytes: Int64) {
+        mutatingPreservingCursor { $0.model.setDirectorySize(id, bytes: bytes) }
+    }
+
     // MARK: - Cursor
 
     public mutating func moveCursor(to index: Int) {

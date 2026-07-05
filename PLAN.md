@@ -125,8 +125,8 @@ the product's feel; do not rush it.
 - [x] Keyboard core: arrows/Home/End/PageUp/PageDown, Enter (open dir / launch file),
       Cmd+Down/Up, and type-to-filter with live narrowing. Backspace is filter-aware (trims
       the filter, else goes up); Esc clears filter then marks (via `cancelOperation:`).
-- [~] Selection model: Space/Insert toggle-and-advance, Cmd+A (mark all), `*` invert, and
-      `+`/`-` glob select UI done. **Space-on-dir in-place size** not yet.
+- [x] Selection model: Space/Insert toggle-and-advance, Cmd+A (mark all), `*` invert,
+      `+`/`-` glob select, and Space-on-directory in-place recursive sizing.
 - [x] Tabs per panel: new (Cmd+T)/close (Cmd+W)/switch (Cmd+Shift+[ / ])/drag-reorder,
       restored on relaunch. Tab bar auto-hides at a single tab.
 - [x] Path bar: clickable breadcrumbs, Cmd+L to edit as text with completion
@@ -296,8 +296,33 @@ right title/button. GOTCHA: the keypad `+`/`-` keys themselves are unexercised-l
 on this machine / the harness has no keypad token), but they call the identical
 `promptForPatternSelection(deselect:)` the menu items do.
 
-Remaining for M1: drag-out, per-tab **column** width/order persistence, and Space-on-directory
-in-place sizing.
+Update (2026-07-05, 10th pass): Space-on-directory in-place sizing landed, completing the
+**Selection model**. New headless core `DirnexCore/…/VFS/DirectorySizer.swift` recursively
+totals a subtree by walking a `VFSBackend` — iterative (explicit stack, no recursion depth
+limit), symlinks counted by their own size and never followed (a cycle can't wedge it),
+unreadable subdirectories skipped rather than fatal, and cancellable. Computed totals live in
+`DirectoryModel.directorySizes` (keyed by entry identity, pruned to present entries on refresh)
+and layer on top of the pure-stat `FileEntry`: `computedSize(of:)` drives the size column
+(dash → byte total) and `effectiveByteSize(of:)` feeds both the selection total and size-sort
+(an unsized directory counts as 0; a file as its own size). `Panel.setDirectorySize` forwards
+cursor-preserving, since a size can reorder rows when sorting by size. In the app, Space on a
+directory now (besides the existing mark-and-advance) kicks off a background walk via a new
+`DirectoryLoader.size` bridge (`.utility`, off-main); `PanelViewController+Sizing` applies the
+result — guarded by `loadToken` + path so a total that resolves after the user navigated away or
+switched tabs is discarded — and re-renders without scrolling. Files: new `DirectorySizer`,
+`PanelViewController+Sizing`; edits to `DirectoryModel`, `Panel`, `DirectoryLoader`,
+`FileFormatting`, `PanelViewController` (+Table/+Chrome and the Space handler). Core now 66
+tests green (+12: `DirectorySizerTests` flat/nested/empty/symlink-cycle/cancel/missing, plus
+model computed-size + Panel cursor-preservation); app builds clean; touched files
+swiftformat/swiftlint-strict clean. Verified live via computer-use (keyboard-driven, since the
+LanguageTool-for-Desktop overlay still gates every mouse click on the window): in a fixture dir
+whose `bigdir` holds 3,145,728 bytes across two files, Space on it marked it (bold red) and the
+status line jumped to "1 of 3 selected · 3,1 MB"; Space on the empty `emptydir` added 0, holding
+the total at "2 of 3 selected · 3,1 MB". (The size *column* value itself is unverified-live —
+the pane was too narrow to show it and the overlay gates every widen/scroll — but it renders
+through the same unit-tested `computedSize(of:)` the status total does.)
+
+Remaining for M1: drag-out and per-tab **column** width/order persistence.
 
 Exit: can live in it for browsing all day; 100k-dir opens < 150 ms warm; scroll never
 drops frames; unicode/symlink fixtures render correctly.

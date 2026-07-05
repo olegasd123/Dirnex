@@ -29,7 +29,9 @@ extension PanelViewController: NSTableViewDelegate {
             cell.textField?.stringValue = entry.name
             cell.textField?.alignment = .natural
         case .size:
-            cell.textField?.stringValue = FileFormatting.sizeString(for: entry)
+            cell.textField?.stringValue = FileFormatting.sizeString(
+                for: entry, computedSize: panel.model.computedSize(of: entry)
+            )
             cell.textField?.alignment = .right
         case .date:
             cell.textField?.stringValue = FileFormatting.dateString(for: entry)

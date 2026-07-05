@@ -18,8 +18,10 @@ extension PanelViewController {
         let marked = panel.selectionCount
         let counts: String
         if marked > 0 {
+            // A marked directory contributes its computed recursive size once sized
+            // (Space-on-dir), otherwise zero — its inode size is noise, not content.
             let bytes = panel.selectedEntries.reduce(Int64(0)) { sum, entry in
-                sum + (entry.isDirectoryLike ? 0 : entry.byteSize)
+                sum + panel.model.effectiveByteSize(of: entry)
             }
             counts = "\(marked) of \(total) selected · \(FileFormatting.byteString(bytes))"
         } else {

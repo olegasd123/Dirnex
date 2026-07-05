@@ -110,6 +110,58 @@ struct DirectoryModelTests {
         #expect(subject.visibleEntries.map(\.name) == ["a.txt", "c.txt", "b.zip"])
     }
 
+    // MARK: - Computed directory sizes (Space-on-dir)
+
+    @Test("computedSize is nil until recorded, then returns the total")
+    func computedSizeRecorded() {
+        var subject = model([entry("folder", kind: .directory)])
+        let folder = subject.visibleEntries[0]
+        #expect(subject.computedSize(of: folder) == nil)
+
+        subject.setDirectorySize(folder.id, bytes: 4096)
+        #expect(subject.computedSize(of: folder) == 4096)
+    }
+
+    @Test("effectiveByteSize is zero for an unsized directory and the file size for a file")
+    func effectiveByteSizes() {
+        var subject = model([entry("folder", kind: .directory), entry("f.bin", size: 500)])
+        let folder = subject.visibleEntries.first { $0.name == "folder" }!
+        let file = subject.visibleEntries.first { $0.name == "f.bin" }!
+        #expect(subject.effectiveByteSize(of: folder) == 0)
+        #expect(subject.effectiveByteSize(of: file) == 500)
+
+        subject.setDirectorySize(folder.id, bytes: 8192)
+        #expect(subject.effectiveByteSize(of: folder) == 8192)
+    }
+
+    @Test("size sort reflects a computed directory total")
+    func sizeSortReflectsComputed() {
+        var subject = model(
+            [entry("big", kind: .directory), entry("small.bin", size: 5)],
+            sort: FileSort(key: .size, ascending: true, directoriesFirst: false)
+        )
+        // The unsized directory counts as zero, so it sorts before the 5-byte file.
+        #expect(subject.visibleEntries.map(\.name) == ["big", "small.bin"])
+
+        let big = subject.visibleEntries.first { $0.name == "big" }!
+        subject.setDirectorySize(big.id, bytes: 1000)
+        // Now the directory outweighs the file and moves after it.
+        #expect(subject.visibleEntries.map(\.name) == ["small.bin", "big"])
+    }
+
+    @Test("computed sizes are pruned when their entry disappears on refresh")
+    func computedSizePruned() {
+        var subject = model([entry("keep", kind: .directory), entry("drop", kind: .directory)])
+        let keep = subject.visibleEntries.first { $0.name == "keep" }!
+        let drop = subject.visibleEntries.first { $0.name == "drop" }!
+        subject.setDirectorySize(keep.id, bytes: 1)
+        subject.setDirectorySize(drop.id, bytes: 2)
+
+        subject.updateListing(DirectoryListing(path: .local("/test"), entries: [keep]))
+        #expect(subject.computedSize(of: keep) == 1)
+        #expect(subject.directorySizes[drop.id] == nil)
+    }
+
     // MARK: - Hidden
 
     @Test("hidden entries are excluded unless showHidden is on")

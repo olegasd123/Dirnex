@@ -49,6 +49,12 @@ public struct DirectoryModel: Sendable {
     /// Type-to-filter text; case-insensitive substring match on the name.
     public var filter: String { didSet { recompute() } }
 
+    /// Recursively-computed directory totals recorded via Space-on-dir, keyed by entry
+    /// identity. Kept out of `FileEntry` (a pure stat snapshot) and layered on top of it
+    /// for display, selection totals, and size-sorting. Pruned to present entries on
+    /// refresh, so it never grows unbounded or resurrects a deleted folder's number.
+    public private(set) var directorySizes: [VFSPath: Int64]
+
     public private(set) var visibleEntries: [FileEntry]
 
     public init(
@@ -61,14 +67,20 @@ public struct DirectoryModel: Sendable {
         self.sort = sort
         self.showHidden = showHidden
         self.filter = filter
+        directorySizes = [:]
         visibleEntries = []
         recompute()
     }
 
     /// Replace the underlying snapshot (e.g. after a live FSEvents refresh) while
-    /// keeping the current sort/filter/hidden settings.
+    /// keeping the current sort/filter/hidden settings. Computed sizes for entries that
+    /// vanished from the listing are dropped.
     public mutating func updateListing(_ listing: DirectoryListing) {
         self.listing = listing
+        if !directorySizes.isEmpty {
+            let present = Set(listing.entries.map(\.id))
+            directorySizes = directorySizes.filter { present.contains($0.key) }
+        }
         recompute()
     }
 
@@ -83,9 +95,38 @@ public struct DirectoryModel: Sendable {
         visibleEntries.firstIndex { $0.id == id }
     }
 
+    // MARK: - Computed directory sizes (Space-on-dir)
+
+    /// Record a recursively-computed size for the directory identified by `id`
+    /// (Space-on-dir). Re-materializes the visible list because size-sorting may move
+    /// the row.
+    public mutating func setDirectorySize(_ id: VFSPath, bytes: Int64) {
+        directorySizes[id] = bytes
+        recompute()
+    }
+
+    /// The computed recursive size recorded for `entry`, or `nil` if none — only
+    /// directories ever carry one. The size column shows a dash until this is present.
+    public func computedSize(of entry: FileEntry) -> Int64? {
+        directorySizes[entry.id]
+    }
+
+    /// The byte weight to attribute to `entry` in selection totals and size-sorting: a
+    /// computed directory total when present, a file's own size, otherwise zero — an
+    /// unsized directory's inode size is noise, not content.
+    public func effectiveByteSize(of entry: FileEntry) -> Int64 {
+        Self.effectiveByteSize(of: entry, sizes: directorySizes)
+    }
+
+    private static func effectiveByteSize(of entry: FileEntry, sizes: [VFSPath: Int64]) -> Int64 {
+        if let computed = sizes[entry.id] { return computed }
+        return entry.isDirectoryLike ? 0 : entry.byteSize
+    }
+
     private mutating func recompute() {
         visibleEntries = Self.materialize(
-            listing.entries, sort: sort, showHidden: showHidden, filter: filter
+            listing.entries, sort: sort, showHidden: showHidden, filter: filter,
+            sizes: directorySizes
         )
     }
 
@@ -93,7 +134,8 @@ public struct DirectoryModel: Sendable {
         _ entries: [FileEntry],
         sort: FileSort,
         showHidden: Bool,
-        filter: String
+        filter: String,
+        sizes: [VFSPath: Int64] = [:]
     ) -> [FileEntry] {
         var items = entries
         if !showHidden {
@@ -103,20 +145,23 @@ public struct DirectoryModel: Sendable {
             let needle = filter.lowercased()
             items = items.filter { $0.name.lowercased().contains(needle) }
         }
-        items.sort(by: comparator(for: sort))
+        items.sort(by: comparator(for: sort, sizes: sizes))
         return items
     }
 
     /// Builds the row-ordering predicate for a sort. Directory grouping (when on)
     /// wins over the key; the key's direction never moves directories below files.
     /// Name is the stable tiebreaker so equal keys yield a deterministic order.
-    static func comparator(for sort: FileSort) -> (FileEntry, FileEntry) -> Bool {
+    static func comparator(
+        for sort: FileSort,
+        sizes: [VFSPath: Int64] = [:]
+    ) -> (FileEntry, FileEntry) -> Bool {
         { lhs, rhs in
             if sort.directoriesFirst, lhs.isDirectoryLike != rhs.isDirectoryLike {
                 return lhs.isDirectoryLike
             }
 
-            var result = compare(lhs, rhs, key: sort.key)
+            var result = compare(lhs, rhs, key: sort.key, sizes: sizes)
             if result == .orderedSame, sort.key != .name {
                 result = lhs.name.localizedStandardCompare(rhs.name)
             }
@@ -130,13 +175,17 @@ public struct DirectoryModel: Sendable {
     private static func compare(
         _ lhs: FileEntry,
         _ rhs: FileEntry,
-        key: FileSort.Key
+        key: FileSort.Key,
+        sizes: [VFSPath: Int64]
     ) -> ComparisonResult {
         switch key {
         case .name:
             return lhs.name.localizedStandardCompare(rhs.name)
         case .size:
-            return compareValues(lhs.byteSize, rhs.byteSize)
+            return compareValues(
+                effectiveByteSize(of: lhs, sizes: sizes),
+                effectiveByteSize(of: rhs, sizes: sizes)
+            )
         case .modified:
             return compareValues(lhs.modificationDate, rhs.modificationDate)
         case .fileExtension:

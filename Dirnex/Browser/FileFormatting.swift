@@ -20,11 +20,14 @@ enum FileFormatting {
         return formatter
     }()
 
-    /// Size column text. Directories have no meaningful byte size of their own, so we
-    /// show a dash rather than the directory file's inode size (recursive sizing is a
-    /// separate, on-demand feature — PLAN.md §M1 "Space on dir computes size").
-    static func sizeString(for entry: FileEntry) -> String {
-        entry.isDirectoryLike ? "—" : byteFormatter.string(fromByteCount: entry.byteSize)
+    /// Size column text. A file shows its own byte size. A directory shows a dash until
+    /// a recursive total has been computed for it (Space-on-dir, PLAN.md §M1), then that
+    /// byte count — Total Commander's in-place directory sizing.
+    static func sizeString(for entry: FileEntry, computedSize: Int64? = nil) -> String {
+        if entry.isDirectoryLike {
+            return computedSize.map { byteFormatter.string(fromByteCount: $0) } ?? "—"
+        }
+        return byteFormatter.string(fromByteCount: entry.byteSize)
     }
 
     static func byteString(_ bytes: Int64) -> String {

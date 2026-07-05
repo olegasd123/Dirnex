@@ -406,12 +406,18 @@ extension PanelViewController: FileTableViewInput {
             tableView.scrollRowToVisible(parentRowCount)
             return
         }
+        // Capture the entry under the cursor before we advance past it: Space on a
+        // directory also computes its size in place (TC), applied when the walk lands.
+        let sizedDirectory = panel.currentEntry.flatMap { $0.isDirectoryLike ? $0 : nil }
         let markedRow = row(forEntryIndex: panel.cursor)
         panel.toggleMarkAtCursorAndAdvance()
         redrawRow(markedRow)
         syncCursorToTable()
         updateChrome()
         refreshQuickLookIfVisible()
+        if let sizedDirectory {
+            computeDirectorySize(for: sizedDirectory)
+        }
     }
 
     func fileTableSwitchPanel(_ tableView: FileTableView) {
