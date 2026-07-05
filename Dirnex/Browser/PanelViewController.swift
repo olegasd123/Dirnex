@@ -1,5 +1,6 @@
 import AppKit
 import DirnexCore
+import Quartz
 
 /// The pane's owner (the window controller) — receives focus changes so it can track
 /// which of the two panes is active and route Tab between them.
@@ -43,7 +44,9 @@ final class PanelViewController: NSViewController {
         didSet { updateActiveAppearance() }
     }
 
-    private let tableView = FileTableView()
+    /// Internal (not private) so the Quick Look extension in its own file can map the
+    /// cursor row to a source frame for the zoom animation.
+    let tableView = FileTableView()
     private let scrollView = NSScrollView()
     private let pathLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
@@ -165,6 +168,11 @@ final class PanelViewController: NSViewController {
                 let listing = try await DirectoryLoader.list(backend, at: path)
                 guard token == loadToken else { return }
                 panel.setListing(listing)
+                // Entering a directory starts fresh — a quick-filter from the folder we
+                // just left shouldn't silently hide the new folder's contents.
+                if !panel.model.filter.isEmpty {
+                    panel.setFilter("")
+                }
                 if let child, let index = panel.model.index(ofID: child) {
                     panel.moveCursor(to: index)
                 }
@@ -226,13 +234,27 @@ final class PanelViewController: NSViewController {
     private func statusText() -> String {
         let total = panel.count
         let marked = panel.selectionCount
-        guard marked > 0 else {
-            return total == 1 ? "1 item" : "\(total) items"
+        let counts: String
+        if marked > 0 {
+            let bytes = panel.selectedEntries.reduce(Int64(0)) { sum, entry in
+                sum + (entry.isDirectoryLike ? 0 : entry.byteSize)
+            }
+            counts = "\(marked) of \(total) selected · \(FileFormatting.byteString(bytes))"
+        } else {
+            counts = total == 1 ? "1 item" : "\(total) items"
         }
-        let bytes = panel.selectedEntries.reduce(Int64(0)) { sum, entry in
-            sum + (entry.isDirectoryLike ? 0 : entry.byteSize)
-        }
-        return "\(marked) of \(total) selected · \(FileFormatting.byteString(bytes))"
+
+        let filter = panel.model.filter
+        return filter.isEmpty ? counts : "Filter “\(filter)” · \(counts)"
+    }
+
+    /// Replace the type-to-filter and re-render. `Panel`/`DirectoryModel` re-anchor the
+    /// cursor by identity across the change, so the cursor stays on the same file when
+    /// it survives the narrowing.
+    private func setFilter(_ text: String) {
+        panel.setFilter(text)
+        reloadEverything()
+        refreshQuickLookIfVisible()
     }
 
     private func updateSortIndicators() {
@@ -327,6 +349,7 @@ extension PanelViewController: NSTableViewDelegate {
         guard row >= 0 else { return }
         panel.moveCursor(to: row)
         updateChrome()
+        refreshQuickLookIfVisible()
     }
 
     func tableView(_ tableView: NSTableView, didClick tableColumn: NSTableColumn) {
@@ -354,6 +377,29 @@ extension PanelViewController: FileTableViewInput {
         goToParent()
     }
 
+    func fileTableBackspace(_ tableView: FileTableView) {
+        if panel.model.filter.isEmpty {
+            goToParent()
+        } else {
+            setFilter(String(panel.model.filter.dropLast()))
+        }
+    }
+
+    func fileTableCancel(_ tableView: FileTableView) {
+        if !panel.model.filter.isEmpty {
+            setFilter("")
+        } else if panel.selectionCount > 0 {
+            panel.clearSelection()
+            tableView.reloadData()
+            updateChrome()
+            refreshQuickLookIfVisible()
+        }
+    }
+
+    func fileTable(_ tableView: FileTableView, didType text: String) {
+        setFilter(panel.model.filter + text)
+    }
+
     func fileTableToggleMarkAndAdvance(_ tableView: FileTableView) {
         guard !panel.isEmpty else { return }
         let row = panel.cursor
@@ -361,6 +407,7 @@ extension PanelViewController: FileTableViewInput {
         redrawRow(row)
         syncCursorToTable()
         updateChrome()
+        refreshQuickLookIfVisible()
     }
 
     func fileTableSwitchPanel(_ tableView: FileTableView) {
@@ -371,12 +418,23 @@ extension PanelViewController: FileTableViewInput {
         panel.selectAll()
         tableView.reloadData()
         updateChrome()
+        refreshQuickLookIfVisible()
     }
 
     func fileTableInvertMarks(_ tableView: FileTableView) {
         panel.invertSelection()
         tableView.reloadData()
         updateChrome()
+        refreshQuickLookIfVisible()
+    }
+
+    func fileTableToggleQuickLook(_ tableView: FileTableView) {
+        guard let previewPanel = QLPreviewPanel.shared() else { return }
+        if QLPreviewPanel.sharedPreviewPanelExists(), previewPanel.isVisible {
+            previewPanel.orderOut(nil)
+        } else {
+            previewPanel.makeKeyAndOrderFront(nil)
+        }
     }
 
     func fileTableDidBecomeFirstResponder(_ tableView: FileTableView) {

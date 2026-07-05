@@ -122,8 +122,9 @@ the product's feel; do not rush it.
       name, size, date; header-click sort with direction indicator. 60fps/100k budget not yet
       measured — deferred to the M1 exit gate / M7 perf pass.
 - [x] Two panels + splitter; active-panel highlight; Tab switches
-- [~] Keyboard core: arrows/Home/End/PageUp/PageDown, Enter (open dir / launch file),
-      Backspace (up), Cmd+Down/Up done. **type-to-filter** (live narrowing, Esc clears) not yet.
+- [x] Keyboard core: arrows/Home/End/PageUp/PageDown, Enter (open dir / launch file),
+      Cmd+Down/Up, and type-to-filter with live narrowing. Backspace is filter-aware (trims
+      the filter, else goes up); Esc clears filter then marks (via `cancelOperation:`).
 - [~] Selection model: Space/Insert toggle-and-advance, Cmd+A (mark all), `*` invert done.
       **Space-on-dir in-place size** and **`+`/`-` glob select UI** not yet (glob select exists
       in `Panel`, just unwired).
@@ -131,7 +132,8 @@ the product's feel; do not rush it.
 - [ ] Path bar: clickable breadcrumbs, Cmd+L to edit as text with completion
 - [ ] Volumes/places strip (replaces TC's drive letters); eject
 - [ ] FSEvents: panels refresh live, preserving cursor and selection
-- [ ] Quick Look on Space-with-modifier or Cmd+Y (Space is taken by selection — verify feel)
+- [x] Quick Look on Cmd+Y (Space stays reserved for selection, per §7); previews the marked
+      set or the cursor file, tracks the cursor live
 - [ ] Drag out to other apps; drag in = reveal only (real drop lands in M2)
 - [ ] Sort/column state per tab, persisted
 
@@ -155,9 +157,18 @@ mirror with loop guard + stale-load token, header-click sort, error sheets), plu
 text), and `FileFormatting`/`FileIconProvider`. Verified live: home dir lists correctly,
 active/inactive highlight, sort, marks all render.
 
-Remaining for M1: type-to-filter, tabs per panel, clickable breadcrumb path bar + Cmd+L,
-volumes/places strip + eject, live FSEvents refresh, Quick Look, drag-out, per-tab
-sort/column persistence, `+`/`-` glob-select UI, and Space-on-directory in-place sizing.
+Update (2026-07-05, 3rd pass): type-to-filter and Quick Look landed. Printable keys build a
+live filter (`FileTableView` → `PanelViewController.setFilter`), status shows `Filter "x"`,
+Backspace trims it (then goes up when empty), Esc clears it via `cancelOperation:`, and
+entering a directory resets it. Quick Look (Cmd+Y) is in `PanelViewController+QuickLook.swift`
+— the pane is the QL controller, previewing the marked set or the cursor file and refreshing
+as the cursor/marks move. Verified live: filter narrowing, Backspace edit, Cmd+Y preview.
+(Note: Esc couldn't be exercised through the automation harness — synthetic Escape is
+swallowed by the OS before reaching the app — but the keyDown path it shares is verified.)
+
+Remaining for M1: tabs per panel, clickable breadcrumb path bar + Cmd+L, volumes/places
+strip + eject, live FSEvents refresh, drag-out, per-tab sort/column persistence, `+`/`-`
+glob-select UI, Space-on-directory in-place sizing, and a `..` parent row.
 
 Exit: can live in it for browsing all day; 100k-dir opens < 150 ms warm; scroll never
 drops frames; unicode/symlink fixtures render correctly.
