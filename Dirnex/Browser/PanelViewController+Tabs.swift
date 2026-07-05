@@ -14,6 +14,7 @@ extension PanelViewController {
     /// stored cursor/marks/filter instantly, then refreshes in the background so it is
     /// current after having been unwatched while inactive.
     func activateTab() {
+        applyColumnLayout(for: tabs[activeTabIndex])
         refreshTabBar()
         if tabs[activeTabIndex].hasLoaded {
             reloadEverything()
@@ -54,10 +55,14 @@ extension PanelViewController {
     /// Open a new tab beside the current one, showing the same directory and inheriting
     /// its sort/hidden settings (Cmd+T).
     func addTab() {
+        // Snapshot the current tab's live column geometry first, so the new tab inherits
+        // exactly what's on screen (matching the sort/hidden inheritance below).
+        captureColumnLayout()
         let tab = PanelTab(
             path: panel.path,
             sort: panel.model.sort,
-            showHidden: panel.model.showHidden
+            showHidden: panel.model.showHidden,
+            columns: tabs[activeTabIndex].columnLayout
         )
         tabs.insert(tab, at: activeTabIndex + 1)
         activeTabIndex += 1
@@ -114,7 +119,9 @@ extension PanelViewController {
     /// Write this pane's tabs (paths + per-tab sort) so they survive a relaunch.
     func persistState() {
         guard let restorationKey else { return }
-        let persisted = tabs.map { PersistedTab(path: $0.panel.path, sort: $0.panel.model.sort) }
+        let persisted = tabs.map {
+            PersistedTab(path: $0.panel.path, sort: $0.panel.model.sort, columns: $0.columnLayout)
+        }
         TabPersistence.save(
             PersistedPane(tabs: persisted, activeIndex: activeTabIndex),
             paneKey: restorationKey
@@ -131,7 +138,7 @@ extension PanelViewController {
             guard path.backend == .local,
                   FileManager.default.fileExists(atPath: path.path, isDirectory: &isDirectory),
                   isDirectory.boolValue else { return nil }
-            return PanelTab(path: path, sort: persisted.fileSort)
+            return PanelTab(path: path, sort: persisted.fileSort, columns: persisted.columns)
         }
     }
 

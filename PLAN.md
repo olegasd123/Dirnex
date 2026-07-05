@@ -135,9 +135,9 @@ the product's feel; do not rush it.
 - [x] Quick Look on Cmd+Y (Space stays reserved for selection, per §7); previews the marked
       set or the cursor file, tracks the cursor live
 - [x] Drag out to other apps; drag in = reveal only (real drop lands in M2)
-- [~] Sort/column state per tab, persisted. Per-tab **sort** (key + direction) now lives in
-      each tab and persists across launches; per-tab **column widths/order** not yet (columns
-      are still shared across a pane's tabs).
+- [x] Sort/column state per tab, persisted. Per-tab **sort** (key + direction) and per-tab
+      **column widths/order** both live in each tab and persist across launches — switching
+      tabs swaps the shared table's column geometry in/out.
 
 Progress (2026-07-05): the headless core for this milestone is complete and tested
 in `DirnexCore` (38 tests, SwiftLint/SwiftFormat clean) — see `Sources/DirnexCore/VFS/`:
@@ -341,7 +341,34 @@ dragging the unmarked `alpha.txt` from a pane to a Finder window copied just it;
 `gamma` (status "2 of 3 selected · 29 bytes") then dragging the single `beta` row copied **both**
 into Finder — confirmed on disk.
 
-Remaining for M1: per-tab **column** width/order persistence.
+Update (2026-07-06, 11th pass): per-tab **column** width/order persistence landed — the
+last M1 feature item. A pane keeps one `NSTableView` shared across its tabs, so switching
+tabs now swaps the table's column geometry in and out: `PanelTab` gains a `columnLayout`
+(`[ColumnLayout]`, display-order + width, UI-only like `cursorOnParentRow`), `PersistedTab`
+gains an optional `columns` (missing key → `nil` → default columns, so state written before
+this field decodes untouched), and a new `PanelViewController+Columns.swift` owns the shell:
+`applyColumnLayout(for:)` (reorders the known columns into the stored order via
+`moveColumn`, then sets each width; guarded by `isApplyingColumnLayout` so its own
+resize/move notifications aren't recaptured), `captureColumnLayout()`, and a
+`columnDidResize`/`columnDidMove` observer that records the active tab's geometry and
+`persistState`s it — skipping no-op posts via `ColumnLayout: Equatable` so window
+autoresizing doesn't churn the disk. `activateTab` applies the active tab's layout;
+`addTab` inherits the current one; `restoredTabs` threads `columns` through. To stay under
+SwiftLint's `file_length`, the `Column` enum (now also carrying `defaultWidth`/`minWidth`,
+the single source for `configureTable` and the fallback layout) moved into the new file.
+App builds clean (no warnings); DirnexCore untouched; touched files
+swiftformat/swiftlint-strict clean; app test target green. Verified live via computer-use:
+an injected left-pane layout `[date, name, size]` rendered with **Date Modified** first on
+launch while an old-format right pane (no `columns` key) rendered the default **Name**-first
+order (decode + reorder + backward-compat in one shot); dragging the left pane's **Name**
+header to the front then quitting persisted `[name, date, size]` to disk with widths intact,
+while the untouched right pane stayed `columns: nil` (capture→persist + per-pane
+independence). GOTCHA (unchanged): the LanguageTool-for-Desktop overlay again gated every
+window click until quit for the session.
+
+**M1 feature checklist is now complete.** The only outstanding M1 work is the exit *gate*
+itself — the perf measurements (100k-dir < 150 ms warm, no dropped frames), deliberately
+deferred to the M1 exit gate / M7 perf pass per the M1 panel-view note above.
 
 Exit: can live in it for browsing all day; 100k-dir opens < 150 ms warm; scroll never
 drops frames; unicode/symlink fixtures render correctly.

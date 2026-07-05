@@ -16,28 +16,6 @@ protocol PanelHost: AnyObject {
 /// mirrors that state into AppKit and pushes user input back into it.
 @MainActor
 final class PanelViewController: NSViewController {
-    /// A file-list column. Internal (not private) so the chrome/parent-row extensions
-    /// in their own files can build cells and sort indicators for it.
-    enum Column: String, CaseIterable {
-        case name, size, date
-
-        var title: String {
-            switch self {
-            case .name: return "Name"
-            case .size: return "Size"
-            case .date: return "Date Modified"
-            }
-        }
-
-        var sortKey: FileSort.Key {
-            switch self {
-            case .name: return .name
-            case .size: return .size
-            case .date: return .modified
-            }
-        }
-    }
-
     // Internal so the tab-management extension in its own file can list directories.
     let backend: any VFSBackend
     /// This pane's open tabs and which one is showing. Only the tab code in
@@ -75,6 +53,10 @@ final class PanelViewController: NSViewController {
     /// `panel.cursor` into the table, the resulting selection-changed callback must
     /// not write it straight back. Internal for the table delegate in its own file.
     var isSyncingSelection = false
+    /// Guards the column-layout capture against feedback: applying a tab's stored widths
+    /// and order itself posts resize/move notifications, which must not be recorded back
+    /// as if the user had dragged them. Internal for `PanelViewController+Columns`.
+    var isApplyingColumnLayout = false
     /// Bumped on every navigation so a slow listing that resolves after the user has
     /// already moved on is discarded instead of clobbering the current directory.
     /// Internal so `PanelViewController+Tabs` can discard a stale load on tab switch.
@@ -154,17 +136,8 @@ final class PanelViewController: NSViewController {
                 identifier: NSUserInterfaceItemIdentifier(column.rawValue)
             )
             tableColumn.title = column.title
-            switch column {
-            case .name:
-                tableColumn.width = 320
-                tableColumn.minWidth = 140
-            case .size:
-                tableColumn.width = 90
-                tableColumn.minWidth = 60
-            case .date:
-                tableColumn.width = 150
-                tableColumn.minWidth = 100
-            }
+            tableColumn.width = column.defaultWidth
+            tableColumn.minWidth = column.minWidth
             tableView.addTableColumn(tableColumn)
         }
 
@@ -180,7 +153,12 @@ final class PanelViewController: NSViewController {
         tableView.target = self
         tableView.doubleAction = #selector(handleDoubleClick)
         configureDragging()
+        observeColumnLayoutChanges()
         updateSortIndicators()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func viewDidLoad() {

@@ -18,15 +18,27 @@ final class PanelTab {
     /// Set once this tab's directory has been listed. A tab restored from disk starts
     /// `false` so switching to it triggers a fresh load rather than showing an empty list.
     var hasLoaded = false
+    /// This tab's column widths/order, in display order (UI-only, like `cursorOnParentRow`;
+    /// see `PanelViewController+Columns`). `nil` until the tab has been given an explicit
+    /// layout — restored from disk or inherited from the tab it was spawned from — in which
+    /// case the pane falls back to the default columns.
+    var columnLayout: [ColumnLayout]?
 
     init(panel: Panel) {
         self.panel = panel
     }
 
-    /// A new tab rooted at `path`, inheriting the sort/hidden settings of the tab it was
-    /// spawned from so a fresh tab matches the pane you opened it from.
-    convenience init(path: VFSPath, sort: FileSort = .default, showHidden: Bool = false) {
+    /// A new tab rooted at `path`, inheriting the sort/hidden settings — and, when given,
+    /// the column layout — of the tab it was spawned from so a fresh tab matches the pane
+    /// you opened it from.
+    convenience init(
+        path: VFSPath,
+        sort: FileSort = .default,
+        showHidden: Bool = false,
+        columns: [ColumnLayout]? = nil
+    ) {
         self.init(panel: Panel(path: path, sort: sort, showHidden: showHidden))
+        columnLayout = columns
     }
 
     /// The short label shown on the tab chip — the directory name, or the volume name at
