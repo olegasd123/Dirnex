@@ -43,12 +43,7 @@ extension PanelViewController: NSTableViewDelegate {
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard !isSyncingSelection else { return }
-        let row = tableView.selectedRow
-        guard row >= 0 else { return }
-        cursorOnParentRow = isParentRow(row)
-        if let index = entryIndex(forRow: row) {
-            panel.moveCursor(to: index)
-        }
+        guard reconcileCursorFromTable() else { return }
         updateChrome()
         refreshQuickLookIfVisible()
     }

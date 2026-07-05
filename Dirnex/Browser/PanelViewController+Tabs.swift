@@ -34,6 +34,7 @@ extension PanelViewController {
         Task {
             guard let listing = try? await DirectoryLoader.list(backend, at: path) else { return }
             guard token == loadToken, panel.path == path, activeTabIndex == index else { return }
+            reconcileCursorFromTable()
             panel.setListing(listing)
             tabs[index].hasLoaded = true
             renderRefresh()

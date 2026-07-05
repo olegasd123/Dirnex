@@ -260,6 +260,7 @@ final class PanelViewController: NSViewController {
         Task {
             guard let listing = try? await DirectoryLoader.list(backend, at: watchedPath) else { return }
             guard token == loadToken, panel.path == watchedPath else { return }
+            reconcileCursorFromTable()
             panel.setListing(listing)
             renderRefresh()
         }
@@ -297,6 +298,30 @@ final class PanelViewController: NSViewController {
         syncCursorToTable(scroll: false)
         updateChrome()
         refreshQuickLookIfVisible()
+    }
+
+    /// Mirror the table's live selection into the model cursor (the view→model half of
+    /// the cursor mirror), reporting whether a real row was selected. Runs both from the
+    /// user's own selection change and — crucially — just before a background refresh
+    /// re-anchors the cursor.
+    ///
+    /// `NSTableView` posts its selection-changed notification on a later runloop pass, so
+    /// there is a brief window after the user clicks or arrows to a new row where the
+    /// table already shows it but `panel.cursor` still points at the row they left. A
+    /// live FSEvents refresh, a directory-size completion, or a tab-activation re-list
+    /// landing in that window would otherwise anchor on the stale cursor and snap the
+    /// visible selection back to the previous file. Reconciling first makes the user's
+    /// current selection the anchor, so the refresh preserves it. Internal so the
+    /// background-refresh sites in the Tabs and Sizing extensions can call it.
+    @discardableResult
+    func reconcileCursorFromTable() -> Bool {
+        let row = tableView.selectedRow
+        guard row >= 0 else { return false }
+        cursorOnParentRow = isParentRow(row)
+        if let index = entryIndex(forRow: row) {
+            panel.moveCursor(to: index)
+        }
+        return true
     }
 
     /// Push the cursor into the table's selection (the visible cursor). Navigation

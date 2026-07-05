@@ -25,6 +25,7 @@ extension PanelViewController {
             // Discard a total that resolved after the user navigated away or switched
             // tabs — both bump `loadToken`; the path check is belt-and-suspenders.
             guard token == loadToken, panel.path == directory else { return }
+            reconcileCursorFromTable()
             panel.setDirectorySize(path, bytes: bytes)
             // A size can reorder the list (when sorting by size), so re-render — but as
             // a background refresh that never scrolls, so the number appears without
