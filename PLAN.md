@@ -131,7 +131,7 @@ the product's feel; do not rush it.
 - [ ] Tabs per panel: new/close/reorder, restored on relaunch
 - [x] Path bar: clickable breadcrumbs, Cmd+L to edit as text with completion
 - [ ] Volumes/places strip (replaces TC's drive letters); eject
-- [ ] FSEvents: panels refresh live, preserving cursor and selection
+- [x] FSEvents: panels refresh live, preserving cursor and selection
 - [x] Quick Look on Cmd+Y (Space stays reserved for selection, per §7); previews the marked
       set or the cursor file, tracks the cursor live
 - [ ] Drag out to other apps; drag in = reveal only (real drop lands in M2)
@@ -179,9 +179,27 @@ commit-navigates-and-refocuses. (Crumb *mouse-click* couldn't be exercised — a
 LanguageTool overlay covered the path-bar band and the harness gates clicks onto it — but
 it reuses the verified `navigate(to:focus:)` path and the unit-tested `child(towards:)`.)
 
-Remaining for M1: tabs per panel, volumes/places strip + eject, live FSEvents refresh,
-drag-out, per-tab sort/column persistence, `+`/`-` glob-select UI, Space-on-directory
-in-place sizing, and a `..` parent row.
+Update (2026-07-05, 5th pass): live FSEvents refresh landed. New
+`DirnexCore/…/VFS/DirectoryWatcher.swift` wraps an `FSEventStream` (per-directory,
+coalesced by FSEvents' own latency; dispatch-queue scheduled, no run loop) and fires a
+payload-free `onChange` — "re-list this directory." The stream holds an *unretained*
+pointer to the watcher (a retained one would be a cycle that never stops), so `stop()`
+runs from `deinit`; `FSEventStreamInvalidate` drains the queue. Integration-tested
+(`DirectoryWatcherTests`, 3 tests, ~60 ms: fires on add, fires across successive
+add/remove, idempotent stop). `PanelViewController` owns one watcher, replaced on every
+navigation (skipped when the backend lacks `.watch`); the change hops to the main actor,
+re-lists, and feeds `Panel.setListing` — which re-anchors cursor/marks by identity — then
+renders via a new non-scrolling `renderRefresh()` so a background change never yanks the
+user's scroll position. Error-presentation helpers were split into
+`PanelViewController+Errors.swift` to keep the controller under SwiftLint's length limits.
+Verified live via computer-use: creating/removing a folder in a watched directory updated
+both panes instantly (19⇄20 items) and the cursor stayed on "Applications" instead of
+jumping to the new top-sorted row. Core suite now 48 tests, all green; app builds; touched
+files swiftformat/swiftlint-strict clean.
+
+Remaining for M1: tabs per panel, volumes/places strip + eject, drag-out, per-tab
+sort/column persistence, `+`/`-` glob-select UI, Space-on-directory in-place sizing, and a
+`..` parent row.
 
 Exit: can live in it for browsing all day; 100k-dir opens < 150 ms warm; scroll never
 drops frames; unicode/symlink fixtures render correctly.

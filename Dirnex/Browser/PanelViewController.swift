@@ -58,6 +58,10 @@ final class PanelViewController: NSViewController {
     /// Bumped on every navigation so a slow listing that resolves after the user has
     /// already moved on is discarded instead of clobbering the current directory.
     private var loadToken = 0
+    /// FSEvents watcher for the directory on screen — live-refreshes the pane when the
+    /// folder changes underneath us. Replaced on every navigation; `nil` for backends
+    /// without the `.watch` capability.
+    private var watcher: DirectoryWatcher?
 
     init(backend: any VFSBackend, path: VFSPath) {
         self.backend = backend
@@ -175,10 +179,39 @@ final class PanelViewController: NSViewController {
                     panel.moveCursor(to: index)
                 }
                 reloadEverything()
+                startWatching(path)
             } catch {
                 guard token == loadToken else { return }
                 presentLoadFailure(error, path: path)
             }
+        }
+    }
+
+    // MARK: - Live refresh (FSEvents)
+
+    /// Watch `path` for changes, tearing down the previous watcher. The onChange closure
+    /// runs on a background queue, so it hops to the main actor before touching the pane.
+    private func startWatching(_ path: VFSPath) {
+        guard backend.capabilities.contains(.watch) else {
+            watcher = nil
+            return
+        }
+        watcher = DirectoryWatcher(path: path) { [weak self] in
+            Task { @MainActor in self?.directoryDidChange(path) }
+        }
+    }
+
+    /// A watched directory changed on disk. Re-list it and hand the fresh snapshot to
+    /// `Panel`, which preserves the cursor and marks by identity. Guarded so a late
+    /// event from a directory we've since navigated away from is ignored.
+    private func directoryDidChange(_ watchedPath: VFSPath) {
+        guard panel.path == watchedPath else { return }
+        let token = loadToken
+        Task {
+            guard let listing = try? await DirectoryLoader.list(backend, at: watchedPath) else { return }
+            guard token == loadToken, panel.path == watchedPath else { return }
+            panel.setListing(listing)
+            renderRefresh()
         }
     }
 
@@ -205,8 +238,19 @@ final class PanelViewController: NSViewController {
         updateChrome()
     }
 
-    /// Push `panel.cursor` into the table's selection (the visible cursor).
-    private func syncCursorToTable() {
+    /// Re-render after a live FSEvents refresh. Unlike a navigation, this must not yank
+    /// the view: the cursor is re-applied but not scrolled to, so a background change
+    /// leaves the user's scroll position (and reading spot) where it was.
+    private func renderRefresh() {
+        tableView.reloadData()
+        syncCursorToTable(scroll: false)
+        updateChrome()
+        refreshQuickLookIfVisible()
+    }
+
+    /// Push `panel.cursor` into the table's selection (the visible cursor). Navigation
+    /// scrolls the cursor into view; a live refresh (`scroll: false`) does not.
+    private func syncCursorToTable(scroll: Bool = true) {
         isSyncingSelection = true
         defer { isSyncingSelection = false }
         guard !panel.isEmpty else {
@@ -215,7 +259,9 @@ final class PanelViewController: NSViewController {
         }
         let row = panel.cursor
         tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-        tableView.scrollRowToVisible(row)
+        if scroll {
+            tableView.scrollRowToVisible(row)
+        }
     }
 
     private func redrawRow(_ row: Int) {
@@ -265,36 +311,6 @@ final class PanelViewController: NSViewController {
                 )
                 : nil
             tableView.setIndicatorImage(image, in: tableColumn)
-        }
-    }
-
-    private func presentLoadFailure(_ error: Error, path: VFSPath) {
-        let alert = NSAlert()
-        alert.messageText = "Can’t open “\(path.lastComponent)”"
-        alert.informativeText = describe(error)
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
-        if let window = view.window {
-            alert.beginSheetModal(for: window)
-        } else {
-            alert.runModal()
-        }
-    }
-
-    private func describe(_ error: Error) -> String {
-        guard let vfsError = error as? VFSError else { return error.localizedDescription }
-        switch vfsError {
-        case .permissionDenied:
-            return "You don’t have permission to view this folder. "
-                + "Dirnex may need Full Disk Access in System Settings."
-        case .notFound:
-            return "The folder no longer exists."
-        case .notADirectory:
-            return "That item isn’t a folder."
-        case let .io(_, code):
-            return "The system reported an error (code \(code))."
-        case let .unsupported(message):
-            return message
         }
     }
 
