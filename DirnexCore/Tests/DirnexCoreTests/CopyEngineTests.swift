@@ -4,9 +4,9 @@ import Testing
 @testable import DirnexCore
 
 /// End-to-end tests for the copy/move operation engine (PLAN.md §M2): the clone-backed
-/// happy paths, the conflict policies, cancellation, progress accounting, and — via test
-/// backends that suppress cloning or force a cross-volume error — the chunked recursive
-/// fallback and the move's copy-then-delete path.
+/// happy paths, cancellation, progress accounting, and — via test backends that suppress
+/// cloning or force a cross-volume error — the chunked recursive fallback and the move's
+/// copy-then-delete path. The conflict-policy matrix lives in `CopyEngineConflictTests`.
 @Suite("CopyEngine")
 struct CopyEngineTests {
     let backend = LocalBackend()
@@ -116,84 +116,6 @@ struct CopyEngineTests {
         #expect(throws: VFSError.notFound(tree.vfsPath("a.txt"))) { try backend.stat(
             at: tree.vfsPath("a.txt")
         ) }
-    }
-
-    // MARK: - Conflicts
-
-    @Test("the default fail policy records a failure and leaves the existing item")
-    func conflictFailRecordsFailure() throws {
-        let tree = try TempTree()
-        defer { tree.cleanup() }
-        try tree.writeFile("a.txt", contents: "new")
-        try tree.makeDir("dest")
-        try tree.writeFile("dest/a.txt", contents: "old")
-
-        let op = FileOperation(
-            kind: .copy,
-            sources: [try stat(tree, "a.txt")],
-            destinationDirectory: tree.vfsPath("dest")
-        )
-        let report = CopyEngine.run(op, using: backend) // .fail default
-
-        #expect(report.failures.count == 1)
-        #expect(report.failures.first?.error == .alreadyExists(tree.vfsPath("dest/a.txt")))
-        #expect(try contents(tree, "dest/a.txt") == "old") // untouched
-    }
-
-    @Test("skip leaves the existing item and records the source as skipped")
-    func conflictSkip() throws {
-        let tree = try TempTree()
-        defer { tree.cleanup() }
-        try tree.writeFile("a.txt", contents: "new")
-        try tree.makeDir("dest")
-        try tree.writeFile("dest/a.txt", contents: "old")
-
-        let op = FileOperation(
-            kind: .copy,
-            sources: [try stat(tree, "a.txt")],
-            destinationDirectory: tree.vfsPath("dest")
-        )
-        let report = CopyEngine.run(op, using: backend, conflictPolicy: .skip)
-
-        #expect(report.skipped == [tree.vfsPath("a.txt")])
-        #expect(try contents(tree, "dest/a.txt") == "old")
-    }
-
-    @Test("overwrite replaces the existing item's contents")
-    func conflictOverwrite() throws {
-        let tree = try TempTree()
-        defer { tree.cleanup() }
-        try tree.writeFile("a.txt", contents: "new")
-        try tree.makeDir("dest")
-        try tree.writeFile("dest/a.txt", contents: "old")
-
-        let op = FileOperation(
-            kind: .copy,
-            sources: [try stat(tree, "a.txt")],
-            destinationDirectory: tree.vfsPath("dest")
-        )
-        #expect(CopyEngine.run(op, using: backend, conflictPolicy: .overwrite).succeeded)
-        #expect(try contents(tree, "dest/a.txt") == "new")
-        // No temporary detritus left behind.
-        #expect(try backend.listDirectory(at: tree.vfsPath("dest")).map(\.name) == ["a.txt"])
-    }
-
-    @Test("keepBoth copies under a fresh name, leaving the original")
-    func conflictKeepBoth() throws {
-        let tree = try TempTree()
-        defer { tree.cleanup() }
-        try tree.writeFile("a.txt", contents: "new")
-        try tree.makeDir("dest")
-        try tree.writeFile("dest/a.txt", contents: "old")
-
-        let op = FileOperation(
-            kind: .copy,
-            sources: [try stat(tree, "a.txt")],
-            destinationDirectory: tree.vfsPath("dest")
-        )
-        #expect(CopyEngine.run(op, using: backend, conflictPolicy: .keepBoth).succeeded)
-        #expect(try contents(tree, "dest/a.txt") == "old")
-        #expect(try contents(tree, "dest/a copy.txt") == "new")
     }
 
     // MARK: - Cancellation & progress

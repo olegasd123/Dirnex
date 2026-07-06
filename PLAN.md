@@ -391,8 +391,8 @@ Goal: TC's killer feature — queued, non-blocking, undoable file operations.
 - [ ] Progress UI: cancellable progress sheet ✅; queue-level pause/resume/cancel + ETA
       landed in core (`FileOperationQueue`) ✅; the queue bar (as in mockup) + expandable
       per-job list is the remaining UI work
-- [ ] Conflict engine: up-front ask/overwrite/skip/keep-both ✅; newer-only, "apply to
-      all", and the rich dialog (size/date, text diff, image thumbnails) still pending
+- [ ] Conflict engine: up-front ask/overwrite/skip/keep-both ✅ + newer-only ✅; "apply to
+      all" and the rich dialog (size/date, text diff, image thumbnails) still pending
 - [ ] Undo journal: Cmd+Z reverses move/rename/copy/new-folder; delete-to-Trash restore;
       journal survives relaunch; clear messaging for non-reversible ops
 - [ ] Errors: failures collected + summarized ✅; per-file skip/retry/abort still pending
@@ -561,6 +561,28 @@ landed before its app shell.
   pass: the queue is headless and unused by the app — F5/F6 still run the standalone
   `CopyEngine` behind the single-op sheet; routing them (and drag-drop) through this queue,
   plus the queue-bar UI, is the wiring pass.
+
+Progress (2026-07-06, M2 pass 5): the `newer-only` conflict policy landed — TC's
+"overwrite older", closing one of the two named conflict-engine gaps ("apply to all" +
+the rich dialog remain). Core-only decision site: `ConflictPolicy.newerOnly` (new case)
+resolves in `CopyEngine.resolveConflict`, which now captures the existing destination's
+`stat` and replaces it only when `source.modificationDate > existing.modificationDate`,
+else skips (equal counts as not-newer → skip). It reuses the existing temp-sibling
+overwrite plan (factored into a shared `overwritePlan(at:name:)`), so the atomic-swap
+safety is unchanged; the comparison is on the top-level item's own mtime, so a directory
+is replaced wholesale when *its* mtime is newer (a per-file merge is a later pass). The
+app's F5/F6 conflict prompt gains an **Overwrite If Newer** button (appended before Cancel
+so the existing overwrite/keep-both/skip response mappings are untouched; the 4th button's
+response code is derived from `.alertThirdButtonReturn + 1`). Tests: the conflict-policy
+matrix moved out of `CopyEngineTests` into a focused `CopyEngineConflictTests` suite (kept
+the growing file under SwiftLint's `type_body_length`), which adds 3 `newerOnly` cases
+(replaces-older / keeps-newer / skips-equal) on top of the existing four; a new
+`TempTree.setModificationDate` helper stamps mtimes deterministically. Core suite now
+**109 tests**, all green; app builds clean; touched files swiftformat/swiftlint-strict
+clean. Not yet verified live (headless + a menu-button wiring; the engine path is fully
+unit-covered). GOTCHA for the next pass: newer-only is exposed only through the up-front
+single-policy prompt — it'll want re-surfacing per-file once the rich "apply to all"
+dialog lands.
 
 Exit: 50 GB copy runs in background while browsing stays 60fps; yanking a USB drive
 mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixes it.

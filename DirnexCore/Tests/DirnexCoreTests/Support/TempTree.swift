@@ -53,4 +53,10 @@ struct TempTree {
     func symlink(_ relative: String, to target: String) throws {
         try fileManager.createSymbolicLink(atPath: path(relative), withDestinationPath: target)
     }
+
+    /// Stamp an item's modification date, so tests can make one file demonstrably newer or
+    /// older than another (the `newerOnly` conflict policy compares these).
+    func setModificationDate(_ relative: String, to date: Date) throws {
+        try fileManager.setAttributes([.modificationDate: date], ofItemAtPath: path(relative))
+    }
 }

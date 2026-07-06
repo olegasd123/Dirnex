@@ -38,6 +38,13 @@ public enum ConflictPolicy: Sendable, Equatable {
     /// and swapped into place, so the original survives until the replacement is
     /// complete (a half-finished copy never destroys the file it was replacing).
     case overwrite
+    /// Replace the existing item only when the source is strictly newer than it (by
+    /// modification date); an equal-or-older source is skipped, like the existing one is
+    /// kept. This is TC's "overwrite older" — the safe way to fold newer edits into a
+    /// destination without touching files that are already up to date. The comparison is
+    /// on the top-level item's own modification date, so a directory is replaced wholesale
+    /// when *its* mtime is newer (a per-file merge is a later pass — see PLAN.md §M2).
+    case newerOnly
     /// Copy the source under a fresh, non-colliding name ("file copy.txt", "file copy 2.txt").
     case keepBoth
 }

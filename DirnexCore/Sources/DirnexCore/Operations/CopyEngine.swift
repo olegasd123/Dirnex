@@ -224,20 +224,31 @@ private final class CopyRun {
     }
 
     private func resolveConflict(for entry: FileEntry, at destination: VFSPath) throws -> Plan {
-        guard (try? backend.stat(at: destination)) != nil else { return .proceed(destination) }
+        guard let existing = try? backend.stat(at: destination) else { return .proceed(destination) }
         switch policy {
         case .fail:
             throw VFSError.alreadyExists(destination)
         case .skip:
             return .skip
         case .overwrite:
-            let temp = operation.destinationDirectory
-                .appending(".dirnex-copy-\(UUID().uuidString)-\(entry.name)")
-            return .overwrite(temp: temp, existing: destination, final: destination)
+            return overwritePlan(at: destination, name: entry.name)
+        case .newerOnly:
+            // Replace only a strictly-older destination; an equal-or-newer one is kept.
+            guard entry.modificationDate > existing.modificationDate else { return .skip }
+            return overwritePlan(at: destination, name: entry.name)
         case .keepBoth:
             let name = firstAvailableName(basedOn: entry.name)
             return .proceed(operation.destinationDirectory.appending(name))
         }
+    }
+
+    /// The plan for replacing an existing `destination` in place: write the replacement to
+    /// a temporary sibling first, then swap it in, so the original survives a failure or
+    /// cancellation partway through (see `replace(_:via:removing:landingAt:bytes:)`).
+    private func overwritePlan(at destination: VFSPath, name: String) -> Plan {
+        let temp = operation.destinationDirectory
+            .appending(".dirnex-copy-\(UUID().uuidString)-\(name)")
+        return .overwrite(temp: temp, existing: destination, final: destination)
     }
 
     /// Generate the first "<name> copy[.ext]" / "<name> copy N[.ext]" that doesn't yet

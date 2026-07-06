@@ -92,6 +92,7 @@ extension PanelViewController {
             alert.addButton(withTitle: "Overwrite")
             alert.addButton(withTitle: "Keep Both")
             alert.addButton(withTitle: "Skip")
+            alert.addButton(withTitle: "Overwrite If Newer")
             alert.addButton(withTitle: "Cancel")
 
             let handler: (NSApplication.ModalResponse) -> Void = { response in
@@ -105,12 +106,19 @@ extension PanelViewController {
         }
     }
 
+    /// The response code of the fourth `NSAlert` button ("Overwrite If Newer"); AppKit
+    /// only names the first three, and the rest count up from `.alertThirdButtonReturn`.
+    private static let fourthButtonReturn = NSApplication.ModalResponse(
+        rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1
+    )
+
     private static func policy(for response: NSApplication.ModalResponse) -> ConflictPolicy? {
         switch response {
         case .alertFirstButtonReturn: .overwrite
         case .alertSecondButtonReturn: .keepBoth
         case .alertThirdButtonReturn: .skip
-        default: nil // Cancel
+        case fourthButtonReturn: .newerOnly
+        default: nil // Cancel (fifth button) or dismissal
         }
     }
 
