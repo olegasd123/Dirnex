@@ -87,6 +87,44 @@ public protocol VFSBackend: Sendable {
     /// `.unsupported`; check `capabilities.contains(.trash)` first.
     @discardableResult
     func trashItem(at path: VFSPath) throws -> VFSPath?
+
+    // MARK: - Byte-copy primitives (driven by the operation engine)
+
+    /// Attempt a copy-on-write clone of a whole item (a file, or a directory *and* its
+    /// entire subtree) from `source` to `destination` in one shot — APFS's instant
+    /// same-volume copy (PLAN.md §2 "COPYFILE_CLONE fast path"). `destination` must not
+    /// already exist.
+    ///
+    /// Returns `true` when the clone happened. Returns `false` — not an error — when a
+    /// clone isn't possible *here* (a cross-volume copy, or a filesystem without
+    /// copy-on-write), so `CopyEngine` falls back to a chunked recursive copy. Still
+    /// throws for real failures (`.alreadyExists`, `.permissionDenied`, …). The default
+    /// reports "no clone support", so a backend need only implement it to opt in.
+    func cloneItem(at source: VFSPath, to destination: VFSPath) throws -> Bool
+
+    /// Copy one regular file's bytes from `source` to a not-yet-existing `destination`,
+    /// preserving metadata (permissions, timestamps, extended attributes, Finder tags).
+    /// `progress` is called with the number of bytes copied by each chunk, so the engine
+    /// can drive a determinate progress bar; `isCancelled` is polled between chunks and,
+    /// when it returns `true`, the copy throws `CancellationError` after removing the
+    /// partial destination. This is the chunked fallback used when cloning isn't available.
+    func copyFile(
+        at source: VFSPath,
+        to destination: VFSPath,
+        progress: (Int64) -> Void,
+        isCancelled: () -> Bool
+    ) throws
+
+    /// Recreate a symbolic link at `destination` pointing at the raw (unresolved) target
+    /// text `target`. Copying a symlink duplicates the link itself, never the file it
+    /// points at (matching `clonefile`/`cp -R` semantics).
+    func createSymbolicLink(at destination: VFSPath, withDestination target: String) throws
+
+    /// Copy just the metadata (permissions, timestamps, extended attributes) from
+    /// `source` onto an already-created `destination` — used to finish a directory that
+    /// the engine had to recreate by hand on the cross-volume fallback path. The default
+    /// is a no-op so a backend that doesn't track metadata compiles untouched.
+    func copyMetadata(at source: VFSPath, to destination: VFSPath) throws
 }
 
 public extension VFSBackend {
@@ -105,5 +143,26 @@ public extension VFSBackend {
     @discardableResult
     func trashItem(at path: VFSPath) throws -> VFSPath? {
         throw VFSError.unsupported("This location doesn’t have a Trash.")
+    }
+
+    func cloneItem(at source: VFSPath, to destination: VFSPath) throws -> Bool {
+        false // no copy-on-write here — the engine falls back to a chunked copy
+    }
+
+    func copyFile(
+        at source: VFSPath,
+        to destination: VFSPath,
+        progress: (Int64) -> Void,
+        isCancelled: () -> Bool
+    ) throws {
+        throw VFSError.unsupported("This location doesn’t support copying files.")
+    }
+
+    func createSymbolicLink(at destination: VFSPath, withDestination target: String) throws {
+        throw VFSError.unsupported("This location doesn’t support symbolic links.")
+    }
+
+    func copyMetadata(at source: VFSPath, to destination: VFSPath) throws {
+        // Backends without metadata to preserve need do nothing.
     }
 }

@@ -111,6 +111,103 @@ public struct LocalBackend: VFSBackend {
         return .local(resolved.path)
     }
 
+    // MARK: - Byte-copy primitives
+
+    public func cloneItem(at source: VFSPath, to destination: VFSPath) throws -> Bool {
+        let cSource = (source.path as NSString).fileSystemRepresentation
+        let cDest = (destination.path as NSString).fileSystemRepresentation
+        // clonefile(2) copies a whole hierarchy as a copy-on-write clone, preserving
+        // metadata — instant on APFS. It clones a symlink as a symlink rather than
+        // following it, so nested links survive faithfully.
+        guard clonefile(cSource, cDest, 0) != 0 else { return true }
+        switch errno {
+        case ENOTSUP, EXDEV:
+            // Different volume, or a filesystem without copy-on-write: not an error —
+            // the engine falls back to a chunked recursive copy.
+            return false
+        default:
+            throw VFSError.fromErrno(errno, path: destination)
+        }
+    }
+
+    public func copyFile(
+        at source: VFSPath,
+        to destination: VFSPath,
+        progress: (Int64) -> Void,
+        isCancelled: () -> Bool
+    ) throws {
+        let readFD = open((source.path as NSString).fileSystemRepresentation, O_RDONLY)
+        guard readFD >= 0 else { throw VFSError.fromErrno(errno, path: source) }
+        defer { close(readFD) }
+
+        let cDest = (destination.path as NSString).fileSystemRepresentation
+        // O_EXCL so a destination that reappeared under us is reported, never clobbered —
+        // the engine has already applied the conflict policy before calling in.
+        let writeFD = open(cDest, O_WRONLY | O_CREAT | O_EXCL, 0o644)
+        guard writeFD >= 0 else { throw VFSError.fromErrno(errno, path: destination) }
+
+        do {
+            try streamBytes(from: readFD, to: writeFD, progress: progress, isCancelled: isCancelled)
+        } catch {
+            close(writeFD)
+            unlink(cDest) // don't leave a half-written file behind on cancel/error
+            throw error
+        }
+        close(writeFD)
+
+        // Carry over permissions, timestamps, and extended attributes (Finder tags live
+        // there). Failing to copy metadata shouldn't fail the copy — the bytes are safe.
+        copyfile(
+            (source.path as NSString).fileSystemRepresentation,
+            cDest,
+            nil,
+            copyfile_flags_t(COPYFILE_METADATA)
+        )
+    }
+
+    public func createSymbolicLink(at destination: VFSPath, withDestination target: String) throws {
+        let cTarget = (target as NSString).fileSystemRepresentation
+        let cDest = (destination.path as NSString).fileSystemRepresentation
+        guard symlink(cTarget, cDest) == 0 else {
+            throw VFSError.fromErrno(errno, path: destination)
+        }
+    }
+
+    public func copyMetadata(at source: VFSPath, to destination: VFSPath) throws {
+        let cSource = (source.path as NSString).fileSystemRepresentation
+        let cDest = (destination.path as NSString).fileSystemRepresentation
+        copyfile(cSource, cDest, nil, copyfile_flags_t(COPYFILE_METADATA))
+    }
+
+    /// The chunked read→write loop behind `copyFile`. A 1 MiB buffer balances syscall
+    /// overhead against memory; cancellation is checked once per chunk so even a huge
+    /// file abandons promptly.
+    private func streamBytes(
+        from readFD: Int32,
+        to writeFD: Int32,
+        progress: (Int64) -> Void,
+        isCancelled: () -> Bool
+    ) throws {
+        let chunkSize = 1 << 20
+        var buffer = [UInt8](repeating: 0, count: chunkSize)
+        while true {
+            if isCancelled() { throw CancellationError() }
+            let bytesRead = buffer.withUnsafeMutableBytes { read(readFD, $0.baseAddress, chunkSize) }
+            if bytesRead == 0 { break } // EOF
+            guard bytesRead > 0 else { throw VFSError.io(path: .local("/"), code: errno) }
+
+            var offset = 0
+            while offset < bytesRead {
+                let written = buffer.withUnsafeBytes {
+                    write(writeFD, $0.baseAddress!.advanced(by: offset), bytesRead - offset)
+                }
+                guard written > 0 else { throw VFSError.io(path: .local("/"), code: errno) }
+                offset += written
+            }
+            progress(Int64(bytesRead))
+        }
+    }
+
     /// Translate a `FileManager` failure into a `VFSError`, recovering the POSIX errno
     /// when Cocoa tucked one under `NSUnderlyingErrorKey`, else falling back to the
     /// Cocoa file-error code so the UI still gets a specific message.

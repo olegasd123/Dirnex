@@ -157,6 +157,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fileMenu = NSMenu(title: "File")
         fileMenuItem.submenu = fileMenu
 
+        let copy = fileMenu.addItem(
+            withTitle: "Copy to Other Panel",
+            action: #selector(PanelViewController.copyToOtherPane(_:)),
+            keyEquivalent: Self.functionKey(NSF5FunctionKey)
+        )
+        copy.keyEquivalentModifierMask = .function
+        let move = fileMenu.addItem(
+            withTitle: "Move to Other Panel",
+            action: #selector(PanelViewController.moveToOtherPane(_:)),
+            keyEquivalent: Self.functionKey(NSF6FunctionKey)
+        )
+        move.keyEquivalentModifierMask = .function
+
+        fileMenu.addItem(.separator())
         let newFolder = fileMenu.addItem(
             withTitle: "New Folder",
             action: #selector(PanelViewController.newFolder(_:)),

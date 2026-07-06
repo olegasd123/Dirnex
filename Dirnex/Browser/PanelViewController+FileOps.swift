@@ -96,10 +96,10 @@ extension PanelViewController {
 
     // MARK: - Delete (F8 Trash / Shift+F8 permanent)
 
-    /// The entries a delete targets: the marked set when anything is marked (Total
-    /// Commander operates on marks over the cursor), otherwise the single cursor entry.
-    /// The synthetic `..` row is never a target.
-    func deletionTargets() -> [FileEntry] {
+    /// The entries an operation (delete, copy, move) targets: the marked set when
+    /// anything is marked (Total Commander operates on marks over the cursor), otherwise
+    /// the single cursor entry. The synthetic `..` row is never a target.
+    func selectionTargets() -> [FileEntry] {
         if panel.selectionCount > 0 {
             return panel.selectedEntries
         }
@@ -110,7 +110,7 @@ extension PanelViewController {
     }
 
     private func deleteSelection(permanent: Bool) {
-        let targets = deletionTargets()
+        let targets = selectionTargets()
         guard !targets.isEmpty else { return }
         if permanent {
             confirmPermanentDelete(of: targets) { [weak self] in
@@ -190,7 +190,8 @@ extension PanelViewController {
     /// Re-list the current directory after a mutation and, when `selecting` names a fresh
     /// entry (a just-created folder), land the cursor on it. `Panel.setListing` re-anchors
     /// the cursor/marks by identity, so this survives the new entry appearing mid-list.
-    private func refreshCurrentDirectory(selecting target: VFSPath? = nil) {
+    /// Internal so `PanelViewController+Copy` can refresh both panes after a transfer.
+    func refreshCurrentDirectory(selecting target: VFSPath? = nil) {
         loadToken += 1
         let token = loadToken
         let path = panel.path
@@ -208,7 +209,7 @@ extension PanelViewController {
         }
     }
 
-    private func presentOperationFailure(message: String, detail: String) {
+    func presentOperationFailure(message: String, detail: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = message
@@ -228,7 +229,9 @@ extension PanelViewController: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(moveSelectionToTrash(_:)), #selector(deleteSelectionPermanently(_:)):
-            return !deletionTargets().isEmpty
+            return !selectionTargets().isEmpty
+        case #selector(copyToOtherPane(_:)), #selector(moveToOtherPane(_:)):
+            return !selectionTargets().isEmpty && host?.panelCounterpart(of: self) != nil
         default:
             return true
         }

@@ -377,22 +377,24 @@ drops frames; unicode/symlink fixtures render correctly.
 
 Goal: TC's killer feature — queued, non-blocking, undoable file operations.
 
-- [ ] `Operation` model + `OperationQueue` actor: concurrent across volume pairs,
-      serial per volume pair (no disk thrashing); F2-style "add to queue" vs run now
-- [ ] Copy (F5): APFS clone fast path; chunked fallback with per-file + total progress,
-      throughput, ETA; preserves xattrs, permissions, dates, Finder tags
-- [ ] Move (F6): rename fast path same-volume; copy+delete across volumes
+- [ ] `Operation` model ✅ + `OperationQueue` actor: concurrent across volume pairs,
+      serial per volume pair (no disk thrashing); F2-style "add to queue" vs run now —
+      the `FileOperation` model landed; the queue/scheduler actor is still pending
+- [x] Copy (F5): APFS clone fast path; chunked fallback with per-file + total progress;
+      preserves xattrs, permissions, dates, Finder tags — throughput/ETA readout still to add
+- [x] Move (F6): rename fast path same-volume; copy+delete across volumes
 - [x] Delete (F8): to Trash; Shift+F8 permanent with explicit confirm
 - [ ] New folder (F7) ✅, inline rename (F2/Enter-on-name) — rename still pending
-- [ ] Progress UI: queue bar (as in mockup) + expandable list; pause/resume/cancel per job
-- [ ] Conflict engine: policies (ask/overwrite/skip/keep-both/newer-only), "apply to all";
-      dialog shows both files' size/date, text diff preview, image thumbnails side by side
+- [ ] Progress UI: cancellable progress sheet ✅; queue bar (as in mockup) + expandable
+      list + pause/resume/cancel per job still pending
+- [ ] Conflict engine: up-front ask/overwrite/skip/keep-both ✅; newer-only, "apply to
+      all", and the rich dialog (size/date, text diff, image thumbnails) still pending
 - [ ] Undo journal: Cmd+Z reverses move/rename/copy/new-folder; delete-to-Trash restore;
       journal survives relaunch; clear messaging for non-reversible ops
-- [ ] Errors: per-file skip/retry/abort, summarized at end, never a modal storm
+- [ ] Errors: failures collected + summarized ✅; per-file skip/retry/abort still pending
 - [ ] Drop onto panel = real copy/move through the queue
-- [ ] Core test suite on fixtures: cancellation mid-copy, permission errors, disk-full,
-      source-changed-during-copy
+- [ ] Core test suite on fixtures: cancellation mid-copy ✅, conflicts ✅, cross-volume ✅,
+      symlink ✅; permission errors, disk-full, source-changed-during-copy still pending
 
 Progress (2026-07-06, M2 pass 1): the write layer + the "instant" operations landed —
 New Folder and Delete, the ops that finish immediately and so don't need the (still to
@@ -430,6 +432,51 @@ come) progress queue. Copy/Move/queue/progress/conflict/undo are the next passes
   14 bytes") trashed leaving the unmarked cursor file; Delete Immediately showed the
   "can't be undone" confirm then permanently removed a file (absent from Trash) and,
   separately, a non-empty subtree (recursive), parking the cursor on `..` at 0 items.
+
+Progress (2026-07-06, M2 pass 2): the copy/move engine landed — F5 Copy and F6 Move,
+the byte-moving heart of M2. The headless engine is fully tested; the app is a thin
+progress shell over it.
+
+- **Core engine** (`DirnexCore/…/Operations/`, new group per §2's architecture).
+  `FileOperation` (kind = copy/move, a source set → a destination directory) +
+  `ConflictPolicy` (fail/skip/overwrite/keepBoth) + `OperationProgress`/`OperationReport`
+  value types. `CopyEngine.run(…)` is a synchronous entry point (like `DirectorySizer` —
+  the caller picks the thread) that transfers each source by the fastest path the backend
+  offers: an **APFS clone** of the whole subtree same-volume (`clonefile`, instant, metadata
+  preserved), falling back to a **chunked recursive copy** across volumes (1 MiB `read`/
+  `write` loop with per-chunk progress + cancellation, symlinks recreated not followed,
+  directory metadata carried over via `copyfile(COPYFILE_METADATA)`). Move takes the
+  same-volume `rename` fast path and falls back to copy-then-delete on `EXDEV`. Overwrite
+  writes to a temp sibling then swaps, so a half-finished copy never destroys the file it
+  replaces; keepBoth generates "name copy.ext". Progress is throttled (≥ 8 MiB or an item
+  boundary) so a 50 GB copy doesn't flood the caller. New `VFSBackend` primitives —
+  `cloneItem` (returns `false`, not throwing, when CoW isn't possible so the engine falls
+  back), `copyFile`, `createSymbolicLink`, `copyMetadata` — all defaulted (unsupported /
+  no-op) so other backends compile untouched; `LocalBackend` implements them on POSIX.
+  Tests: `CopyEngineTests` (14) + `LocalBackendCopyTests` (6) cover clone/tree/file copy,
+  same- and cross-volume move (via a `CrossVolumeBackend` that forces `EXDEV`), all four
+  conflict policies, cancel-mid-stream (partial file unlinked), progress reaching the full
+  total, and the no-clone chunked fallback + symlink duplication (via a `NoCloneBackend`).
+  Core suite now **99 tests**, all green; swiftformat/swiftlint-strict clean.
+- **App wiring** (`Dirnex/Browser/PanelViewController+Copy.swift` + `OperationProgressSheet.swift`,
+  new). F5/F6 target the marked set over the cursor (TC) and land in the *other* pane's
+  directory (new `PanelHost.panelCounterpart(of:)`). Colliding names are detected off-main
+  and resolved once, up front, via a four-way prompt (Overwrite / Keep Both / Skip / Cancel)
+  whose choice becomes the whole operation's `ConflictPolicy`. The engine runs on a detached
+  task; progress streams back over an `AsyncStream` to a cancellable sheet (Cancel trips
+  `Task.cancel()`, which the engine polls via `Task.isCancelled`). Both panes re-list after,
+  and marks clear (matching the delete flow). New File-menu items carry TC's F5/F6 with the
+  `.function` mask, dispatched through the responder chain like the other pane actions;
+  `deletionTargets()` was generalized to `selectionTargets()` and shared. App builds clean
+  (no warnings). **Verified live via computer-use** (pre-seeded both panes at a fixture via
+  the tab-persistence defaults, then drove the File menu): copying the `subdir` directory
+  cloned it recursively into the other pane (`subdir/nested.txt` on disk) with the source
+  untouched; moving `alpha.txt` removed it from the source and landed it in the destination,
+  the cursor advancing to the next row; re-copying `subdir` raised the conflict prompt, and
+  **Keep Both** produced a full recursive `subdir copy`. GOTCHA: this pass resolves conflicts
+  once up front (a single policy for the whole op) — the per-file interactive dialog with
+  side-by-side sizes/dates and thumbnails, plus the multi-operation queue actor and undo,
+  are the next M2 passes.
 
 Exit: 50 GB copy runs in background while browsing stays 60fps; yanking a USB drive
 mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixes it.

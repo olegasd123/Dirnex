@@ -8,6 +8,9 @@ import Quartz
 protocol PanelHost: AnyObject {
     func panelDidBecomeActive(_ panel: PanelViewController)
     func panelRequestsFocusSwitch(_ panel: PanelViewController)
+    /// The opposite pane — the default destination for a copy/move (F5/F6), whose
+    /// current directory receives the operation. `nil` if there is no counterpart.
+    func panelCounterpart(of panel: PanelViewController) -> PanelViewController?
 }
 
 /// One file pane: a path bar, an `NSTableView` of the current directory, and a status

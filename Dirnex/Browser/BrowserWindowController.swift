@@ -84,8 +84,15 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     }
 
     func panelRequestsFocusSwitch(_ panel: PanelViewController) {
-        let other = (panel === leftPanel) ? rightPanel : leftPanel
-        other.focusTable()
+        counterpart(of: panel).focusTable()
+    }
+
+    func panelCounterpart(of panel: PanelViewController) -> PanelViewController? {
+        counterpart(of: panel)
+    }
+
+    private func counterpart(of panel: PanelViewController) -> PanelViewController {
+        panel === leftPanel ? rightPanel : leftPanel
     }
 
     private func setActive(_ panel: PanelViewController) {
