@@ -377,17 +377,20 @@ drops frames; unicode/symlink fixtures render correctly.
 
 Goal: TC's killer feature — queued, non-blocking, undoable file operations.
 
-- [ ] `Operation` model ✅ + `OperationQueue` actor: concurrent across volume pairs,
-      serial per volume pair (no disk thrashing); F2-style "add to queue" vs run now —
-      the `FileOperation` model landed; the queue/scheduler actor is still pending
+- [x] `Operation` model ✅ + `OperationQueue` actor ✅: concurrent across volume pairs,
+      serial per volume pair (no disk thrashing); pause/resume, cancel, aggregate
+      progress + ETA — landed as `FileOperationQueue` (renamed only to dodge
+      `Foundation.OperationQueue`). App wiring (queue bar UI, routing F5/F6 through it,
+      "add to queue" vs run now) is the remaining piece
 - [x] Copy (F5): APFS clone fast path; chunked fallback with per-file + total progress;
       preserves xattrs, permissions, dates, Finder tags — throughput/ETA readout still to add
 - [x] Move (F6): rename fast path same-volume; copy+delete across volumes
 - [x] Delete (F8): to Trash; Shift+F8 permanent with explicit confirm
 - [x] New folder (F7) ✅, inline rename (F2) ✅ — Enter-on-name deferred (Enter opens
       the cursor entry in the TC key model, so F2 is the rename trigger)
-- [ ] Progress UI: cancellable progress sheet ✅; queue bar (as in mockup) + expandable
-      list + pause/resume/cancel per job still pending
+- [ ] Progress UI: cancellable progress sheet ✅; queue-level pause/resume/cancel + ETA
+      landed in core (`FileOperationQueue`) ✅; the queue bar (as in mockup) + expandable
+      per-job list is the remaining UI work
 - [ ] Conflict engine: up-front ask/overwrite/skip/keep-both ✅; newer-only, "apply to
       all", and the rich dialog (size/date, text diff, image thumbnails) still pending
 - [ ] Undo journal: Cmd+Z reverses move/rename/copy/new-folder; delete-to-Trash restore;
@@ -513,6 +516,51 @@ single cursor entry (never the marked set — that's M4's multi-rename tool — 
   the unchanged-name no-op both behaved. GOTCHA (unchanged from prior passes): the
   harness's synthetic Escape is swallowed by the OS before reaching the app, so the
   Esc-cancel path is correct by inspection but unverified-live.
+
+Progress (2026-07-06, M2 pass 4): the operation-queue actor landed — the scheduler
+that sits above the single-shot `CopyEngine` and turns it into TC's queued, non-blocking
+background engine. Core-only (`DirnexCore`); the app isn't wired to it yet (that's the
+queue-bar / drop-through-queue pass), so it's tested-but-dormant, matching how the engine
+landed before its app shell.
+
+- **Core scheduler** (`DirnexCore/…/Operations/FileOperationQueue.swift` +
+  `QueueSnapshot.swift`, new). A `public actor` — named `FileOperationQueue` only to dodge
+  `Foundation.OperationQueue` — that owns a FIFO of jobs (`FileOperation` + `ConflictPolicy`)
+  and runs each through `CopyEngine.run` on a detached task, so the actor itself only
+  bookkeeps and never blocks on I/O.
+  - **Volume-aware scheduling.** Each job's volume set = every source's volume ∪ the
+    destination's, resolved via a new `VFSBackend.volumeIdentifier(for:)` (defaulted `nil`
+    = "one volume, serialize"; `LocalBackend` returns the `st_dev` of the nearest existing
+    ancestor, following symlinks). `pump()` greedily launches the first waiting job whose
+    volumes are disjoint from every running job's — so same-disk jobs serialize (no head
+    thrashing) while independent disks run concurrently, FIFO within a volume. A
+    `maxConcurrent` cap (default 8) backstops many-volume machines.
+  - **Pause/resume that actually parks running transfers.** A per-job `JobControl`
+    (`NSCondition`-backed, `@unchecked Sendable`) is handed to the engine as its
+    `isCancelled` hook via `checkpoint()`: it reports cancellation *and*, while the queue is
+    paused, blocks the copy thread between chunks until resume or cancel. So pause halts new
+    dispatch *and* freezes in-flight copies — with zero changes to `CopyEngine`, which
+    already polls `isCancelled` between chunks/items.
+  - **Cancel** one job (waiting → dropped pre-start; running → engine unwinds through its
+    normal cancel, partial file cleaned up, reports `wasCancelled`) or `cancelAll()`.
+  - **Live progress.** `observe()` fans out an `AsyncStream<QueueSnapshot>` (current state
+    immediately, then on every change); `snapshot()` is the one-shot read; `waitUntilIdle()`
+    suspends until drained. `AggregateProgress` rolls up bytes across jobs and derives
+    throughput + ETA from the average rate since the batch started moving (clock injected
+    for testability); still-waiting jobs count 0 bytes, so the total is an estimate early
+    and exact once nothing's waiting.
+- **Tests** (`FileOperationQueueTests`, +7 → core suite **106**, all green;
+  swiftformat/swiftlint-strict clean; app still builds). Scheduling is made deterministic by
+  a `GatedBackend` whose clone blocks in a test-controlled rendezvous (not a sleep-race):
+  serial-per-volume (only one of two same-volume jobs runs, the second starts only once the
+  first is released), concurrent-across-volumes (two disjoint-volume jobs reach the gate at
+  once), pause-halts-dispatch (+ a running job flips to `.paused`, and a newly-enqueued
+  independent-volume job stays put until resume), cancel-waiting (never enters the gate, no
+  report), cancel-running (via a `BlockingCopyBackend` that spins on the cancel hook →
+  `wasCancelled`), single-job happy path, and the `observe()` stream. GOTCHA for the next
+  pass: the queue is headless and unused by the app — F5/F6 still run the standalone
+  `CopyEngine` behind the single-op sheet; routing them (and drag-drop) through this queue,
+  plus the queue-bar UI, is the wiring pass.
 
 Exit: 50 GB copy runs in background while browsing stays 60fps; yanking a USB drive
 mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixes it.

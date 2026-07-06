@@ -179,6 +179,23 @@ public struct LocalBackend: VFSBackend {
         copyfile(cSource, cDest, nil, copyfile_flags_t(COPYFILE_METADATA))
     }
 
+    public func volumeIdentifier(for path: VFSPath) -> String? {
+        // `st_dev` is the mounted-filesystem id: equal within a volume, distinct across
+        // mounts — exactly the grouping the operation queue needs. We follow symlinks
+        // (flags 0) so the id reflects where the bytes actually live, and walk up to the
+        // nearest existing ancestor so a destination that hasn't been created yet still
+        // resolves to the volume it will land on.
+        var probe: VFSPath? = path
+        while let candidate = probe {
+            var info = StatBuf()
+            if fstatat(AT_FDCWD, (candidate.path as NSString).fileSystemRepresentation, &info, 0) == 0 {
+                return String(info.st_dev)
+            }
+            probe = candidate.parent
+        }
+        return nil
+    }
+
     /// The chunked read→write loop behind `copyFile`. A 1 MiB buffer balances syscall
     /// overhead against memory; cancellation is checked once per chunk so even a huge
     /// file abandons promptly.

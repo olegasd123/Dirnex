@@ -125,6 +125,19 @@ public protocol VFSBackend: Sendable {
     /// the engine had to recreate by hand on the cross-volume fallback path. The default
     /// is a no-op so a backend that doesn't track metadata compiles untouched.
     func copyMetadata(at source: VFSPath, to destination: VFSPath) throws
+
+    /// A stable identifier for the physical volume `path` resides on, or `nil` when the
+    /// backend can't tell its volumes apart. The M2 operation queue schedules by this:
+    /// jobs that share a volume run serially (so two transfers don't thrash one disk
+    /// head), while jobs on independent volumes run concurrently (PLAN.md §2
+    /// "serial-per-volume scheduling").
+    ///
+    /// Two paths on the same volume must return equal, non-`nil` identifiers, and it must
+    /// be cheap — the queue may call it for every source of every job on the actor, so an
+    /// implementation should not touch the network or do heavy I/O. The default returns
+    /// `nil`, which the queue reads as "one indistinguishable volume", so a backend that
+    /// opts out simply has all its jobs serialized (the safe choice).
+    func volumeIdentifier(for path: VFSPath) -> String?
 }
 
 public extension VFSBackend {
@@ -164,5 +177,9 @@ public extension VFSBackend {
 
     func copyMetadata(at source: VFSPath, to destination: VFSPath) throws {
         // Backends without metadata to preserve need do nothing.
+    }
+
+    func volumeIdentifier(for path: VFSPath) -> String? {
+        nil // "one indistinguishable volume" — the queue serializes such a backend's jobs
     }
 }
