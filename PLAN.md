@@ -401,8 +401,8 @@ Goal: TC's killer feature — queued, non-blocking, undoable file operations.
 - [x] Drop onto panel = real copy/move through the queue ✅ (pane-to-pane, into a
       subfolder, or from Finder; Finder's copy-vs-move conventions; routed through the
       shared queue via the same `submitTransfer` as F5/F6)
-- [ ] Core test suite on fixtures: cancellation mid-copy ✅, conflicts ✅, cross-volume ✅,
-      symlink ✅; permission errors, disk-full, source-changed-during-copy still pending
+- [x] Core test suite on fixtures: cancellation mid-copy ✅, conflicts ✅, cross-volume ✅,
+      symlink ✅, permission errors ✅, disk-full ✅, source-changed-during-copy ✅
 
 Progress (2026-07-06, M2 pass 1): the write layer + the "instant" operations landed —
 New Folder and Delete, the ops that finish immediately and so don't need the (still to
@@ -675,6 +675,38 @@ other pane, from the same pane onto a subfolder, or from an external app (Finder
   synthetic manual drag, and the machine has only one browsable volume (would need a mounted
   disk image, as in pass 6). NEXT M2: rich per-file conflict dialog ("apply to all"), undo
   journal, expandable per-job queue-bar list.
+
+Progress (2026-07-06, M2 pass 8): copy/move engine test hardening — closed the three
+failure-mode gaps PLAN §5 mandates for every operation but the happy-path/conflict suites
+never reached: **permission denied**, **disk full** (`ENOSPC`), and **source mutated
+during the op**. Core-only (`DirnexCore`); no production code changed. New
+`CopyEngineFailureTests` (7 tests → core suite **118**, all green;
+swiftformat/swiftlint-strict clean). The safety theme: a failed item is *collected* and
+the op carries on, a failed copy never deletes the source it was moving or the destination
+it was overwriting, and a half-written file is never left behind.
+
+- **Test double.** One `FaultBackend` wrapper generalizes the `NoCloneBackend`/
+  `CrossVolumeBackend` pattern (block clone → force the chunked path; report `EXDEV`;
+  fail `copyFile` for chosen sources; run a side effect just before a copy to mutate the
+  source under the engine), so out-of-space and permission conditions are injected
+  deterministically rather than needing a real full/locked volume — the same call the
+  existing suites make for `EXDEV`.
+- **Coverage.** permission-denied on one source is collected while the others still copy
+  (+ a real `chmod 000` source, `getuid`-guarded, so the POSIX `EACCES → .permissionDenied`
+  mapping is covered end to end); a disk-full copy during a **cross-volume move keeps the
+  source**; a disk-full **overwrite keeps the existing destination and leaves no temp
+  sibling** (the atomic-swap guarantee); a **mid-file cancel unlinks the partial**
+  destination (the real `LocalBackend.copyFile` close+unlink path, which the prior
+  cancel-before-work test never reached); a **vanished source** is recorded as `.notFound`
+  and the op continues; a source **appended-to mid-copy is copied in full** (the engine
+  streams to EOF, not to the pre-scanned length).
+- GOTCHA surfaced (not fixed — production behavior left untouched): on the **clone** fast
+  path `LocalBackend.cloneItem` maps *every* `clonefile` errno to `path: destination`, so a
+  vanished/unreadable **source** surfaces as an error about the **destination** path
+  (`.notFound(dest/x)` not `.notFound(src/x)`). The `.alreadyExists` (EEXIST) attribution is
+  correctly destination-side and the app relies on it, so the test asserts the failure
+  *case*, not the incidental path. A minor diagnostic-message inaccuracy worth revisiting
+  when the rich conflict/error dialog lands.
 
 Exit: 50 GB copy runs in background while browsing stays 60fps; yanking a USB drive
 mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixes it.
