@@ -398,7 +398,9 @@ Goal: TC's killer feature — queued, non-blocking, undoable file operations.
 - [ ] Undo journal: Cmd+Z reverses move/rename/copy/new-folder; delete-to-Trash restore;
       journal survives relaunch; clear messaging for non-reversible ops
 - [ ] Errors: failures collected + summarized ✅; per-file skip/retry/abort still pending
-- [ ] Drop onto panel = real copy/move through the queue
+- [x] Drop onto panel = real copy/move through the queue ✅ (pane-to-pane, into a
+      subfolder, or from Finder; Finder's copy-vs-move conventions; routed through the
+      shared queue via the same `submitTransfer` as F5/F6)
 - [ ] Core test suite on fixtures: cancellation mid-copy ✅, conflicts ✅, cross-volume ✅,
       symlink ✅; permission errors, disk-full, source-changed-during-copy still pending
 
@@ -631,6 +633,48 @@ deleted). This is the pass that makes copies TC-style background work.
   across model round-trips — to observe it you need a real cross-volume (chunked) transfer,
   and to land an interactive pause/cancel click you must do it *inside one computer_batch*
   (server-side, no round-trip latency) or the sub-3 s transfer finishes first.
+
+Progress (2026-07-06, M2 pass 7): drop *in* landed — dragging files onto a pane is now a
+real copy/move through the shared queue, the receiving half of pass 11's drag-*out*
+(app-target only; `DirnexCore` untouched, still 111 tests). Files can arrive from the
+other pane, from the same pane onto a subfolder, or from an external app (Finder).
+
+- **App wiring.** `configureDragging` (`PanelViewController+Drag`) now also
+  `registerForDraggedTypes([.fileURL])` and widens the *local* drag-source mask from `[]`
+  to `[.copy, .move]` (external stays `.copy`-only, so a drag out can never move/delete the
+  original). New `PanelViewController+Drop.swift` implements the receiving
+  `NSTableViewDataSource` drop methods. A single `dropPlan(_:row:dropOperation:)` — computed
+  identically in `validateDrop` (for the cursor badge + row highlight) and `acceptDrop`
+  (for the real work) — resolves: the **destination** (a directory row released *on* → into
+  that folder, incl. the `..` row → move up a level; else the pane's current dir, with the
+  whole pane highlighted via `setDropRow(-1, .on)`); the **kind** (Finder conventions:
+  Option forces copy, Command forces move, else move within a volume / copy across volumes,
+  read from `NSDragOperation` + `NSEvent.modifierFlags` since a *local* drag's source mask
+  ignores modifiers; same-volume decided cheaply via `volumeIdentifier` on the first
+  source); and two **guards** — reject a no-op (every dropped item already lives in the
+  destination, e.g. a pane's own files onto its own background) and reject a folder dropped
+  onto itself or into its own subtree (would recurse). `acceptDrop` returns `true`
+  immediately, then off-main `stat`s the dropped URLs into `[FileEntry]` and hands them to
+  the **shared** `submitTransfer(kind:sources:destination:)` — factored out of
+  `PanelViewController+Copy`'s F5/F6 flow (which now calls it and only clears its own marks
+  when it returns `true`, preserving the exact cancel-at-prompt behavior). So conflict
+  handling, progress (queue bar), and the both-panes refresh are identical to F5/F6; a drop
+  also makes the target pane active (focus-follows-drop). App builds clean; whole repo
+  swiftformat/swiftlint-strict clean; app smoke test green.
+- **Verified live via computer-use** (no LanguageTool overlay this session — mouse worked;
+  seeded both panes at a `~/dropfix-verify/{left,right}` fixture via the tab-persistence
+  data-blob; manual drags = `left_mouse_down` → several `mouse_move`s → dwell →
+  `left_mouse_up`, all in one `computer_batch`): dragging `alpha.txt` left→right defaulted
+  to a **move** (gone from left, present in right, byte-exact); dragging the `subdir` folder
+  onto the right pane's `target` **folder row** highlighted that row green mid-drag and moved
+  `subdir/nested.txt` recursively *into* `right/target/`; dropping a colliding `beta.txt`
+  raised the shared **conflict prompt** (all five buttons incl. Overwrite If Newer), and
+  **Keep Both** produced `beta copy.txt` while preserving the destination's original
+  `beta.txt` — all confirmed on disk. GOTCHA: Option=copy and the cross-volume copy default
+  are correct by inspection but unverified-live — this harness can't hold a modifier across a
+  synthetic manual drag, and the machine has only one browsable volume (would need a mounted
+  disk image, as in pass 6). NEXT M2: rich per-file conflict dialog ("apply to all"), undo
+  journal, expandable per-job queue-bar list.
 
 Exit: 50 GB copy runs in background while browsing stays 60fps; yanking a USB drive
 mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixes it.

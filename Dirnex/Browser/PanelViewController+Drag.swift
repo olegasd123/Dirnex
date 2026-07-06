@@ -1,20 +1,23 @@
 import AppKit
 import DirnexCore
 
-/// Drag-out support (PLAN.md §M1 "Drag out to other apps"). A file pane is a drag
-/// *source* only in M1 — files can be dragged to Finder or any app that accepts file
-/// URLs, but dropping onto a pane (a real copy/move) lands in M2, so no drag types are
-/// registered for receiving here.
+/// Drag-out support (PLAN.md §M1 "Drag out to other apps") plus the source half of
+/// drag *in* (PLAN.md §M2 "Drop onto panel"). A file pane is both a drag source and,
+/// via `PanelViewController+Drop`, a drop target.
 ///
 /// These are additional `NSTableViewDataSource` methods; the conformance is declared in
 /// `PanelViewController+Table`.
 extension PanelViewController {
-    /// Advertise the pane as a copy-only drag source. Only `.copy` is offered so a drag
-    /// to Finder can never move or delete the original — real move/delete operations are
-    /// M2. Local drags (pane-to-pane, i.e. drop-in) advertise nothing for the same reason.
+    /// Configure the pane as a drag source and register it to receive file-URL drops.
+    ///
+    /// External drags (to Finder or other apps) offer only `.copy`, so a drag out can
+    /// never move or delete the original. Local drags (pane-to-pane, or onto a subfolder
+    /// of the same pane) offer both `.copy` and `.move` so `PanelViewController+Drop` can
+    /// honor Finder's copy-vs-move conventions.
     func configureDragging() {
         tableView.setDraggingSourceOperationMask(.copy, forLocal: false)
-        tableView.setDraggingSourceOperationMask([], forLocal: true)
+        tableView.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
+        tableView.registerForDraggedTypes([.fileURL])
     }
 
     /// The pasteboard item for a dragged row: the entry's file URL, or `nil` for the

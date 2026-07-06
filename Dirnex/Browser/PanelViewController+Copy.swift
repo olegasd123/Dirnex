@@ -47,12 +47,32 @@ extension PanelViewController {
         sources: [FileEntry],
         destination: VFSPath
     ) async {
+        let enqueued = await submitTransfer(kind: kind, sources: sources, destination: destination)
+        // Marks are consumed the moment the operation is queued, matching the delete flow;
+        // the source rows themselves stay until the job runs and the window controller
+        // re-lists both panes on completion. A cancel at the conflict prompt leaves them.
+        if enqueued {
+            panel.clearSelection()
+            reloadEverything()
+        }
+        focusTable()
+    }
+
+    /// Detect name collisions in `destination`, ask the user how to resolve them if there
+    /// are any, then hand the operation to the window's shared queue. Shared by F5/F6
+    /// (destination = the other pane) and drag-drop (`PanelViewController+Drop`, destination
+    /// = the drop target). Returns `false` when the user cancels at the conflict prompt, so
+    /// the caller can leave any source marks in place.
+    func submitTransfer(
+        kind: FileOperation.Kind,
+        sources: [FileEntry],
+        destination: VFSPath
+    ) async -> Bool {
         let conflicts = await detectConflicts(names: sources.map(\.name), in: destination)
         var policy: ConflictPolicy = .fail // irrelevant when there are no conflicts
         if !conflicts.isEmpty {
             guard let chosen = await promptConflictPolicy(count: conflicts.count, in: destination) else {
-                focusTable()
-                return // user cancelled at the conflict prompt
+                return false // user cancelled at the conflict prompt
             }
             policy = chosen
         }
@@ -62,12 +82,7 @@ extension PanelViewController {
             destinationDirectory: destination
         )
         host?.enqueue(operation, conflictPolicy: policy)
-        // Marks are consumed the moment the operation is queued, matching the delete flow;
-        // the source rows themselves stay until the job runs and the window controller
-        // re-lists both panes on completion.
-        panel.clearSelection()
-        reloadEverything()
-        focusTable()
+        return true
     }
 
     /// Which of the top-level source names already exist in the destination — computed
