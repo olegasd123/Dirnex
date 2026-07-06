@@ -243,8 +243,41 @@ public actor FileOperationQueue {
         for id in order { cancel(id) }
     }
 
-    // MARK: - Snapshots
+    // MARK: - Housekeeping
 
+    /// Drop every finished or cancelled job from the queue, leaving waiting, running, and
+    /// paused jobs untouched. The aggregate rolls up *all* known jobs, so without this a
+    /// later batch would inherit the bytes of jobs already done — its progress bar would
+    /// start part-full. The app calls this once the queue drains, matching a queue bar that
+    /// vanishes when idle and reappears fresh for the next batch.
+    public func clearFinished() {
+        var removedAny = false
+        for (id, job) in jobs where job.status == .finished || job.status == .cancelled {
+            jobs[id] = nil
+            removedAny = true
+        }
+        guard removedAny else { return }
+        order.removeAll { jobs[$0] == nil }
+        publish()
+    }
+
+    // MARK: - Internal job record
+
+    /// The actor's private, mutable view of a job. The `Sendable` outward shape is
+    /// `JobSnapshot`; this stays inside the actor.
+    private struct Job {
+        let operation: FileOperation
+        let policy: ConflictPolicy
+        let volumes: Set<String>
+        var status: JobStatus
+        var progress: OperationProgress?
+        var report: OperationReport?
+    }
+}
+
+// MARK: - Snapshots & observation
+
+extension FileOperationQueue {
     /// The current state of the whole queue — a one-shot read for a caller that doesn't
     /// want a stream.
     public func snapshot() -> QueueSnapshot { currentSnapshot() }
@@ -275,11 +308,11 @@ public actor FileOperationQueue {
         }
     }
 
-    private var isIdle: Bool {
+    var isIdle: Bool {
         !jobs.values.contains { $0.status == .waiting || $0.status == .running || $0.status == .paused }
     }
 
-    private func checkIdle() {
+    func checkIdle() {
         guard isIdle else { return }
         let waiters = idleWaiters
         idleWaiters.removeAll()
@@ -287,7 +320,7 @@ public actor FileOperationQueue {
         firstActivityAt = nil // next batch measures its own throughput
     }
 
-    private func publish() {
+    func publish() {
         let snapshot = currentSnapshot()
         for continuation in observers.values { continuation.yield(snapshot) }
     }
@@ -343,19 +376,6 @@ public actor FileOperationQueue {
             bytesPerSecond: bytesPerSecond,
             estimatedTimeRemaining: eta
         )
-    }
-
-    // MARK: - Internal job record
-
-    /// The actor's private, mutable view of a job. The `Sendable` outward shape is
-    /// `JobSnapshot`; this stays inside the actor.
-    private struct Job {
-        let operation: FileOperation
-        let policy: ConflictPolicy
-        let volumes: Set<String>
-        var status: JobStatus
-        var progress: OperationProgress?
-        var report: OperationReport?
     }
 }
 

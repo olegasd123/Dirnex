@@ -380,17 +380,19 @@ Goal: TC's killer feature — queued, non-blocking, undoable file operations.
 - [x] `Operation` model ✅ + `OperationQueue` actor ✅: concurrent across volume pairs,
       serial per volume pair (no disk thrashing); pause/resume, cancel, aggregate
       progress + ETA — landed as `FileOperationQueue` (renamed only to dodge
-      `Foundation.OperationQueue`). App wiring (queue bar UI, routing F5/F6 through it,
-      "add to queue" vs run now) is the remaining piece
+      `Foundation.OperationQueue`) and now **wired into the app** (F5/F6 route through it,
+      window-bottom queue bar). "Add to queue" vs "run now" as an explicit choice is a
+      later nicety — everything runs through the queue today
 - [x] Copy (F5): APFS clone fast path; chunked fallback with per-file + total progress;
-      preserves xattrs, permissions, dates, Finder tags — throughput/ETA readout still to add
+      preserves xattrs, permissions, dates, Finder tags; throughput/ETA readout ✅ (queue bar)
 - [x] Move (F6): rename fast path same-volume; copy+delete across volumes
 - [x] Delete (F8): to Trash; Shift+F8 permanent with explicit confirm
 - [x] New folder (F7) ✅, inline rename (F2) ✅ — Enter-on-name deferred (Enter opens
       the cursor entry in the TC key model, so F2 is the rename trigger)
-- [ ] Progress UI: cancellable progress sheet ✅; queue-level pause/resume/cancel + ETA
-      landed in core (`FileOperationQueue`) ✅; the queue bar (as in mockup) + expandable
-      per-job list is the remaining UI work
+- [~] Progress UI: the window-bottom **queue bar** landed ✅ — aggregate determinate
+      progress + live throughput + ETA, current-item label, pause/resume + cancel-all
+      buttons, non-blocking (replaced the modal progress sheet, now deleted); the
+      expandable per-job list is the remaining UI work
 - [ ] Conflict engine: up-front ask/overwrite/skip/keep-both ✅ + newer-only ✅; "apply to
       all" and the rich dialog (size/date, text diff, image thumbnails) still pending
 - [ ] Undo journal: Cmd+Z reverses move/rename/copy/new-folder; delete-to-Trash restore;
@@ -583,6 +585,52 @@ clean. Not yet verified live (headless + a menu-button wiring; the engine path i
 unit-covered). GOTCHA for the next pass: newer-only is exposed only through the up-front
 single-policy prompt — it'll want re-surfacing per-file once the rich "apply to all"
 dialog lands.
+
+Progress (2026-07-06, M2 pass 6): the app is now **wired to the operation queue** — the
+dormant `FileOperationQueue` from pass 4 is live, and F5/F6 run through it behind a
+non-blocking, window-bottom queue bar instead of the old modal progress sheet (which is
+deleted). This is the pass that makes copies TC-style background work.
+
+- **Core** (`FileOperationQueue`): one small addition, `clearFinished()` — drops terminal
+  (finished/cancelled) jobs, leaving waiting/running/paused ones. The aggregate rolls up
+  *all* known jobs, so without this a later batch would inherit the bytes of jobs already
+  done and its bar would start part-full; the app calls it once the queue drains. To stay
+  under SwiftLint's `type_body_length` (the addition pushed the actor body to 252 > 250 —
+  recurring gotcha), the snapshots/observation/aggregate methods moved to an
+  `extension FileOperationQueue` in the same file (still actor-isolated). Tests +2 →
+  **111 core** (clearFinished resets the aggregate; keeps a still-running job).
+- **App.** One shared `FileOperationQueue` lives on `BrowserWindowController`, keyed off
+  the same `LocalBackend` both panes use (so volume-aware scheduling works). New
+  `PanelHost.enqueue(_:conflictPolicy:)` is fire-and-forget; `PanelViewController+Copy`
+  keeps the up-front conflict prompt (Overwrite / Keep Both / Skip / Overwrite If Newer /
+  Cancel) then hands the operation to the queue and clears its own marks. The window
+  controller drains `queue.observe()` for the window's lifetime (task cancelled in `deinit`;
+  `[weak self]` + per-iteration re-bind avoids pinning the window alive) and, per snapshot:
+  shows/collapses the bar, re-lists **both** panes as each job reaches a terminal state
+  (dedup'd via a `finalizedJobs` set), surfaces failures, and `clearFinished()`s on drain.
+  New `QueueBarView` (own file) renders from a `QueueSnapshot` and knows nothing of the
+  actor: "Copying X" + determinate bar + "done of total · rate/s · ETA left", a pause/resume
+  toggle (SF Symbol flips play↔pause; drops rate/ETA while paused), and cancel-all. Layout:
+  a container VC stacks the split view over the bar; the bar collapses to zero height and
+  hides when idle. `OperationProgressSheet.swift` deleted. App builds clean, whole repo
+  `swiftformat --lint` + `swiftlint --strict` clean.
+- **Verified live via computer-use** (no LanguageTool overlay this session — mouse worked;
+  seeded both panes at a fixture via the tab-persistence data-blob, and mounted a 6 GB APFS
+  disk image as a *second volume* so cross-volume copies take the chunked byte-path and the
+  bar lingers): a same-volume clone of `big.bin` was instant (bar flashed, dest refreshed);
+  a 3.67 GB cross-volume copy of `huge.bin` showed the bar live — "Copying huge.bin",
+  determinate bar, "1.84 GB of 3.67 GB · 1.27 GB/s · 1s left" — with browsing fully
+  responsive, then dest auto-refreshed and the bar collapsed; the file was byte-exact on
+  disk. **Pause** froze the transfer at 1.74 GB (identical across a 2 s gap — genuinely
+  parked, not just relabelled), flipped the button to play, and dropped rate/ETA;
+  **resume** finished it, byte-exact (pause/resume didn't corrupt). The conflict prompt
+  also surfaced correctly on a re-copy, showing all five options incl. "Overwrite If Newer".
+  (Cancel-all button is core-unit-tested — cancel-waiting/cancel-running — and renders; not
+  clicked live. Move/F6 uses the identical enqueue path and was verified live in pass 2.)
+  GOTCHA (tooling): a same-volume APFS clone is O(1), so the bar flashes too fast to catch
+  across model round-trips — to observe it you need a real cross-volume (chunked) transfer,
+  and to land an interactive pause/cancel click you must do it *inside one computer_batch*
+  (server-side, no round-trip latency) or the sub-3 s transfer finishes first.
 
 Exit: 50 GB copy runs in background while browsing stays 60fps; yanking a USB drive
 mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixes it.

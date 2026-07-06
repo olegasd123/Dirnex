@@ -6,14 +6,30 @@ import DirnexCore
 /// active-pane bookkeeping the panes themselves stay ignorant of.
 @MainActor
 final class BrowserWindowController: NSWindowController, PanelHost {
-    private let leftPanel: PanelViewController
-    private let rightPanel: PanelViewController
+    let leftPanel: PanelViewController
+    let rightPanel: PanelViewController
     private let sidebar = SidebarViewController()
     private let splitViewController = NSSplitViewController()
     private weak var activePanel: PanelViewController?
 
+    /// The shared background operation engine both panes route F5/F6 through, so copies and
+    /// moves queue and run without blocking browsing (PLAN.md §M2). Volume-aware scheduling
+    /// keys off the same `backend` the panes use.
+    let queue: FileOperationQueue
+    /// The window-bottom progress readout, collapsed to zero height while the queue is idle.
+    let queueBar = QueueBarView()
+    private var queueBarHeight: NSLayoutConstraint!
+    /// The long-lived task draining `queue.observe()` into the queue bar and pane refreshes.
+    var queueObservation: Task<Void, Never>?
+    /// Jobs already reacted to (panes re-listed, failures reported), so a repeat snapshot of
+    /// the same finished job doesn't refresh twice. Cleared when the queue drains.
+    var finalizedJobs: Set<OperationJobID> = []
+    /// The last observed pause state, so the queue bar's button knows which way to toggle.
+    var lastPaused = false
+
     init() {
         let backend = LocalBackend()
+        queue = FileOperationQueue(backend: backend)
         let home = VFSPath.local(NSHomeDirectory())
         // Each pane restores its own tabs from the last session, keyed by side.
         leftPanel = PanelViewController(
@@ -62,13 +78,58 @@ final class BrowserWindowController: NSWindowController, PanelHost {
             panel.host = self
         }
 
-        window.contentViewController = splitViewController
+        window.contentViewController = makeContainerViewController()
         window.center()
+
+        queueBar.onPauseToggle = { [weak self] in self?.togglePause() }
+        queueBar.onCancelAll = { [weak self] in self?.cancelAllJobs() }
+        startObservingQueue()
+    }
+
+    deinit {
+        queueObservation?.cancel()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    /// Stack the two panes over the queue bar so the bar spans the full window width at the
+    /// bottom. `setQueueBar(visible:)` collapses it to zero height (and hides it) while the
+    /// queue is idle, giving the panes the whole window.
+    private func makeContainerViewController() -> NSViewController {
+        let container = NSViewController()
+        container.view = NSView()
+        container.addChild(splitViewController)
+
+        let splitView = splitViewController.view
+        splitView.translatesAutoresizingMaskIntoConstraints = false
+        queueBar.translatesAutoresizingMaskIntoConstraints = false
+        queueBar.isHidden = true
+        container.view.addSubview(splitView)
+        container.view.addSubview(queueBar)
+
+        queueBarHeight = queueBar.heightAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            splitView.topAnchor.constraint(equalTo: container.view.topAnchor),
+            splitView.leadingAnchor.constraint(equalTo: container.view.leadingAnchor),
+            splitView.trailingAnchor.constraint(equalTo: container.view.trailingAnchor),
+            splitView.bottomAnchor.constraint(equalTo: queueBar.topAnchor),
+            queueBar.leadingAnchor.constraint(equalTo: container.view.leadingAnchor),
+            queueBar.trailingAnchor.constraint(equalTo: container.view.trailingAnchor),
+            queueBar.bottomAnchor.constraint(equalTo: container.view.bottomAnchor),
+            queueBarHeight
+        ])
+        return container
+    }
+
+    /// Show or collapse the queue bar. Driven by the queue observation: shown while any job
+    /// is waiting/running/paused, collapsed to zero height (and hidden) once idle.
+    func setQueueBar(visible: Bool) {
+        guard queueBar.isHidden == visible else { return }
+        queueBar.isHidden = !visible
+        queueBarHeight.constant = visible ? QueueBarView.preferredHeight : 0
     }
 
     override func showWindow(_ sender: Any?) {

@@ -39,6 +39,56 @@ struct FileOperationQueueTests {
         #expect(snapshot.aggregate.fraction == 1)
     }
 
+    @Test("clearFinished drops terminal jobs so a later batch's aggregate starts fresh")
+    func clearFinishedResetsAggregate() async throws {
+        let tree = try TempTree()
+        defer { tree.cleanup() }
+        try tree.writeFile("a.txt", contents: "hello")
+        try tree.makeDir("dest")
+
+        let queue = FileOperationQueue(backend: LocalBackend())
+        await queue.enqueue(copy(tree, "a.txt", to: "dest"))
+        await queue.waitUntilIdle()
+
+        // The finished job is still in the snapshot (and its bytes in the aggregate)…
+        var snapshot = await queue.snapshot()
+        #expect(snapshot.jobs.count == 1)
+        #expect(snapshot.aggregate.totalBytes > 0)
+
+        await queue.clearFinished()
+
+        // …until cleared: the queue is now empty, so a new batch measures itself.
+        snapshot = await queue.snapshot()
+        #expect(snapshot.jobs.isEmpty)
+        #expect(snapshot.aggregate.totalBytes == 0)
+        #expect(snapshot.aggregate.totalJobs == 0)
+    }
+
+    @Test("clearFinished keeps a still-running job")
+    func clearFinishedKeepsRunning() async throws {
+        let tree = try TempTree()
+        defer { tree.cleanup() }
+        try tree.writeFile("a.txt", contents: "a")
+        try tree.makeDir("dest")
+
+        let gate = Gate()
+        let backend = GatedBackend(gate: gate, volumeFor: { _ in "V" })
+        let queue = FileOperationQueue(backend: backend)
+
+        let running = await queue.enqueue(copy(tree, "a.txt", to: "dest"))
+        #expect(gate.waitForStarted(1) == 1)
+
+        await queue.clearFinished() // nothing terminal yet → the running job survives
+        var snapshot = await queue.snapshot()
+        #expect(snapshot.jobs.first { $0.id == running }?.status == .running)
+
+        gate.releaseAll()
+        await queue.waitUntilIdle()
+        await queue.clearFinished()
+        snapshot = await queue.snapshot()
+        #expect(snapshot.jobs.isEmpty)
+    }
+
     // MARK: - Scheduling
 
     @Test("jobs sharing a volume run one at a time, in order")

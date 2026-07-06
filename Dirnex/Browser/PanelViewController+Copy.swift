@@ -1,15 +1,16 @@
 import AppKit
 import DirnexCore
 
-/// Copy (F5) and Move (F6) — the byte-moving operations, run through `DirnexCore`'s
-/// `CopyEngine` on a background task so a large transfer never blocks the UI (PLAN.md
-/// §M2). Total Commander semantics: the operation targets the marked set over the
+/// Copy (F5) and Move (F6) — the byte-moving operations, run through the window's shared
+/// `FileOperationQueue` so large transfers run in the background while browsing continues
+/// (PLAN.md §M2). Total Commander semantics: the operation targets the marked set over the
 /// cursor and lands in the *other* pane's current directory.
 ///
-/// This file owns only the AppKit shell — resolving the source set and destination,
-/// the up-front conflict prompt, the progress sheet, and the post-op refresh of both
-/// panes. All the byte work (clone fast path, chunked fallback, cancellation) lives in
-/// the tested engine.
+/// This file owns only the AppKit shell — resolving the source set and destination and the
+/// up-front conflict prompt, then handing the operation to the queue. Progress (the
+/// window's queue bar) and the post-op re-list of both panes are the window controller's
+/// job; all the byte work (clone fast path, chunked fallback, cancellation) lives in the
+/// tested engine the queue drives.
 extension PanelViewController {
     // MARK: - Menu actions (dispatched to the focused pane via the responder chain)
 
@@ -37,20 +38,14 @@ extension PanelViewController {
             return
         }
         Task {
-            await runTransfer(
-                kind: kind,
-                sources: sources,
-                destination: destination,
-                destPane: destPane
-            )
+            await runTransfer(kind: kind, sources: sources, destination: destination)
         }
     }
 
     private func runTransfer(
         kind: FileOperation.Kind,
         sources: [FileEntry],
-        destination: VFSPath,
-        destPane: PanelViewController
+        destination: VFSPath
     ) async {
         let conflicts = await detectConflicts(names: sources.map(\.name), in: destination)
         var policy: ConflictPolicy = .fail // irrelevant when there are no conflicts
@@ -61,10 +56,18 @@ extension PanelViewController {
             }
             policy = chosen
         }
-        await performTransfer(
-            kind: kind, sources: sources, destination: destination, policy: policy,
-            destPane: destPane
+        let operation = FileOperation(
+            kind: kind,
+            sources: sources,
+            destinationDirectory: destination
         )
+        host?.enqueue(operation, conflictPolicy: policy)
+        // Marks are consumed the moment the operation is queued, matching the delete flow;
+        // the source rows themselves stay until the job runs and the window controller
+        // re-lists both panes on completion.
+        panel.clearSelection()
+        reloadEverything()
+        focusTable()
     }
 
     /// Which of the top-level source names already exist in the destination — computed
@@ -120,67 +123,5 @@ extension PanelViewController {
         case fourthButtonReturn: .newerOnly
         default: nil // Cancel (fifth button) or dismissal
         }
-    }
-
-    // MARK: - Run
-
-    private func performTransfer(
-        kind: FileOperation.Kind,
-        sources: [FileEntry],
-        destination: VFSPath,
-        policy: ConflictPolicy,
-        destPane: PanelViewController
-    ) async {
-        let operation = FileOperation(
-            kind: kind,
-            sources: sources,
-            destinationDirectory: destination
-        )
-        let backend = backend
-        let (stream, continuation) = AsyncStream<OperationProgress>.makeStream()
-
-        // The engine is synchronous; run it on a detached task and stream progress back.
-        // `Task.isCancelled` is what the Cancel button trips via `task.cancel()`.
-        let task = Task.detached(priority: .userInitiated) { () -> OperationReport in
-            let report = CopyEngine.run(
-                operation,
-                using: backend,
-                conflictPolicy: policy,
-                onProgress: { continuation.yield($0) },
-                isCancelled: { Task.isCancelled }
-            )
-            continuation.finish()
-            return report
-        }
-
-        let sheet = OperationProgressSheet(kind: kind)
-        sheet.present(in: view.window) { task.cancel() }
-        for await progress in stream {
-            sheet.update(progress)
-        }
-        sheet.dismiss()
-        finishTransfer(report: await task.value, kind: kind, destPane: destPane)
-    }
-
-    private func finishTransfer(
-        report: OperationReport,
-        kind: FileOperation.Kind,
-        destPane: PanelViewController
-    ) {
-        // Marks are consumed by the operation, matching the delete flow; both panes
-        // re-list so the source (for a move) and destination reflect the change at once.
-        // The FSEvents watchers would catch up on their own, but an explicit refresh is
-        // immediate and deterministic.
-        panel.clearSelection()
-        refreshCurrentDirectory()
-        destPane.refreshCurrentDirectory()
-        focusTable()
-
-        guard !report.failures.isEmpty else { return }
-        let verb = kind == .copy ? "copy" : "move"
-        let message = report.failures.count == 1
-            ? "Couldn’t \(verb) “\(report.failures[0].path.lastComponent)”"
-            : "Couldn’t \(verb) \(report.failures.count) items"
-        presentOperationFailure(message: message, detail: describe(report.failures[0].error))
     }
 }

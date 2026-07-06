@@ -11,6 +11,10 @@ protocol PanelHost: AnyObject {
     /// The opposite pane — the default destination for a copy/move (F5/F6), whose
     /// current directory receives the operation. `nil` if there is no counterpart.
     func panelCounterpart(of panel: PanelViewController) -> PanelViewController?
+    /// Enqueue a byte-moving operation (copy/move) on the window's shared background
+    /// queue (PLAN.md §M2 `FileOperationQueue`). Fire-and-forget from the pane's view:
+    /// the window's queue bar shows progress and both panes re-list as jobs finish.
+    func enqueue(_ operation: FileOperation, conflictPolicy: ConflictPolicy)
 }
 
 /// One file pane: a path bar, an `NSTableView` of the current directory, and a status
