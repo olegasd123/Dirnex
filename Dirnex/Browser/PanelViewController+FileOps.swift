@@ -232,6 +232,10 @@ extension PanelViewController: NSMenuItemValidation {
             return !selectionTargets().isEmpty
         case #selector(copyToOtherPane(_:)), #selector(moveToOtherPane(_:)):
             return !selectionTargets().isEmpty && host?.panelCounterpart(of: self) != nil
+        case #selector(renameSelection(_:)):
+            // Rename is single-item on the cursor (not the marked set) and never `..`.
+            return !cursorOnParentRow && panel.currentEntry != nil
+                && backend.capabilities.contains(.rename)
         default:
             return true
         }

@@ -69,4 +69,35 @@ final class FileCellView: NSTableCellView {
             textField.textColor = .labelColor
         }
     }
+
+    // MARK: - Inline rename
+
+    /// Turn the name label into an editable field for an in-place rename (F2). Runs after
+    /// `applyStyle`, so it overrides the mark's bold-red styling with a plain editable box
+    /// sized to the same text area beside the icon. `delegate` receives the edit lifecycle.
+    func beginNameEditing(delegate: NSTextFieldDelegate) {
+        guard let textField else { return }
+        textField.isEditable = true
+        textField.isSelectable = true
+        textField.isBordered = true
+        textField.bezelStyle = .squareBezel
+        textField.drawsBackground = true
+        textField.backgroundColor = .textBackgroundColor
+        textField.textColor = .labelColor
+        textField.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textField.focusRingType = .default
+        textField.delegate = delegate
+    }
+
+    /// Revert a (possibly reused) cell back to a plain, non-editable label. Idempotent —
+    /// only touches a field that had been made editable — so the normal render path can
+    /// call it unconditionally.
+    func endNameEditing() {
+        guard let textField, textField.isEditable else { return }
+        textField.isEditable = false
+        textField.isSelectable = false
+        textField.isBordered = false
+        textField.drawsBackground = false
+        textField.delegate = nil
+    }
 }

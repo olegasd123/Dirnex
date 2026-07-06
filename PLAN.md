@@ -384,7 +384,8 @@ Goal: TC's killer feature — queued, non-blocking, undoable file operations.
       preserves xattrs, permissions, dates, Finder tags — throughput/ETA readout still to add
 - [x] Move (F6): rename fast path same-volume; copy+delete across volumes
 - [x] Delete (F8): to Trash; Shift+F8 permanent with explicit confirm
-- [ ] New folder (F7) ✅, inline rename (F2/Enter-on-name) — rename still pending
+- [x] New folder (F7) ✅, inline rename (F2) ✅ — Enter-on-name deferred (Enter opens
+      the cursor entry in the TC key model, so F2 is the rename trigger)
 - [ ] Progress UI: cancellable progress sheet ✅; queue bar (as in mockup) + expandable
       list + pause/resume/cancel per job still pending
 - [ ] Conflict engine: up-front ask/overwrite/skip/keep-both ✅; newer-only, "apply to
@@ -477,6 +478,41 @@ progress shell over it.
   once up front (a single policy for the whole op) — the per-file interactive dialog with
   side-by-side sizes/dates and thumbnails, plus the multi-operation queue actor and undo,
   are the next M2 passes.
+
+Progress (2026-07-06, M2 pass 3): inline rename (F2) landed — the last "instant"
+operation, editing the name in place rather than moving bytes (app-target only;
+`DirnexCore` untouched, still 99 tests). Total Commander semantics: rename acts on the
+single cursor entry (never the marked set — that's M4's multi-rename tool — never `..`).
+
+- **App wiring** (`Dirnex/Browser/PanelViewController+Rename.swift`, new). The name cell
+  becomes a real editable `NSTextField` in place: `FileCellView.beginNameEditing`/
+  `endNameEditing` flip the label between edit and label appearance, and the table's
+  `viewFor` (in `+Table`) builds the cell editable when its entry matches the new
+  `renamingEntryID`. `beginRename` reloads that one row, makes the field first responder,
+  and preselects the **base name** Finder-style so typing keeps the extension. KEY GOTCHA:
+  the base-name selection must be set right after `makeFirstResponder`, NOT in
+  `controlTextDidBeginEditing` — that notification fires on the first *edit*, not on focus,
+  so a selection set there lands a keystroke too late (verified live: it consumed the
+  `.txt`). CORRECTNESS: same-dir rename goes through `moveItem` → `rename(2)`, which
+  silently *overwrites* an existing file (unlike New Folder, which `mkdir` guards with
+  EEXIST), so the flow pre-checks the destination off-main and throws `.alreadyExists`
+  rather than clobber — while allowing a case-only change ("foo" → "Foo", same inode on
+  case-insensitive APFS). Commit lands the cursor on the renamed entry by its new
+  identity via `refreshCurrentDirectory(selecting:)`; an empty/unchanged name is a silent
+  no-op; Esc aborts (`control(_:doCommandBy:)` → `cancelOperation:` → `renameWasCancelled`
+  → revert). File-menu **Rename…** carries F2 with the `.function` mask, responder-chain
+  dispatched like F5–F8, and `validateMenuItem` disables it on `..`/empty/no-rename
+  backends. App builds clean, swiftformat/swiftlint-strict clean, app smoke test green.
+- **Verified live via computer-use** (no LanguageTool overlay this session, so mouse +
+  keyboard both worked; seeded the left pane at a fixture via the tab-persistence
+  data-blob): the File ▸ Rename… item and the F2 key both opened the inline editor;
+  `alpha.txt` + typing `renamed` produced `renamed.txt` on disk (extension preserved,
+  content intact); the cursor landed on the renamed row; renaming onto an existing
+  `taken.txt` was **refused** with "already exists here" and the target file was NOT
+  clobbered (content + source both intact — the `rename(2)` guard); commit-on-Return and
+  the unchanged-name no-op both behaved. GOTCHA (unchanged from prior passes): the
+  harness's synthetic Escape is swallowed by the OS before reaching the app, so the
+  Esc-cancel path is correct by inspection but unverified-live.
 
 Exit: 50 GB copy runs in background while browsing stays 60fps; yanking a USB drive
 mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixes it.

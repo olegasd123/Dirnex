@@ -171,6 +171,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         move.keyEquivalentModifierMask = .function
 
         fileMenu.addItem(.separator())
+        let rename = fileMenu.addItem(
+            withTitle: "Rename…",
+            action: #selector(PanelViewController.renameSelection(_:)),
+            keyEquivalent: Self.functionKey(NSF2FunctionKey)
+        )
+        rename.keyEquivalentModifierMask = .function
+
+        fileMenu.addItem(.separator())
         let newFolder = fileMenu.addItem(
             withTitle: "New Folder",
             action: #selector(PanelViewController.newFolder(_:)),

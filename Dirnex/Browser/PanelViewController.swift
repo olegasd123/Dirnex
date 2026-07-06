@@ -60,6 +60,14 @@ final class PanelViewController: NSViewController {
     /// and order itself posts resize/move notifications, which must not be recorded back
     /// as if the user had dragged them. Internal for `PanelViewController+Columns`.
     var isApplyingColumnLayout = false
+    /// Identity of the entry currently being renamed inline (`nil` = not renaming). The
+    /// name cell for this entry is built as an editable text field; everything else in
+    /// `PanelViewController+Rename` drives the edit lifecycle. Internal so the table
+    /// delegate in its own file can read it while building cells.
+    var renamingEntryID: VFSPath?
+    /// Set when the inline rename ends via Esc, so the shared end-editing handler reverts
+    /// the field instead of committing the typed name. Internal for `+Rename`.
+    var renameWasCancelled = false
     /// Bumped on every navigation so a slow listing that resolves after the user has
     /// already moved on is discarded instead of clobbering the current directory.
     /// Internal so `PanelViewController+Tabs` can discard a stale load on tab switch.

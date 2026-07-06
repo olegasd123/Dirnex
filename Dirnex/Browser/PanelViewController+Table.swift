@@ -38,6 +38,16 @@ extension PanelViewController: NSTableViewDelegate {
             cell.textField?.alignment = .natural
         }
         cell.applyStyle()
+        // Inline rename (F2): the name cell for the entry being renamed becomes an
+        // editable field; any reused name cell reverts to a label. Done after
+        // `applyStyle` so the editable box wins over the mark's styling.
+        if column == .name {
+            if renamingEntryID == entry.path {
+                cell.beginNameEditing(delegate: self)
+            } else {
+                cell.endNameEditing()
+            }
+        }
         return cell
     }
 
