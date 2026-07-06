@@ -67,6 +67,71 @@ public struct LocalBackend: VFSBackend {
         )
     }
 
+    // MARK: - Write operations
+
+    public func createDirectory(at path: VFSPath) throws {
+        let cPath = (path.path as NSString).fileSystemRepresentation
+        guard mkdir(cPath, 0o755) == 0 else {
+            throw VFSError.fromErrno(errno, path: path)
+        }
+    }
+
+    public func moveItem(at source: VFSPath, to destination: VFSPath) throws {
+        // Two distinct NSStrings, so both C buffers stay valid for the rename(2) call.
+        let cSource = (source.path as NSString).fileSystemRepresentation
+        let cDest = (destination.path as NSString).fileSystemRepresentation
+        guard rename(cSource, cDest) == 0 else {
+            // rename(2) reports a same-name-onto-nonempty-dir as ENOTEMPTY and a
+            // cross-device move as EXDEV; both are mapped for the caller.
+            throw VFSError.fromErrno(errno, path: source)
+        }
+    }
+
+    public func removeItem(at path: VFSPath) throws {
+        // `FileManager.removeItem` deletes a subtree recursively and removes a symlink
+        // itself rather than following it — both what a permanent delete wants. Its
+        // Cocoa error is normalized back to a `VFSError` for the caller.
+        do {
+            try FileManager.default.removeItem(atPath: path.path)
+        } catch {
+            throw Self.mapCocoaError(error, path: path)
+        }
+    }
+
+    @discardableResult
+    public func trashItem(at path: VFSPath) throws -> VFSPath? {
+        var resultingURL: NSURL?
+        let url = URL(fileURLWithPath: path.path)
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+        } catch {
+            throw Self.mapCocoaError(error, path: path)
+        }
+        guard let resolved = resultingURL as URL? else { return nil }
+        return .local(resolved.path)
+    }
+
+    /// Translate a `FileManager` failure into a `VFSError`, recovering the POSIX errno
+    /// when Cocoa tucked one under `NSUnderlyingErrorKey`, else falling back to the
+    /// Cocoa file-error code so the UI still gets a specific message.
+    private static func mapCocoaError(_ error: Error, path: VFSPath) -> VFSError {
+        let nsError = error as NSError
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError,
+           underlying.domain == NSPOSIXErrorDomain {
+            return VFSError.fromErrno(Int32(underlying.code), path: path)
+        }
+        switch nsError.code {
+        case NSFileNoSuchFileError, NSFileReadNoSuchFileError:
+            return .notFound(path)
+        case NSFileWriteNoPermissionError, NSFileReadNoPermissionError:
+            return .permissionDenied(path)
+        case NSFileWriteFileExistsError:
+            return .alreadyExists(path)
+        default:
+            return .io(path: path, code: Int32(nsError.code))
+        }
+    }
+
     // MARK: - Entry assembly
 
     private func makeEntry(

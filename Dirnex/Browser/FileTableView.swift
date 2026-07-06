@@ -32,6 +32,12 @@ protocol FileTableViewInput: AnyObject {
     func fileTableToggleQuickLook(_ tableView: FileTableView)
     /// Cmd+L — edit the location as text in the path bar.
     func fileTableEditPath(_ tableView: FileTableView)
+    /// Cmd+Shift+N (also File ▸ New Folder / F7) — create a folder here.
+    func fileTableNewFolder(_ tableView: FileTableView)
+    /// Cmd+Delete (also File ▸ Move to Trash / F8) — move the selection to the Trash.
+    func fileTableDeleteToTrash(_ tableView: FileTableView)
+    /// Cmd+Shift+Delete (also Delete Immediately / Shift+F8) — delete permanently.
+    func fileTableDeletePermanently(_ tableView: FileTableView)
     /// The table became first responder — its pane should become the active one.
     func fileTableDidBecomeFirstResponder(_ tableView: FileTableView)
 }
@@ -65,11 +71,26 @@ final class FileTableView: NSTableView {
 
         if flags == .command {
             if handleCommandArrow(event.keyCode) { return }
+            if event.keyCode == 51 { // Cmd+Delete — move to Trash (Finder's shortcut)
+                inputDelegate?.fileTableDeleteToTrash(self)
+                return
+            }
             switch event.charactersIgnoringModifiers {
             case "a": inputDelegate?.fileTableMarkAll(self); return
             case "y": inputDelegate?.fileTableToggleQuickLook(self); return
             case "l": inputDelegate?.fileTableEditPath(self); return
             default: break
+            }
+        }
+
+        if flags == [.command, .shift] {
+            if event.keyCode == 51 { // Cmd+Shift+Delete — delete permanently
+                inputDelegate?.fileTableDeletePermanently(self)
+                return
+            }
+            if event.charactersIgnoringModifiers?.lowercased() == "n" { // Cmd+Shift+N — new folder
+                inputDelegate?.fileTableNewFolder(self)
+                return
             }
         }
 

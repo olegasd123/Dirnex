@@ -145,13 +145,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleSidebar.keyEquivalentModifierMask = [.command, .control]
     }
 
-    /// The File menu — just tab commands for now. Nil targets dispatch through the
-    /// responder chain to whichever pane is focused (see `PanelViewController+Tabs`).
+    /// The File menu — folder creation, deletion, and tab commands. Nil targets dispatch
+    /// through the responder chain to whichever pane is focused (see
+    /// `PanelViewController+FileOps` / `+Tabs`). The operations carry Total Commander's
+    /// F-keys for muscle memory; the same actions also answer to Finder's Cmd combos in
+    /// `FileTableView` (Cmd+Shift+N, Cmd+Delete, Cmd+Shift+Delete). Rebindable presets
+    /// arrive with the M3 action registry.
     private func buildFileMenu(into mainMenu: NSMenu) {
         let fileMenuItem = NSMenuItem()
         mainMenu.addItem(fileMenuItem)
         let fileMenu = NSMenu(title: "File")
         fileMenuItem.submenu = fileMenu
+
+        let newFolder = fileMenu.addItem(
+            withTitle: "New Folder",
+            action: #selector(PanelViewController.newFolder(_:)),
+            keyEquivalent: Self.functionKey(NSF7FunctionKey)
+        )
+        newFolder.keyEquivalentModifierMask = .function
+
+        fileMenu.addItem(.separator())
+        let moveToTrash = fileMenu.addItem(
+            withTitle: "Move to Trash",
+            action: #selector(PanelViewController.moveSelectionToTrash(_:)),
+            keyEquivalent: Self.functionKey(NSF8FunctionKey)
+        )
+        moveToTrash.keyEquivalentModifierMask = .function
+        let deletePermanently = fileMenu.addItem(
+            withTitle: "Delete Immediately…",
+            action: #selector(PanelViewController.deleteSelectionPermanently(_:)),
+            keyEquivalent: Self.functionKey(NSF8FunctionKey)
+        )
+        deletePermanently.keyEquivalentModifierMask = [.function, .shift]
+
+        fileMenu.addItem(.separator())
         fileMenu.addItem(
             withTitle: "New Tab",
             action: #selector(PanelViewController.newTab(_:)),
@@ -162,5 +189,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(PanelViewController.closeCurrentTab(_:)),
             keyEquivalent: "w"
         )
+    }
+
+    /// The single-character key-equivalent string for a function-key constant such as
+    /// `NSF7FunctionKey` (the private-use-area scalars AppKit uses for the F-keys).
+    private static func functionKey(_ code: Int) -> String {
+        guard let scalar = UnicodeScalar(code) else { return "" }
+        return String(scalar)
     }
 }

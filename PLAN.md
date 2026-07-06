@@ -382,8 +382,8 @@ Goal: TC's killer feature — queued, non-blocking, undoable file operations.
 - [ ] Copy (F5): APFS clone fast path; chunked fallback with per-file + total progress,
       throughput, ETA; preserves xattrs, permissions, dates, Finder tags
 - [ ] Move (F6): rename fast path same-volume; copy+delete across volumes
-- [ ] Delete (F8): to Trash; Shift+F8 permanent with explicit confirm
-- [ ] New folder (F7), inline rename (F2/Enter-on-name)
+- [x] Delete (F8): to Trash; Shift+F8 permanent with explicit confirm
+- [ ] New folder (F7) ✅, inline rename (F2/Enter-on-name) — rename still pending
 - [ ] Progress UI: queue bar (as in mockup) + expandable list; pause/resume/cancel per job
 - [ ] Conflict engine: policies (ask/overwrite/skip/keep-both/newer-only), "apply to all";
       dialog shows both files' size/date, text diff preview, image thumbnails side by side
@@ -393,6 +393,43 @@ Goal: TC's killer feature — queued, non-blocking, undoable file operations.
 - [ ] Drop onto panel = real copy/move through the queue
 - [ ] Core test suite on fixtures: cancellation mid-copy, permission errors, disk-full,
       source-changed-during-copy
+
+Progress (2026-07-06, M2 pass 1): the write layer + the "instant" operations landed —
+New Folder and Delete, the ops that finish immediately and so don't need the (still to
+come) progress queue. Copy/Move/queue/progress/conflict/undo are the next passes.
+
+- **Core write primitives.** `VFSBackend` grew four write methods —
+  `createDirectory` / `moveItem` / `removeItem` / `trashItem` — with default
+  implementations that throw `.unsupported`, so a read-only or future backend compiles
+  untouched and the panel greys the op out via `capabilities` (§M5). `LocalBackend`
+  implements them on POSIX where the errno matters (`mkdir`, `rename`) and `FileManager`
+  where it's the right tool (recursive `removeItem`, `trashItem` returning the resulting
+  Trash location for a future undo-restore); a `mapCocoaError` helper recovers the POSIX
+  errno Cocoa tucks under `NSUnderlyingErrorKey`. New `VFSError.alreadyExists` (EEXIST/
+  ENOTEMPTY) feeds the M2 conflict engine later. `DirnexCore/…/Tests/LocalBackendWriteTests`
+  adds 13 tests (create over-existing / missing-parent, rename, cross-dir move, recursive
+  tree delete, trash-and-return-location, and the read-only-backend `.unsupported`
+  contract) — core suite now **79 tests**, all green; swiftformat/swiftlint-strict clean.
+- **App wiring** (`Dirnex/Browser/PanelViewController+FileOps.swift`, new). New Folder
+  prompts for a name (prefilled, `/`-rejected), creates off-main, refreshes, and lands the
+  cursor on the new folder by identity. Delete targets the **marked set over the cursor**
+  (TC), runs off-main collecting per-item failures in a `Sendable` shape, then clears
+  marks and re-lists: F8/Cmd+Delete → Trash (no prompt, recoverable, Finder-parity);
+  Shift+F8/Cmd+Shift+Delete → permanent with an explicit critical confirm. Both carry
+  Total Commander's F-keys in a new File-menu section *and* answer to Finder's Cmd combos
+  in `FileTableView` (Cmd+Shift+N / Cmd+Delete / Cmd+Shift+Delete); `validateMenuItem`
+  disables the delete items when nothing is deletable. `+Errors.describe` was generalized
+  (now internal, handles `.alreadyExists`) and reused for op-failure sheets. App builds
+  clean (no warnings); app smoke test green.
+- **Verified live via computer-use** (menu-driven — the automation harness still doesn't
+  deliver the Command modifier, confirmed via a no-op Cmd+T, so shortcuts were exercised
+  through the File menu, which dispatches the same responder-chain actions): New Folder
+  created `zzz-created-folder`, cursor landed on it, count 4→5, present on disk; Move to
+  Trash removed it (recoverable — confirmed by `stat`-ing the returned `~/.Trash` path,
+  since a non-FDA shell can't *list* `~/.Trash`); a marked pair (status "2 of 4 selected ·
+  14 bytes") trashed leaving the unmarked cursor file; Delete Immediately showed the
+  "can't be undone" confirm then permanently removed a file (absent from Trash) and,
+  separately, a non-empty subtree (recursive), parking the cursor on `..` at 0 items.
 
 Exit: 50 GB copy runs in background while browsing stays 60fps; yanking a USB drive
 mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixes it.
