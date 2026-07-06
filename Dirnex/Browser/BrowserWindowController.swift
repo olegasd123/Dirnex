@@ -16,6 +16,10 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     /// moves queue and run without blocking browsing (PLAN.md §M2). Volume-aware scheduling
     /// keys off the same `backend` the panes use.
     let queue: FileOperationQueue
+    /// The window's undo journal owner (PLAN.md §M2). Records the panes' reversible
+    /// operations — New Folder / rename / Trash inline, copy/move as their queue jobs finish
+    /// — and reverses the most recent one on Cmd+Z. Persists across launches.
+    let undoController: UndoController
     /// The window-bottom progress readout, collapsed to zero height while the queue is idle.
     let queueBar = QueueBarView()
     private var queueBarHeight: NSLayoutConstraint!
@@ -30,6 +34,7 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     init() {
         let backend = LocalBackend()
         queue = FileOperationQueue(backend: backend)
+        undoController = UndoController(backend: backend)
         let home = VFSPath.local(NSHomeDirectory())
         // Each pane restores its own tabs from the last session, keyed by side.
         leftPanel = PanelViewController(

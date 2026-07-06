@@ -57,7 +57,13 @@ extension BrowserWindowController {
         for job in snapshot.jobs where job.status == .finished || job.status == .cancelled {
             guard finalizedJobs.insert(job.id).inserted else { continue }
             refreshPanes()
-            if let report = job.report, !report.failures.isEmpty {
+            guard let report = job.report else { continue }
+            // Journal whatever landed (even a cancelled job's partial work) so Cmd+Z can
+            // reverse it; `transfer` returns nil when nothing is reversible.
+            if let record = UndoRecord.transfer(kind: job.kind, outcomes: report.outcomes) {
+                undoController.record(record)
+            }
+            if !report.failures.isEmpty {
                 reportFailures(report, kind: job.kind)
             }
         }

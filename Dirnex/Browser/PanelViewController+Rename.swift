@@ -110,6 +110,7 @@ extension PanelViewController {
                 }.value
                 refreshCurrentDirectory(selecting: destination)
                 focusTable()
+                host?.recordUndoableAction(.rename(from: source, to: destination))
             } catch {
                 presentOperationFailure(
                     message: "Can’t rename “\(oldName)”",

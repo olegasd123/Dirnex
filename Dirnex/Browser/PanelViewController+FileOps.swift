@@ -24,6 +24,13 @@ extension PanelViewController {
         deleteSelection(permanent: true)
     }
 
+    /// Cmd+Z — reverse the last operation on the window's undo journal (PLAN.md §M2). The
+    /// pane forwards to the window, which owns the (window-global) journal. Validation below
+    /// steps aside for an active inline-rename/path-bar field editor so text undo still works.
+    @objc func undoLastOperation(_ sender: Any?) {
+        host?.undoLastOperation()
+    }
+
     // MARK: - FileTableViewInput (keyboard)
 
     func fileTableNewFolder(_ tableView: FileTableView) {
@@ -85,6 +92,7 @@ extension PanelViewController {
                 }.value
                 refreshCurrentDirectory(selecting: target)
                 focusTable()
+                host?.recordUndoableAction(.newFolder(at: target))
             } catch {
                 presentOperationFailure(
                     message: "Can’t create “\(name)”",
@@ -148,14 +156,16 @@ extension PanelViewController {
         let paths = targets.map(\.path)
         let backend = backend
         Task {
-            let failures = await Task.detached(priority: .userInitiated) { () -> [OperationFailure] in
+            let result = await Task.detached(priority: .userInitiated) { () -> DeleteResult in
                 var failures: [OperationFailure] = []
+                var restorations: [TrashRestoration] = []
                 for path in paths {
                     do {
                         if permanent {
                             try backend.removeItem(at: path)
-                        } else {
-                            try backend.trashItem(at: path)
+                        } else if let trashed = try backend.trashItem(at: path) {
+                            // Capture where it landed so Cmd+Z can restore it from the Trash.
+                            restorations.append(TrashRestoration(original: path, trashed: trashed))
                         }
                     } catch let error as VFSError {
                         failures.append(OperationFailure(path: path, error: error))
@@ -165,14 +175,19 @@ extension PanelViewController {
                         )
                     }
                 }
-                return failures
+                return DeleteResult(failures: failures, restorations: restorations)
             }.value
 
             panel.clearSelection()
             refreshCurrentDirectory()
             focusTable()
-            if !failures.isEmpty {
-                presentDeletionFailures(failures, permanent: permanent)
+            // Permanent delete is irreversible and never journaled; Trash is restorable.
+            if !permanent,
+               let record = UndoRecord.trash(result.restorations.map { ($0.original, $0.trashed) }) {
+                host?.recordUndoableAction(record)
+            }
+            if !result.failures.isEmpty {
+                presentDeletionFailures(result.failures, permanent: permanent)
             }
         }
     }
@@ -236,9 +251,28 @@ extension PanelViewController: NSMenuItemValidation {
             // Rename is single-item on the cursor (not the marked set) and never `..`.
             return !cursorOnParentRow && panel.currentEntry != nil
                 && backend.capabilities.contains(.rename)
+        case #selector(undoLastOperation(_:)):
+            return validateUndoItem(menuItem)
         default:
             return true
         }
+    }
+
+    /// Enable Cmd+Z only when the journal has something to reverse *and* no text field is
+    /// being edited — while an inline rename / path-bar field editor is first responder, a
+    /// disabled item lets `performKeyEquivalent` fall through so Cmd+Z undoes typing instead.
+    /// The title tracks the next action ("Undo Move"), collapsing to plain "Undo" when idle.
+    private func validateUndoItem(_ menuItem: NSMenuItem) -> Bool {
+        if view.window?.firstResponder is NSText {
+            menuItem.title = "Undo"
+            return false
+        }
+        guard let label = host?.nextUndoLabel else {
+            menuItem.title = "Undo"
+            return false
+        }
+        menuItem.title = "Undo \(label)"
+        return true
     }
 }
 
@@ -248,4 +282,18 @@ extension PanelViewController: NSMenuItemValidation {
 private struct OperationFailure: Sendable {
     let path: VFSPath
     let error: VFSError
+}
+
+/// One trashed item's before/after locations, captured so Cmd+Z can restore it from the
+/// Trash (PLAN.md §M2 "delete-to-Trash restore").
+private struct TrashRestoration: Sendable {
+    let original: VFSPath
+    let trashed: VFSPath
+}
+
+/// What a delete pass produced: the items it couldn't remove, and (for Trash) where the
+/// removed items landed so the operation can be journaled for undo.
+private struct DeleteResult: Sendable {
+    let failures: [OperationFailure]
+    let restorations: [TrashRestoration]
 }

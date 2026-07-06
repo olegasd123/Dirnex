@@ -395,8 +395,9 @@ Goal: TC's killer feature — queued, non-blocking, undoable file operations.
       expandable per-job list is the remaining UI work
 - [ ] Conflict engine: up-front ask/overwrite/skip/keep-both ✅ + newer-only ✅; "apply to
       all" and the rich dialog (size/date, text diff, image thumbnails) still pending
-- [ ] Undo journal: Cmd+Z reverses move/rename/copy/new-folder; delete-to-Trash restore;
-      journal survives relaunch; clear messaging for non-reversible ops
+- [x] Undo journal: Cmd+Z reverses move/rename/copy/new-folder + delete-to-Trash restore ✅;
+      journal survives relaunch (JSON in UserDefaults) ✅; overwrites marked non-reversible and
+      surfaced ✅ — reversal logic + property tests in `DirnexCore/…/UndoJournal.swift`
 - [ ] Errors: failures collected + summarized ✅; per-file skip/retry/abort still pending
 - [x] Drop onto panel = real copy/move through the queue ✅ (pane-to-pane, into a
       subfolder, or from Finder; Finder's copy-vs-move conventions; routed through the
@@ -707,6 +708,45 @@ it was overwriting, and a half-written file is never left behind.
   correctly destination-side and the app relies on it, so the test asserts the failure
   *case*, not the incidental path. A minor diagnostic-message inaccuracy worth revisiting
   when the rich conflict/error dialog lands.
+
+Progress (2026-07-07, M2 pass 9): the undo journal landed — Cmd+Z reverses the five
+reversible operations and delete-to-Trash restore, and the journal survives relaunch. Undo
+is "the scariest feature" (§5), so the byte-touching reversal lives in `DirnexCore` under
+property tests; the app is the thin shell that records completed ops and drives `revert`.
+
+- **Core** (`DirnexCore/…/Operations/UndoJournal.swift`, new). An `UndoRecord` is a
+  user-facing label + a list of inverse `UndoStep`s (`restore(from:to:)` /
+  `removeCopy` / `removeCreatedFolder`) + a `nonReversibleCount`. `UndoJournal` is a bounded
+  newest-on-top stack (`record`/`removeTop`, capacity 50); `UndoJournal.revert(_:using:)` is
+  the executor — it refuses to clobber a reoccupied original, protects a New-Folder undo when
+  the user has since filled the folder, and (for a cross-volume move) reverses copy-then-delete
+  through `CopyEngine`. The copy/move builder reads the **engine's new per-item outcomes**:
+  `CopyEngine` now records each top-level source's landing path + whether it overwrote, added
+  as `OperationReport.outcomes` (`OperationItemOutcome`); `UndoRecord.transfer` turns a copy
+  into `removeCopy`s, a move into `restore`s, and an **overwrite into a counted, non-reversible
+  item never silently deleted**. `VFSPath`/`VFSBackendID` gained `Codable` (routing decode
+  through the normalizing init) so records persist. New `UndoJournalTests` (13) prove the
+  headline property `op + undo == original tree` for copy/move (incl. cross-volume)/rename/
+  New-Folder/Trash-restore, plus the overwrite/skip/clobber/capacity/JSON-round-trip edges —
+  **core suite 131 tests**, all green; swiftformat/swiftlint-strict clean.
+- **App wiring.** New `UndoController` (per window on `BrowserWindowController`) owns the
+  journal, persists `records` as JSON in `UserDefaults` (matching `TabPersistence`; the plan's
+  SQLite earns its keep once undo shares the M3 frecency DB), and runs `revert` off-main.
+  New Folder / rename / Trash record through a new `PanelHost.recordUndoableAction`; copy/move
+  record in `BrowserWindowController+Queue` as their queue jobs finish (so drag-drop is covered
+  for free). A new **Edit ▸ Undo (Cmd+Z)** dispatches through the responder chain to the focused
+  pane's `undoLastOperation` → the window's controller; `validateMenuItem` sets the live title
+  ("Undo Move") and **steps aside for an active field editor** so inline-rename/path-bar typing
+  keeps its own undo (a disabled item lets `performKeyEquivalent` fall through). A less-than-clean
+  undo (non-reversible parts, or a step that couldn't apply) raises a summary sheet; a clean one
+  is silent. App builds clean; app smoke test green.
+- **Verified live via computer-use** (menu- and Cmd+Z-driven; the Command modifier came through
+  this session): seeded a two-file fixture into both panes. **Move** alpha→right then Edit ▸
+  Undo (menu showed "Undo Move") restored it byte-exact; **New Folder** then **Cmd+Z** removed
+  the empty folder; **Move to Trash** then **Cmd+Z** restored alpha from the Trash; and — the
+  relaunch test — a move, graceful quit, relaunch (journal reloaded, menu still read "Undo
+  Move"), Cmd+Z reversed it. Every step confirmed on disk. NEXT M2: rich per-file conflict
+  dialog ("apply to all"), expandable per-job queue-bar list, per-file skip/retry/abort.
 
 Exit: 50 GB copy runs in background while browsing stays 60fps; yanking a USB drive
 mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixes it.

@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         buildFileMenu(into: mainMenu)
+        buildEditMenu(into: mainMenu)
         buildSelectMenu(into: mainMenu)
         buildViewMenu(into: mainMenu)
 
@@ -99,6 +100,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
+    }
+
+    /// The Edit menu — universal undo for file operations (PLAN.md §M2 "Undo works for file
+    /// operations, not just text fields"). The nil target dispatches Cmd+Z through the
+    /// responder chain to the focused pane, which forwards to the window's undo journal; the
+    /// pane's `validateMenuItem` sets the live title ("Undo Move") and steps aside for an
+    /// active text field so inline-rename/path-bar typing keeps its own undo. Rebindable
+    /// shortcuts and a full Edit menu (cut/copy/paste) arrive with the M3 action registry.
+    private func buildEditMenu(into mainMenu: NSMenu) {
+        let editMenuItem = NSMenuItem()
+        mainMenu.addItem(editMenuItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenuItem.submenu = editMenu
+        editMenu.addItem(
+            withTitle: "Undo",
+            action: #selector(PanelViewController.undoLastOperation(_:)),
+            keyEquivalent: "z"
+        )
     }
 
     /// The Select menu — mark-set commands. Nil targets dispatch through the responder

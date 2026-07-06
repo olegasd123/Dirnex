@@ -15,6 +15,19 @@ protocol PanelHost: AnyObject {
     /// queue (PLAN.md §M2 `FileOperationQueue`). Fire-and-forget from the pane's view:
     /// the window's queue bar shows progress and both panes re-list as jobs finish.
     func enqueue(_ operation: FileOperation, conflictPolicy: ConflictPolicy)
+
+    /// Record a completed, reversible operation (New Folder, rename, Move-to-Trash) on the
+    /// window's shared undo journal so Cmd+Z can reverse it (PLAN.md §M2 "Undo journal").
+    /// Copy/move are recorded by the window as their queue jobs finish, not here.
+    func recordUndoableAction(_ record: UndoRecord)
+
+    /// Reverse the most recent operation on the window's undo journal (Cmd+Z). Refreshes
+    /// both panes and reports anything that couldn't be put back.
+    func undoLastOperation()
+
+    /// The label of the action Cmd+Z would reverse next, for the menu title, or `nil` when
+    /// the journal is empty.
+    var nextUndoLabel: String? { get }
 }
 
 /// One file pane: a path bar, an `NSTableView` of the current directory, and a status

@@ -57,6 +57,7 @@ private final class CopyRun {
     private var lastEmitted: Int64 = -1
     private var skipped: [VFSPath] = []
     private var failures: [OperationItemFailure] = []
+    private var outcomes: [OperationItemOutcome] = []
 
     init(
         operation: FileOperation,
@@ -122,11 +123,14 @@ private final class CopyRun {
             case .skip:
                 skipped.append(entry.path)
                 account(bytes: bytes)
+                outcomes.append(.init(source: entry.path, landedAt: nil, replacedExisting: false))
             case let .proceed(target):
                 try perform(entry, to: target, bytes: bytes)
                 account(bytes: 0) // bytes were tallied inside `perform`
+                outcomes.append(.init(source: entry.path, landedAt: target, replacedExisting: false))
             case let .overwrite(temp, existing, final):
                 try replace(entry, via: temp, removing: existing, landingAt: final, bytes: bytes)
+                outcomes.append(.init(source: entry.path, landedAt: final, replacedExisting: true))
             }
             return true
         } catch is CancellationError {
@@ -293,7 +297,8 @@ private final class CopyRun {
             completedBytes: completedBytes,
             skipped: skipped,
             failures: failures,
-            wasCancelled: cancelled
+            wasCancelled: cancelled,
+            outcomes: outcomes
         )
     }
 }

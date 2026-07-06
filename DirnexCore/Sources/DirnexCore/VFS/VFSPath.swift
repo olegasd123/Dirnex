@@ -103,3 +103,40 @@ public struct VFSPath: Sendable, Hashable, CustomStringConvertible {
         return "/" + components.joined(separator: "/")
     }
 }
+
+// MARK: - Codable
+
+/// Persisted so the undo journal survives relaunch (PLAN.md §M2 "journal survives
+/// relaunch"). Decoding routes through the normalizing initializer, so a stored path is
+/// re-normalized on the way back in and identity comparisons stay stable.
+extension VFSBackendID: Codable {
+    public init(from decoder: any Decoder) throws {
+        self.init(try decoder.singleValueContainer().decode(String.self))
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+extension VFSPath: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case backend
+        case path
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            backend: try container.decode(VFSBackendID.self, forKey: .backend),
+            path: try container.decode(String.self, forKey: .path)
+        )
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(backend, forKey: .backend)
+        try container.encode(path, forKey: .path)
+    }
+}

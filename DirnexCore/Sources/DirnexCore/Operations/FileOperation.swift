@@ -93,6 +93,27 @@ public struct OperationItemFailure: Sendable, Equatable {
     }
 }
 
+/// What became of one top-level source once the engine finished with it — the record the
+/// undo journal reverses (PLAN.md §M2 "Cmd+Z reverses move/rename/copy"). The engine knows
+/// exactly where each item landed (including the fresh name a keep-both copy took) and
+/// whether it replaced something already there, so the undo layer never has to re-derive it.
+public struct OperationItemOutcome: Sendable, Equatable {
+    public let source: VFSPath
+    /// Where the item now lives — the copy's/move's landing path. `nil` when the conflict
+    /// policy skipped the item, so nothing happened and there is nothing to reverse.
+    public let landedAt: VFSPath?
+    /// The landing path was already occupied and got overwritten. Such an item can't be
+    /// cleanly reversed (the replaced original is gone), so undo reports it rather than
+    /// silently deleting the replacement — see `UndoRecord.transfer`.
+    public let replacedExisting: Bool
+
+    public init(source: VFSPath, landedAt: VFSPath?, replacedExisting: Bool) {
+        self.source = source
+        self.landedAt = landedAt
+        self.replacedExisting = replacedExisting
+    }
+}
+
 /// The outcome of running an operation: what got through, what was skipped by the
 /// conflict policy, what failed, and whether the user cancelled partway.
 public struct OperationReport: Sendable, Equatable {
@@ -101,19 +122,24 @@ public struct OperationReport: Sendable, Equatable {
     public let skipped: [VFSPath]
     public let failures: [OperationItemFailure]
     public let wasCancelled: Bool
+    /// Per-item disposition for the sources that completed, in the order they finished —
+    /// the raw material the undo journal turns into a reversal (see `UndoRecord.transfer`).
+    public let outcomes: [OperationItemOutcome]
 
     public init(
         completedItems: Int,
         completedBytes: Int64,
         skipped: [VFSPath],
         failures: [OperationItemFailure],
-        wasCancelled: Bool
+        wasCancelled: Bool,
+        outcomes: [OperationItemOutcome] = []
     ) {
         self.completedItems = completedItems
         self.completedBytes = completedBytes
         self.skipped = skipped
         self.failures = failures
         self.wasCancelled = wasCancelled
+        self.outcomes = outcomes
     }
 
     public var succeeded: Bool { failures.isEmpty && !wasCancelled }
