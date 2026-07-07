@@ -19,6 +19,13 @@ final class QueueJobRowView: NSView {
     private let statusLabel = NSTextField(labelWithString: "")
     private let cancelButton = NSButton()
 
+    /// Like the header readout, a running job's byte count arrives many times a second; we
+    /// coalesce it to at most once a second. Fixed-word states (Waiting/Paused/Done/…) still
+    /// refresh instantly, since a status change forces a refresh — see `update(with:)`.
+    private static let detailRefreshInterval: TimeInterval = 1
+    private var lastDetailRefresh: Date = .distantPast
+    private var lastStatus: JobStatus?
+
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
@@ -48,7 +55,7 @@ final class QueueJobRowView: NSView {
 
         statusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         statusLabel.textColor = .secondaryLabelColor
-        statusLabel.alignment = .right
+        statusLabel.alignment = .left
         statusLabel.lineBreakMode = .byClipping
         statusLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -66,13 +73,19 @@ final class QueueJobRowView: NSView {
         cancelButton.action = #selector(cancelClicked)
         cancelButton.setContentHuggingPriority(.required, for: .horizontal)
 
-        let stack = NSStackView(views: [nameLabel, bar, statusLabel, cancelButton])
+        // Cancel and bar lead (mirroring the header) so they stay put; the byte readout follows
+        // the bar and the name flexes at the trailing edge. Indenting to `cancelColumnInset`
+        // puts this cancel button — and, one control over, this bar — directly under the header's.
+        let stack = NSStackView(views: [cancelButton, bar, statusLabel, nameLabel])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 8
-        // Indent the name under the header's status label; trim the trailing edge to the
-        // header's cancel button so the two cancel affordances line up.
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: 34, bottom: 0, right: 12)
+        stack.spacing = QueueBarMetrics.spacing
+        stack.edgeInsets = NSEdgeInsets(
+            top: 0,
+            left: QueueBarMetrics.cancelColumnInset,
+            bottom: 0,
+            right: QueueBarMetrics.edgeInset
+        )
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
@@ -80,12 +93,14 @@ final class QueueJobRowView: NSView {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            cancelButton.widthAnchor.constraint(equalToConstant: QueueBarMetrics.controlWidth),
             bar.widthAnchor.constraint(equalToConstant: 90)
         ])
     }
 
     /// Render one job's state. Waiting/paused jobs show a label in place of a live rate;
-    /// a terminal job hides its cancel button since there is nothing left to stop.
+    /// a terminal job hides its cancel button since there is nothing left to stop. The bar
+    /// tracks every snapshot; only the fast-moving byte readout is coalesced (see below).
     func update(with job: JobSnapshot) {
         jobID = job.id
         let verb = job.kind == .copy ? "Copy" : "Move"
@@ -93,22 +108,35 @@ final class QueueJobRowView: NSView {
         nameLabel.stringValue = name.map { "\(verb) \($0)" } ?? "\(verb)…"
 
         switch job.status {
-        case .waiting:
-            bar.doubleValue = 0
-            statusLabel.stringValue = "Waiting"
-        case .running:
-            bar.doubleValue = job.progress?.fraction ?? 0
-            statusLabel.stringValue = byteDetail(for: job.progress)
-        case .paused:
-            bar.doubleValue = job.progress?.fraction ?? 0
-            statusLabel.stringValue = "Paused"
-        case .finished:
-            bar.doubleValue = 1
-            statusLabel.stringValue = "Done"
-        case .cancelled:
-            statusLabel.stringValue = "Cancelled"
+        case .waiting: bar.doubleValue = 0
+        case .running, .paused: bar.doubleValue = job.progress?.fraction ?? 0
+        case .finished: bar.doubleValue = 1
+        case .cancelled: break
         }
+
+        updateStatusLabel(for: job)
         cancelButton.isHidden = job.status == .finished || job.status == .cancelled
+    }
+
+    /// Refresh the trailing readout, coalescing the running byte count to once a second so it's
+    /// legible. Every other status is a fixed word, and a status change forces an immediate
+    /// refresh, so transitions (start, pause, done) never look stuck behind the throttle.
+    private func updateStatusLabel(for job: JobSnapshot) {
+        let statusChanged = lastStatus != job.status
+        lastStatus = job.status
+
+        switch job.status {
+        case .waiting: statusLabel.stringValue = "Waiting"
+        case .paused: statusLabel.stringValue = "Paused"
+        case .finished: statusLabel.stringValue = "Done"
+        case .cancelled: statusLabel.stringValue = "Cancelled"
+        case .running:
+            guard statusChanged
+                || Date().timeIntervalSince(lastDetailRefresh) >= Self.detailRefreshInterval
+            else { return }
+            lastDetailRefresh = Date()
+            statusLabel.stringValue = byteDetail(for: job.progress)
+        }
     }
 
     private func byteDetail(for progress: OperationProgress?) -> String {

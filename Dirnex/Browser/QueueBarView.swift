@@ -1,14 +1,36 @@
 import AppKit
 import DirnexCore
 
+/// Shared layout metrics for the queue bar, so the header's controls and each per-job row's
+/// controls line up in fixed columns. Both lay out a leading run of fixed-width buttons, then
+/// the progress bar, then the readout, then a flexible name at the trailing edge — that
+/// ordering keeps everything the user clicks (bar and buttons) anchored to the left edge
+/// instead of drifting as the name and byte readout change width. The header leads with `disclosure · pause ·
+/// cancel`; a row omits the first two and indents to `cancelColumnInset` so its cancel button
+/// sits directly under the header's, and its bar under the header's bar.
+enum QueueBarMetrics {
+    /// Left/right padding inside the header and each job row.
+    static let edgeInset: CGFloat = 12
+    /// Fixed footprint of each borderless symbol button, so a row's cancel lines up under the
+    /// header's regardless of which glyph each shows.
+    static let controlWidth: CGFloat = 22
+    /// Gap between adjacent elements in the header and row stacks.
+    static let spacing: CGFloat = 10
+    /// Leading inset of the cancel button: past the disclosure chevron and the pause button.
+    /// A job row uses this as its left inset so every cancel button shares one column.
+    static let cancelColumnInset = edgeInset + (controlWidth + spacing) * 2
+}
+
 /// The window-bottom queue bar (PLAN.md §M2 "Progress UI"): a non-blocking readout of the
 /// shared `FileOperationQueue`. Unlike the old modal progress sheet, it lets the user keep
 /// browsing while a large transfer runs in the background — TC's killer feature.
 ///
-/// A compact header row (what's happening, an aggregate determinate bar, a byte/throughput/
-/// ETA readout, pause/resume + cancel-all) sits over an expandable per-job list: the
-/// disclosure chevron reveals one row per queued copy/move, each with its own progress and
-/// cancel button. The bar renders from a `QueueSnapshot` and knows nothing about the queue
+/// A compact header row — the disclosure chevron plus pause/resume and cancel-all controls,
+/// then an aggregate determinate bar, a byte/throughput/ETA readout, and finally what's
+/// happening (the item name) — sits over an expandable per-job list: the disclosure chevron reveals one row per queued
+/// copy/move, each with its own progress and cancel button. Leading the row with the fixed-
+/// width controls and bar keeps them from drifting as the name and readout change width (see
+/// `QueueBarMetrics`). The bar renders from a `QueueSnapshot` and knows nothing about the queue
 /// actor — the window controller feeds it snapshots, wires the buttons back, and follows the
 /// bar's `preferredHeight` as the list expands and collapses.
 @MainActor
@@ -50,6 +72,13 @@ final class QueueBarView: NSView {
     var displayedJobIDs: [OperationJobID] = []
     var isExpanded = false
     var lastReportedHeight: CGFloat = QueueBarView.collapsedHeight
+
+    /// The byte/throughput/ETA readout arrives many times a second; refreshing the label that
+    /// fast makes it a blur. We coalesce it to at most once a second (with an immediate refresh
+    /// when the paused state flips) — see `update(with:)`.
+    private static let detailRefreshInterval: TimeInterval = 1
+    private var lastDetailRefresh: Date = .distantPast
+    private var lastPausedState: Bool?
 
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -149,13 +178,17 @@ final class QueueBarView: NSView {
             action: #selector(cancelClicked)
         )
 
+        // Controls and bar lead so they stay put; the readout follows the bar and the name
+        // flexes at the trailing edge.
         let stack = NSStackView(
-            views: [disclosureButton, statusLabel, bar, detailLabel, pauseButton, cancelButton]
+            views: [disclosureButton, pauseButton, cancelButton, bar, detailLabel, statusLabel]
         )
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
+        stack.spacing = QueueBarMetrics.spacing
+        stack.edgeInsets = NSEdgeInsets(
+            top: 0, left: QueueBarMetrics.edgeInset, bottom: 0, right: QueueBarMetrics.edgeInset
+        )
         NSLayoutConstraint.activate([bar.widthAnchor.constraint(equalToConstant: 160)])
         return stack
     }
@@ -196,6 +229,8 @@ final class QueueBarView: NSView {
         button.target = self
         button.action = action
         button.setContentHuggingPriority(.required, for: .horizontal)
+        // A fixed footprint keeps the header's and rows' buttons in aligned columns.
+        button.widthAnchor.constraint(equalToConstant: QueueBarMetrics.controlWidth).isActive = true
     }
 
     // MARK: - Rendering
@@ -207,7 +242,15 @@ final class QueueBarView: NSView {
         let aggregate = snapshot.aggregate
         bar.doubleValue = aggregate.fraction
         statusLabel.stringValue = statusText(for: snapshot)
-        detailLabel.stringValue = detailText(for: aggregate, paused: snapshot.isPaused)
+
+        // Coalesce the fast-moving detail readout to once a second so it's legible, but refresh
+        // it immediately when the run pauses or resumes so that transition never looks stuck.
+        let pausedChanged = lastPausedState != snapshot.isPaused
+        if pausedChanged || Date().timeIntervalSince(lastDetailRefresh) >= Self.detailRefreshInterval {
+            detailLabel.stringValue = detailText(for: aggregate, paused: snapshot.isPaused)
+            lastDetailRefresh = Date()
+            lastPausedState = snapshot.isPaused
+        }
 
         let symbol = snapshot.isPaused ? "play.fill" : "pause.fill"
         let title = snapshot.isPaused ? "Resume" : "Pause"
