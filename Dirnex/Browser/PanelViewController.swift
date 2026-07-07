@@ -189,7 +189,10 @@ final class PanelViewController: NSViewController {
         // Only the Name column absorbs slack as the pane resizes; Size and Date keep their
         // set widths so they never scroll off-screen when a pane is narrow.
         tableView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
-        tableView.rowSizeStyle = .default
+        // The cell centers its 16pt icon/text vertically; the system default height leaves
+        // it cramped, so give each row a little vertical breathing room above and below.
+        tableView.rowSizeStyle = .custom
+        tableView.rowHeight = 22
         tableView.usesAlternatingRowBackgroundColors = true
         tableView.allowsMultipleSelection = false
         tableView.allowsEmptySelection = true
