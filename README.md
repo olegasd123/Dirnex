@@ -43,6 +43,9 @@ bytes, it lives in `DirnexCore` and has tests.
 ## Build & test
 
 ```bash
+# Build
+xcodebuild -project Dirnex.xcodeproj -scheme Dirnex -destination 'platform=macOS' build 2>&1 | tail -15
+
 # Core package (fast, headless):
 swift test --package-path DirnexCore
 

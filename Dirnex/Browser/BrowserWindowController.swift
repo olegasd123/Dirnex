@@ -57,13 +57,12 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         )
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 680),
+            contentRect: NSRect(x: 0, y: 0, width: 1300, height: 750),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Dirnex"
-        window.setFrameAutosaveName("MainWindow")
         window.minSize = NSSize(width: 640, height: 360)
 
         super.init(window: window)
@@ -98,8 +97,15 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         panesItem.canCollapse = false
         splitViewController.addSplitViewItem(panesItem)
 
+        // Assigning `contentViewController` resizes the window to the content view's
+        // fitting size, discarding the initializer's `contentRect`. So set our default
+        // size afterwards, then let a previously autosaved frame win if one exists.
         window.contentViewController = makeContainerViewController()
-        window.center()
+        if !window.setFrameUsingName("MainWindow") {
+            window.setContentSize(NSSize(width: 1300, height: 750))
+            window.center()
+        }
+        window.setFrameAutosaveName("MainWindow")
 
         queueBar.onPauseToggle = { [weak self] in self?.togglePause() }
         queueBar.onCancelAll = { [weak self] in self?.cancelAllJobs() }
