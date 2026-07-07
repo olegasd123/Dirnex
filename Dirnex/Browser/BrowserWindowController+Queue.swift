@@ -11,14 +11,16 @@ extension BrowserWindowController {
     func enqueue(
         _ operation: FileOperation,
         conflictPolicy: ConflictPolicy,
-        resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)?
+        resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)?,
+        onError: (@Sendable (OperationErrorContext) -> ErrorResolution)?
     ) {
         let queue = queue
         Task {
             await queue.enqueue(
                 operation,
                 conflictPolicy: conflictPolicy,
-                resolveConflict: resolveConflict
+                resolveConflict: resolveConflict,
+                onError: onError
             )
         }
     }

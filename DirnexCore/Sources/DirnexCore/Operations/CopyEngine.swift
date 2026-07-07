@@ -20,6 +20,12 @@ public enum CopyEngine {
     ///   thread (never for a non-colliding source), so the caller may block it while a
     ///   prompt is on screen; returning `.cancel` aborts the whole operation. With any
     ///   other policy it is ignored, and an `.ask` policy with no resolver behaves as `.fail`.
+    /// - `onError` is consulted whenever a source fails to transfer — the hook behind TC's
+    ///   per-file "Skip / Retry / Abort" dialog. Like `resolveConflict` it runs synchronously
+    ///   on the copy thread, so the caller may block it: `.retry` re-attempts the same source
+    ///   (discarding any partial bytes first), `.skip` collects the failure and moves on, and
+    ///   `.abort` unwinds the whole operation as cancelled. A missing resolver behaves as
+    ///   `.skip`, so an unattended run still finishes and summarizes its failures.
     /// - `onProgress` is called periodically (throttled by byte volume and at each item
     ///   boundary) — never per chunk, so a 50 GB copy doesn't flood the caller.
     /// - `isCancelled` is polled between chunks and items; cancelling leaves a report with
@@ -30,6 +36,7 @@ public enum CopyEngine {
         using backend: any VFSBackend,
         conflictPolicy: ConflictPolicy = .fail,
         resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)? = nil,
+        onError: (@Sendable (OperationErrorContext) -> ErrorResolution)? = nil,
         onProgress: @escaping @Sendable (OperationProgress) -> Void = { _ in },
         isCancelled: @escaping @Sendable () -> Bool = { false }
     ) -> OperationReport {
@@ -38,6 +45,7 @@ public enum CopyEngine {
             backend: backend,
             policy: conflictPolicy,
             resolveConflict: resolveConflict,
+            onError: onError,
             onProgress: onProgress,
             isCancelled: isCancelled
         ).execute()
@@ -52,6 +60,7 @@ private final class CopyRun {
     private let backend: any VFSBackend
     private let policy: ConflictPolicy
     private let resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)?
+    private let onError: (@Sendable (OperationErrorContext) -> ErrorResolution)?
     private let onProgress: @Sendable (OperationProgress) -> Void
     private let isCancelled: @Sendable () -> Bool
 
@@ -72,6 +81,7 @@ private final class CopyRun {
         backend: any VFSBackend,
         policy: ConflictPolicy,
         resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)?,
+        onError: (@Sendable (OperationErrorContext) -> ErrorResolution)?,
         onProgress: @escaping @Sendable (OperationProgress) -> Void,
         isCancelled: @escaping @Sendable () -> Bool
     ) {
@@ -79,6 +89,7 @@ private final class CopyRun {
         self.backend = backend
         self.policy = policy
         self.resolveConflict = resolveConflict
+        self.onError = onError
         self.onProgress = onProgress
         self.isCancelled = isCancelled
     }
@@ -123,37 +134,65 @@ private final class CopyRun {
     // MARK: - Per-item transfer
 
     /// Transfer one top-level source, applying the conflict policy. Returns `false` only
-    /// when the user cancelled; item-level failures are recorded and reported as `true`
-    /// so the operation carries on to the remaining sources.
+    /// when the operation should unwind (a user cancel or an `onError` `.abort`); item-level
+    /// failures are recorded and reported as `true` so the operation carries on to the
+    /// remaining sources.
+    ///
+    /// A failed attempt is routed to `onError`, which can `.retry` the source (any partial
+    /// bytes discarded first), `.skip` it (collect and continue — the default), or `.abort`
+    /// the whole operation. The loop re-attempts as long as the resolver keeps asking.
     private func transfer(_ entry: FileEntry, bytes: Int64) -> Bool {
         let destination = operation.destinationDirectory.appending(entry.name)
-        emit(current: entry.path, force: true)
-        do {
-            switch try resolveConflict(for: entry, at: destination) {
-            case .skip:
-                skipped.append(entry.path)
-                account(bytes: bytes)
-                outcomes.append(.init(source: entry.path, landedAt: nil, replacedExisting: false))
-            case let .proceed(target):
-                try perform(entry, to: target, bytes: bytes)
-                account(bytes: 0) // bytes were tallied inside `perform`
-                outcomes.append(.init(source: entry.path, landedAt: target, replacedExisting: false))
-            case let .overwrite(temp, existing, final):
-                try replace(entry, via: temp, removing: existing, landingAt: final, bytes: bytes)
-                outcomes.append(.init(source: entry.path, landedAt: final, replacedExisting: true))
+        // The byte tally to roll back to before each attempt, so a failed-then-retried copy
+        // doesn't double-count the bytes it wrote before failing.
+        let bytesBefore = completedBytes
+        while true {
+            emit(current: entry.path, force: true)
+            do {
+                try attempt(entry, to: destination, bytes: bytes)
+                return true
+            } catch is CancellationError {
+                return false
+            } catch {
+                let failure = (error as? VFSError) ?? .io(path: entry.path, code: 0)
+                completedBytes = bytesBefore // discard the failed attempt's partial progress
+                switch resolveError(entry, failure) {
+                case .retry:
+                    continue
+                case .skip:
+                    failures.append(OperationItemFailure(path: entry.path, error: failure))
+                    return true
+                case .abort:
+                    return false // unwind the whole op, reported cancelled like a user cancel
+                }
             }
-            return true
-        } catch is CancellationError {
-            return false
-        } catch let error as VFSError {
-            failures.append(OperationItemFailure(path: entry.path, error: error))
-            return true
-        } catch {
-            failures.append(
-                OperationItemFailure(path: entry.path, error: .io(path: entry.path, code: 0))
-            )
-            return true
         }
+    }
+
+    /// One attempt to transfer `entry`, resolving the destination conflict and moving the
+    /// bytes. Records the item's disposition (`skipped`/`outcomes`) only on success; a throw
+    /// leaves those untouched so a retry re-runs cleanly.
+    private func attempt(_ entry: FileEntry, to destination: VFSPath, bytes: Int64) throws {
+        switch try resolveConflict(for: entry, at: destination) {
+        case .skip:
+            skipped.append(entry.path)
+            account(bytes: bytes)
+            outcomes.append(.init(source: entry.path, landedAt: nil, replacedExisting: false))
+        case let .proceed(target):
+            try perform(entry, to: target, bytes: bytes)
+            account(bytes: 0) // bytes were tallied inside `perform`
+            outcomes.append(.init(source: entry.path, landedAt: target, replacedExisting: false))
+        case let .overwrite(temp, existing, final):
+            try replace(entry, via: temp, removing: existing, landingAt: final, bytes: bytes)
+            outcomes.append(.init(source: entry.path, landedAt: final, replacedExisting: true))
+        }
+    }
+
+    /// Ask the caller's `onError` resolver how to handle a failed source. Without one, keep
+    /// the engine's unattended default: `.skip` (collect the failure and move on).
+    private func resolveError(_ entry: FileEntry, _ error: VFSError) -> ErrorResolution {
+        guard let onError else { return .skip }
+        return onError(OperationErrorContext(kind: operation.kind, path: entry.path, error: error))
     }
 
     /// The overwrite path: copy the source to a temporary sibling, remove the existing
@@ -229,87 +268,6 @@ private final class CopyRun {
         }
     }
 
-    // MARK: - Conflict resolution
-
-    private enum Plan {
-        case proceed(VFSPath)
-        case overwrite(temp: VFSPath, existing: VFSPath, final: VFSPath)
-        case skip
-    }
-
-    private func resolveConflict(for entry: FileEntry, at destination: VFSPath) throws -> Plan {
-        guard let existing = try? backend.stat(at: destination) else { return .proceed(destination) }
-        switch policy {
-        case .fail:
-            throw VFSError.alreadyExists(destination)
-        case .skip:
-            return .skip
-        case .overwrite:
-            return overwritePlan(at: destination, name: entry.name)
-        case .newerOnly:
-            return newerOnlyPlan(source: entry, existing: existing, at: destination)
-        case .keepBoth:
-            return keepBothPlan(for: entry)
-        case .ask:
-            return try askPlan(for: entry, existing: existing, at: destination)
-        }
-    }
-
-    /// Consult the operation's resolver for one conflict and translate its answer into a
-    /// `Plan`. A missing resolver degrades to the safe `.fail` behaviour; `.cancel` aborts
-    /// the whole operation through the engine's normal cancellation path.
-    private func askPlan(for entry: FileEntry, existing: FileEntry, at destination: VFSPath) throws -> Plan {
-        guard let resolveConflict else { throw VFSError.alreadyExists(destination) }
-        let context = ConflictContext(kind: operation.kind, source: entry, existing: existing)
-        switch resolveConflict(context) {
-        case .overwrite:
-            return overwritePlan(at: destination, name: entry.name)
-        case .overwriteIfNewer:
-            return newerOnlyPlan(source: entry, existing: existing, at: destination)
-        case .skip:
-            return .skip
-        case .keepBoth:
-            return keepBothPlan(for: entry)
-        case .cancel:
-            throw CancellationError()
-        }
-    }
-
-    /// Replace only a strictly-older destination; an equal-or-newer one is kept (skipped).
-    private func newerOnlyPlan(source: FileEntry, existing: FileEntry, at destination: VFSPath) -> Plan {
-        guard source.modificationDate > existing.modificationDate else { return .skip }
-        return overwritePlan(at: destination, name: source.name)
-    }
-
-    private func keepBothPlan(for entry: FileEntry) -> Plan {
-        .proceed(operation.destinationDirectory.appending(firstAvailableName(basedOn: entry.name)))
-    }
-
-    /// The plan for replacing an existing `destination` in place: write the replacement to
-    /// a temporary sibling first, then swap it in, so the original survives a failure or
-    /// cancellation partway through (see `replace(_:via:removing:landingAt:bytes:)`).
-    private func overwritePlan(at destination: VFSPath, name: String) -> Plan {
-        let temp = operation.destinationDirectory
-            .appending(".dirnex-copy-\(UUID().uuidString)-\(name)")
-        return .overwrite(temp: temp, existing: destination, final: destination)
-    }
-
-    /// Generate the first "<name> copy[.ext]" / "<name> copy N[.ext]" that doesn't yet
-    /// exist in the destination — Finder's keep-both naming.
-    private func firstAvailableName(basedOn name: String) -> String {
-        let ns = name as NSString
-        let ext = ns.pathExtension
-        let stem = ns.deletingPathExtension
-        let suffix = ext.isEmpty ? "" : ".\(ext)"
-        var counter = 1
-        while true {
-            let candidate = counter == 1 ? "\(stem) copy\(suffix)" : "\(stem) copy \(counter)\(suffix)"
-            let path = operation.destinationDirectory.appending(candidate)
-            if (try? backend.stat(at: path)) == nil { return candidate }
-            counter += 1
-        }
-    }
-
     // MARK: - Progress accounting
 
     private func account(bytes: Int64) {
@@ -339,5 +297,90 @@ private final class CopyRun {
             wasCancelled: cancelled,
             outcomes: outcomes
         )
+    }
+}
+
+// MARK: - Conflict resolution
+
+/// The per-source conflict handling, split into an extension so the main `CopyRun` body stays
+/// under SwiftLint's type-body-length limit (the same treatment the snapshot helpers got).
+private extension CopyRun {
+    enum Plan {
+        case proceed(VFSPath)
+        case overwrite(temp: VFSPath, existing: VFSPath, final: VFSPath)
+        case skip
+    }
+
+    func resolveConflict(for entry: FileEntry, at destination: VFSPath) throws -> Plan {
+        guard let existing = try? backend.stat(at: destination) else { return .proceed(destination) }
+        switch policy {
+        case .fail:
+            throw VFSError.alreadyExists(destination)
+        case .skip:
+            return .skip
+        case .overwrite:
+            return overwritePlan(at: destination, name: entry.name)
+        case .newerOnly:
+            return newerOnlyPlan(source: entry, existing: existing, at: destination)
+        case .keepBoth:
+            return keepBothPlan(for: entry)
+        case .ask:
+            return try askPlan(for: entry, existing: existing, at: destination)
+        }
+    }
+
+    /// Consult the operation's resolver for one conflict and translate its answer into a
+    /// `Plan`. A missing resolver degrades to the safe `.fail` behaviour; `.cancel` aborts
+    /// the whole operation through the engine's normal cancellation path.
+    func askPlan(for entry: FileEntry, existing: FileEntry, at destination: VFSPath) throws -> Plan {
+        guard let resolveConflict else { throw VFSError.alreadyExists(destination) }
+        let context = ConflictContext(kind: operation.kind, source: entry, existing: existing)
+        switch resolveConflict(context) {
+        case .overwrite:
+            return overwritePlan(at: destination, name: entry.name)
+        case .overwriteIfNewer:
+            return newerOnlyPlan(source: entry, existing: existing, at: destination)
+        case .skip:
+            return .skip
+        case .keepBoth:
+            return keepBothPlan(for: entry)
+        case .cancel:
+            throw CancellationError()
+        }
+    }
+
+    /// Replace only a strictly-older destination; an equal-or-newer one is kept (skipped).
+    func newerOnlyPlan(source: FileEntry, existing: FileEntry, at destination: VFSPath) -> Plan {
+        guard source.modificationDate > existing.modificationDate else { return .skip }
+        return overwritePlan(at: destination, name: source.name)
+    }
+
+    func keepBothPlan(for entry: FileEntry) -> Plan {
+        .proceed(operation.destinationDirectory.appending(firstAvailableName(basedOn: entry.name)))
+    }
+
+    /// The plan for replacing an existing `destination` in place: write the replacement to
+    /// a temporary sibling first, then swap it in, so the original survives a failure or
+    /// cancellation partway through (see `replace(_:via:removing:landingAt:bytes:)`).
+    func overwritePlan(at destination: VFSPath, name: String) -> Plan {
+        let temp = operation.destinationDirectory
+            .appending(".dirnex-copy-\(UUID().uuidString)-\(name)")
+        return .overwrite(temp: temp, existing: destination, final: destination)
+    }
+
+    /// Generate the first "<name> copy[.ext]" / "<name> copy N[.ext]" that doesn't yet
+    /// exist in the destination — Finder's keep-both naming.
+    func firstAvailableName(basedOn name: String) -> String {
+        let ns = name as NSString
+        let ext = ns.pathExtension
+        let stem = ns.deletingPathExtension
+        let suffix = ext.isEmpty ? "" : ".\(ext)"
+        var counter = 1
+        while true {
+            let candidate = counter == 1 ? "\(stem) copy\(suffix)" : "\(stem) copy \(counter)\(suffix)"
+            let path = operation.destinationDirectory.appending(candidate)
+            if (try? backend.stat(at: path)) == nil { return candidate }
+            counter += 1
+        }
     }
 }

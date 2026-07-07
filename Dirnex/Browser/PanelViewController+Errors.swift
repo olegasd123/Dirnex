@@ -20,7 +20,14 @@ extension PanelViewController {
 
     /// A human-readable sentence for an error. Internal (not private) so the file-op
     /// presenters in `PanelViewController+FileOps` can reuse the same phrasing.
-    func describe(_ error: Error) -> String {
+    func describe(_ error: Error) -> String { VFSErrorText.sentence(for: error) }
+}
+
+/// The single source of truth for turning a `VFSError` into a user-facing sentence, shared
+/// by the pane's load/op error sheets, the queue's failure summary, and the per-file error
+/// dialog (`ErrorDialog`). Free of any view state so it can run on any actor.
+enum VFSErrorText {
+    static func sentence(for error: Error) -> String {
         guard let vfsError = error as? VFSError else { return error.localizedDescription }
         switch vfsError {
         case .permissionDenied:

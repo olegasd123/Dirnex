@@ -49,14 +49,16 @@ extension PanelViewController {
     /// Hand a copy/move to the window's shared queue under the `.ask` conflict policy: the
     /// engine copies non-colliding items straight through and, for each collision, calls back
     /// into a fresh `ConflictPrompter` that raises the rich per-file dialog (and remembers an
-    /// "apply to all" choice for the rest of this operation). Shared by F5/F6 (destination =
-    /// the other pane) and drag-drop (`PanelViewController+Drop`, destination = the drop target).
+    /// "apply to all" choice for the rest of this operation). A sibling `ErrorPrompter` fields
+    /// per-file *failures* the same way — TC's Skip / Retry / Abort. Shared by F5/F6 (destination
+    /// = the other pane) and drag-drop (`PanelViewController+Drop`, destination = the drop target).
     func submitTransfer(
         kind: FileOperation.Kind,
         sources: [FileEntry],
         destination: VFSPath
     ) {
-        let prompter = ConflictPrompter(window: view.window)
+        let conflictPrompter = ConflictPrompter(window: view.window)
+        let errorPrompter = ErrorPrompter(window: view.window)
         let operation = FileOperation(
             kind: kind,
             sources: sources,
@@ -65,7 +67,8 @@ extension PanelViewController {
         host?.enqueue(
             operation,
             conflictPolicy: .ask,
-            resolveConflict: { prompter.resolve($0) }
+            resolveConflict: { conflictPrompter.resolve($0) },
+            onError: { errorPrompter.resolve($0) }
         )
     }
 }

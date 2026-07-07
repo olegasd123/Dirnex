@@ -402,7 +402,9 @@ Goal: TC's killer feature — queued, non-blocking, undoable file operations.
 - [x] Undo journal: Cmd+Z reverses move/rename/copy/new-folder + delete-to-Trash restore ✅;
       journal survives relaunch (JSON in UserDefaults) ✅; overwrites marked non-reversible and
       surfaced ✅ — reversal logic + property tests in `DirnexCore/…/UndoJournal.swift`
-- [ ] Errors: failures collected + summarized ✅; per-file skip/retry/abort still pending
+- [x] Errors: failures collected + summarized ✅; **per-file skip/retry/abort** ✅ — the engine
+      yields per failed source (`CopyEngine.run(onError:)` → `ErrorResolution` skip/retry/abort),
+      bridged to a main-actor `ErrorDialog` by `ErrorPrompter` ("apply to all" = skip-all)
 - [x] Drop onto panel = real copy/move through the queue ✅ (pane-to-pane, into a
       subfolder, or from Finder; Finder's copy-vs-move conventions; routed through the
       shared queue via the same `submitTransfer` as F5/F6)
@@ -827,6 +829,42 @@ side-by-side comparison.
   deadlock) and the sheet resumed on refocus. GOTCHA: full side-by-side text *diff* is still
   deferred — the thumbnails cover the common visual case; per-file skip/retry/abort remains
   the last conflict-adjacent M2 item.
+
+Progress (2026-07-07, M2 pass 12): **per-file skip/retry/abort on errors** landed — the last
+open item of §M2's Errors line. The engine now *yields on failure* the same way pass 11 made it
+yield on conflict: instead of always collecting a failed source and moving on, it hands the
+error to a resolver that can Retry the item, Skip it, or Abort the whole op.
+
+- **Core** (`DirnexCore`, +6 tests → **144**). New value types `OperationErrorContext` (op kind +
+  failing `path` + `VFSError`) and `ErrorResolution` (retry / skip / abort). `CopyEngine.run` gained
+  an optional `onError: @Sendable (OperationErrorContext) -> ErrorResolution`; `transfer` was
+  refactored into an `attempt`-and-retry loop that, on a caught `VFSError`, rolls back the failed
+  attempt's partial bytes (so a retried copy never double-counts) and consults `onError`: `.retry`
+  re-runs the source, `.skip` collects the failure and continues (**the default when no resolver**,
+  so every existing failure test and unattended run is unchanged), `.abort` unwinds like a mid-copy
+  cancel (`wasCancelled`, no failure appended — the user already saw it). `FileOperationQueue.enqueue`
+  threads `onError` into the job and on to the engine. The conflict-resolution helpers moved to a
+  `private extension CopyRun` to keep the class under `type_body_length`. New `CopyEngineErrorTests`
+  cover skip-collects-and-continues, retry-after-transient-fault (asserting bytes tallied once),
+  retry-N-times-then-skip, abort-unwinds, abort-keeps-earlier-work, and the no-resolver default,
+  driven by a `MutableFaultBackend` that fails `copyFile` for a chosen name a fixed number of times.
+- **App** (`Dirnex/Dialogs/`). New `ErrorPrompter` (sibling of `ConflictPrompter`: same
+  copy-thread-parks-on-a-`DispatchSemaphore` bridge, an "apply to all" that is sticky **only for
+  Skip** — a sticky Retry would spin forever, Abort ends the op) and `ErrorDialog` (`NSAlert` sheet,
+  Retry [default] / Skip / Abort + a suppression checkbox, message from a shared `VFSErrorText`
+  extracted out of `PanelViewController.describe`). `PanelHost.enqueue` /
+  `BrowserWindowController+Queue.enqueue` / `submitTransfer` gained the `onError` parameter, so F5/F6
+  **and** drag-drop all raise it. The window's end-of-op `reportFailures` summary still fires for the
+  Skip case; Abort stays silent (empty failures). Whole repo swiftformat/swiftlint-strict clean.
+- **Verified live via computer-use** (a `~/dirnex-err-verify/{src,dst}` fixture with `dst` chmod
+  `0555` so a copy into it hits EACCES): F5 of `payload.txt` raised "Couldn't copy 'payload.txt'"
+  with the permission text, the apply-to-all checkbox, Retry/Skip/Abort, and the queue bar parked at
+  "Copying payload.txt · Zero KB of 13 bytes" behind it. **Retry** after `chmod 0755`-ing `dst`
+  mid-sheet (the copy thread was parked) completed byte-exact (`cmp` IDENTICAL). **Abort** on a
+  re-locked `dst` was silent — no summary, queue bar gone, nothing copied. **Skip** collected the
+  failure and surfaced the end-of-op "Couldn't copy 'other.txt'" summary. **§M2's Errors line is now
+  `[x]`.** Deferred: sub-item granularity (an error deep in a recursive directory copy still fails the
+  whole top-level source, not the individual child) and a full text diff in the conflict dialog.
 
 Exit: 50 GB copy runs in background while browsing stays 60fps; yanking a USB drive
 mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixes it.

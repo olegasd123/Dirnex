@@ -71,17 +71,23 @@ public actor FileOperationQueue {
     /// `resolveConflict` is only meaningful when `conflictPolicy` is `.ask`: it is handed to
     /// the engine so a colliding item can be resolved per file (TC's conflict dialog). It
     /// runs on the job's background copy thread, so the app bridges it to a main-actor prompt.
+    ///
+    /// `onError` is consulted when a source fails to transfer — TC's per-file "Skip / Retry /
+    /// Abort" dialog. Like `resolveConflict` it runs on the copy thread; a missing one leaves
+    /// the engine's default (collect the failure and carry on).
     @discardableResult
     public func enqueue(
         _ operation: FileOperation,
         conflictPolicy: ConflictPolicy = .fail,
-        resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)? = nil
+        resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)? = nil,
+        onError: (@Sendable (OperationErrorContext) -> ErrorResolution)? = nil
     ) -> OperationJobID {
         let id = OperationJobID()
         jobs[id] = Job(
             operation: operation,
             policy: conflictPolicy,
             resolveConflict: resolveConflict,
+            onError: onError,
             volumes: resolveVolumes(for: operation),
             status: .waiting,
             progress: nil,
@@ -146,6 +152,7 @@ public actor FileOperationQueue {
         let operation = job.operation
         let policy = job.policy
         let resolveConflict = job.resolveConflict
+        let onError = job.onError
         let backend = backend
         let (progressStream, progressContinuation) = AsyncStream<OperationProgress>.makeStream()
 
@@ -158,6 +165,7 @@ public actor FileOperationQueue {
                 using: backend,
                 conflictPolicy: policy,
                 resolveConflict: resolveConflict,
+                onError: onError,
                 onProgress: { progressContinuation.yield($0) },
                 isCancelled: { control.checkpoint() }
             )
@@ -281,6 +289,9 @@ public actor FileOperationQueue {
         let policy: ConflictPolicy
         /// The per-file conflict resolver, only used when `policy` is `.ask` (see `enqueue`).
         let resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)?
+        /// The per-file error resolver (skip/retry/abort); `nil` keeps the collect-and-carry
+        /// default (see `enqueue`).
+        let onError: (@Sendable (OperationErrorContext) -> ErrorResolution)?
         let volumes: Set<String>
         var status: JobStatus
         var progress: OperationProgress?
