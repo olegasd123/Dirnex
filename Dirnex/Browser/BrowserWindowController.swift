@@ -87,6 +87,10 @@ final class BrowserWindowController: NSWindowController, PanelHost {
 
         // The two panes live in their own split view, so the sidebar toggle only resizes this
         // group as a whole and the panes keep their 50/50 ratio (see `panesSplitViewController`).
+        // A `HairlineSplitView` tints the inter-pane divider to match the column-header borders;
+        // it must replace the default split view before any items are added (the setter clears
+        // them). Setting it also re-adopts the controller as the split view's delegate.
+        panesSplitViewController.splitView = HairlineSplitView()
         panesSplitViewController.splitView.isVertical = true
         panesSplitViewController.splitView.dividerStyle = .thin
         panesSplitViewController.splitView.autosaveName = Self.panesAutosaveName
