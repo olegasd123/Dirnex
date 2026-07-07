@@ -9,7 +9,13 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     let leftPanel: PanelViewController
     let rightPanel: PanelViewController
     private let sidebar = SidebarViewController()
+    /// Outer split: `[sidebar, panes]`. Collapsing/expanding the sidebar only ever resizes
+    /// the panes group as a whole.
     private let splitViewController = NSSplitViewController()
+    /// Inner split: `[leftPanel, rightPanel]`. Kept separate so the sidebar toggle can't
+    /// steal width from just the adjacent pane — the two panes redistribute proportionally in
+    /// both directions here, holding their ratio across any number of sidebar toggles.
+    private let panesSplitViewController = NSSplitViewController()
     private weak var activePanel: PanelViewController?
 
     /// The shared background operation engine both panes route F5/F6 through, so copies and
@@ -66,7 +72,20 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         splitViewController.splitView.dividerStyle = .thin
         splitViewController.splitView.autosaveName = "BrowserSplit"
 
-        // The places/volumes strip leads, then the two panes. It's a real macOS sidebar
+        // The two panes live in their own split view, so the sidebar toggle only resizes this
+        // group as a whole and the panes keep their 50/50 ratio (see `panesSplitViewController`).
+        panesSplitViewController.splitView.isVertical = true
+        panesSplitViewController.splitView.dividerStyle = .thin
+        panesSplitViewController.splitView.autosaveName = "BrowserPanes"
+        for panel in [leftPanel, rightPanel] {
+            let item = NSSplitViewItem(viewController: panel)
+            item.holdingPriority = NSLayoutConstraint.Priority(250)
+            item.canCollapse = false
+            panesSplitViewController.addSplitViewItem(item)
+            panel.host = self
+        }
+
+        // The places/volumes strip leads, then the panes group. It's a real macOS sidebar
         // (vibrant, collapsible via View ▸ Show Sidebar) that drives the active pane.
         sidebar.delegate = self
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
@@ -75,13 +94,9 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         sidebarItem.canCollapse = true
         splitViewController.addSplitViewItem(sidebarItem)
 
-        for panel in [leftPanel, rightPanel] {
-            let item = NSSplitViewItem(viewController: panel)
-            item.holdingPriority = NSLayoutConstraint.Priority(250)
-            item.canCollapse = false
-            splitViewController.addSplitViewItem(item)
-            panel.host = self
-        }
+        let panesItem = NSSplitViewItem(viewController: panesSplitViewController)
+        panesItem.canCollapse = false
+        splitViewController.addSplitViewItem(panesItem)
 
         window.contentViewController = makeContainerViewController()
         window.center()
