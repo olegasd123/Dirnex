@@ -389,10 +389,11 @@ Goal: TC's killer feature — queued, non-blocking, undoable file operations.
 - [x] Delete (F8): to Trash; Shift+F8 permanent with explicit confirm
 - [x] New folder (F7) ✅, inline rename (F2) ✅ — Enter-on-name deferred (Enter opens
       the cursor entry in the TC key model, so F2 is the rename trigger)
-- [~] Progress UI: the window-bottom **queue bar** landed ✅ — aggregate determinate
-      progress + live throughput + ETA, current-item label, pause/resume + cancel-all
-      buttons, non-blocking (replaced the modal progress sheet, now deleted); the
-      expandable per-job list is the remaining UI work
+- [x] Progress UI: the window-bottom **queue bar** ✅ — aggregate determinate progress +
+      live throughput + ETA, current-item label, pause/resume + cancel-all buttons,
+      non-blocking (replaced the modal progress sheet, now deleted) — plus an **expandable
+      per-job list** ✅ (disclosure chevron → one scrollable row per queued copy/move, each
+      with its own progress bar + cancel button)
 - [ ] Conflict engine: up-front ask/overwrite/skip/keep-both ✅ + newer-only ✅; "apply to
       all" and the rich dialog (size/date, text diff, image thumbnails) still pending
 - [x] Undo journal: Cmd+Z reverses move/rename/copy/new-folder + delete-to-Trash restore ✅;
@@ -747,6 +748,32 @@ property tests; the app is the thin shell that records completed ops and drives 
   relaunch test — a move, graceful quit, relaunch (journal reloaded, menu still read "Undo
   Move"), Cmd+Z reversed it. Every step confirmed on disk. NEXT M2: rich per-file conflict
   dialog ("apply to all"), expandable per-job queue-bar list, per-file skip/retry/abort.
+
+Progress (2026-07-07, M2 pass 10): the queue bar's **expandable per-job list** landed —
+the last open piece of §M2's Progress-UI line (app-target only; `DirnexCore` untouched,
+still 131 tests). The compact aggregate row gained a disclosure chevron; expanding it
+reveals a scrollable list of one row per in-flight/waiting job — verb + item name, its own
+determinate progress bar, a byte readout, and a per-job cancel button — all rendered from
+the `QueueSnapshot.jobs` the window already receives, so there was **no core change**
+(the per-item data was published back in pass 4).
+
+- **App wiring.** New `QueueJobRowView` (own file) renders a single `JobSnapshot`.
+  `QueueBarView` grew a disclosure header over a bottom `NSScrollView` + vertical
+  `NSStackView` list; it reconciles rows against each snapshot (a fast path updates the
+  existing rows in place when the job set/order is unchanged, else it rebuilds) and reports
+  a dynamic `preferredHeight` (collapsed 42 → header + up to 5 rows, more scroll) through a
+  new `onPreferredHeightChanged` callback so `BrowserWindowController` grows/shrinks the
+  window-bottom band. A per-row cancel routes through a new `onCancelJob` → the window's
+  `cancelJob(id)` → `queue.cancel(id)` (the actor's existing per-job cancel from pass 4).
+  The job-list-height constraint drives the internal layout — the header fills the fixed
+  top band above the scroll area — so the collapsed/hidden case is identical to the prior
+  bar. App builds clean; touched files swiftformat/swiftlint-strict clean; app test target
+  green; launching the built binary showed **no Auto Layout conflicts** (collapsed layout
+  verified). NOT yet driven live in the UI: expanding the list *during* an in-flight
+  transfer needs the pass-6/7 cross-volume disk-image setup to keep the bar on screen long
+  enough — the collapsed-layout launch check passed and the per-job data path is the one
+  pass 6 already verified live. NEXT M2: rich per-file conflict dialog ("apply to all") and
+  per-file skip/retry/abort (both need the engine to yield control mid-operation).
 
 Exit: 50 GB copy runs in background while browsing stays 60fps; yanking a USB drive
 mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixes it.

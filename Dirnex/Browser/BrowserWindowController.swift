@@ -88,6 +88,8 @@ final class BrowserWindowController: NSWindowController, PanelHost {
 
         queueBar.onPauseToggle = { [weak self] in self?.togglePause() }
         queueBar.onCancelAll = { [weak self] in self?.cancelAllJobs() }
+        queueBar.onCancelJob = { [weak self] id in self?.cancelJob(id) }
+        queueBar.onPreferredHeightChanged = { [weak self] in self?.updateQueueBarHeight() }
         startObservingQueue()
     }
 
@@ -134,7 +136,14 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     func setQueueBar(visible: Bool) {
         guard queueBar.isHidden == visible else { return }
         queueBar.isHidden = !visible
-        queueBarHeight.constant = visible ? QueueBarView.preferredHeight : 0
+        queueBarHeight.constant = visible ? queueBar.preferredHeight : 0
+    }
+
+    /// Follow the queue bar's height as its per-job list expands or collapses. Only adjusts
+    /// while the bar is shown; `setQueueBar(visible:)` owns the collapse-to-zero when idle.
+    func updateQueueBarHeight() {
+        guard !queueBar.isHidden else { return }
+        queueBarHeight.constant = queueBar.preferredHeight
     }
 
     override func showWindow(_ sender: Any?) {

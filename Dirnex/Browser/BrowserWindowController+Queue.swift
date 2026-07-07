@@ -101,4 +101,11 @@ extension BrowserWindowController {
         let queue = queue
         Task { await queue.cancelAll() }
     }
+
+    /// Cancel one job from the queue bar's per-job list. A waiting job is dropped; a running
+    /// one unwinds through the engine's normal cancel (partial file cleaned up).
+    func cancelJob(_ id: OperationJobID) {
+        let queue = queue
+        Task { await queue.cancel(id) }
+    }
 }

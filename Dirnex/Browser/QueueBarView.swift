@@ -5,27 +5,51 @@ import DirnexCore
 /// shared `FileOperationQueue`. Unlike the old modal progress sheet, it lets the user keep
 /// browsing while a large transfer runs in the background — TC's killer feature.
 ///
-/// A deliberately compact first cut: what's happening, an aggregate determinate bar, a
-/// byte/throughput/ETA readout, and pause/resume + cancel-all buttons. The expandable
-/// per-job list is the remaining M2 UI work; the bar itself renders from a `QueueSnapshot`
-/// and knows nothing about the queue actor — the window controller feeds it and wires the
-/// buttons back.
+/// A compact header row (what's happening, an aggregate determinate bar, a byte/throughput/
+/// ETA readout, pause/resume + cancel-all) sits over an expandable per-job list: the
+/// disclosure chevron reveals one row per queued copy/move, each with its own progress and
+/// cancel button. The bar renders from a `QueueSnapshot` and knows nothing about the queue
+/// actor — the window controller feeds it snapshots, wires the buttons back, and follows the
+/// bar's `preferredHeight` as the list expands and collapses.
 @MainActor
 final class QueueBarView: NSView {
-    /// The bar's height when shown; the window controller collapses it to zero when idle.
-    static let preferredHeight: CGFloat = 42
+    /// The bar's height with the per-job list collapsed; the window controller collapses it
+    /// to zero when idle and grows it to `preferredHeight` as jobs are disclosed.
+    static let collapsedHeight: CGFloat = 42
+    /// Rows shown before the list starts scrolling, so a big batch can't eat the window.
+    private static let maxVisibleRows = 5
+    /// Breathing room above and below the job rows inside the scroll area.
+    private static let listPadding: CGFloat = 6
 
     /// Fired when the pause/resume button is clicked; the window controller toggles the
     /// queue. The bar doesn't own queue state — it re-renders from the next snapshot.
     var onPauseToggle: (() -> Void)?
     /// Fired when the cancel-all button is clicked.
     var onCancelAll: (() -> Void)?
+    /// Fired when a per-job row's cancel button is clicked, carrying the job to cancel.
+    var onCancelJob: ((OperationJobID) -> Void)?
+    /// Fired when `preferredHeight` changes (disclosure toggled, or the job count crossed a
+    /// row boundary while expanded) so the window controller can resize the bar to match.
+    var onPreferredHeightChanged: (() -> Void)?
 
+    private let disclosureButton = NSButton()
     private let statusLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
     private let bar = NSProgressIndicator()
     private let pauseButton = NSButton()
     private let cancelButton = NSButton()
+
+    let jobScroll = NSScrollView()
+    let jobStack = NSStackView()
+    var jobListHeight: NSLayoutConstraint!
+    /// Live per-job rows, reused across snapshots and keyed by job so a steady stream of
+    /// progress updates edits them in place instead of rebuilding the list.
+    var jobRows: [OperationJobID: QueueJobRowView] = [:]
+    /// The jobs currently shown, in order — the fast-path key: an unchanged list just
+    /// updates rows in place, a changed one rebuilds and re-reports the height.
+    var displayedJobIDs: [OperationJobID] = []
+    var isExpanded = false
+    var lastReportedHeight: CGFloat = QueueBarView.collapsedHeight
 
     private static let byteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
@@ -52,6 +76,42 @@ final class QueueBarView: NSView {
     }
 
     private func buildLayout() {
+        configureAggregateViews()
+        let header = makeHeaderStack()
+        buildJobList()
+
+        // A hairline separator divides the bar from the panes above it.
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+
+        header.translatesAutoresizingMaskIntoConstraints = false
+        jobScroll.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(separator)
+        addSubview(header)
+        addSubview(jobScroll)
+
+        // The scroll view's fixed height (0 when collapsed) drives the whole layout: pinned to
+        // the bottom, it pushes the header up to fill the fixed-height top band above it.
+        jobListHeight = jobScroll.heightAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            separator.topAnchor.constraint(equalTo: topAnchor),
+            header.topAnchor.constraint(equalTo: separator.bottomAnchor),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: trailingAnchor),
+            jobScroll.topAnchor.constraint(equalTo: header.bottomAnchor),
+            jobScroll.leadingAnchor.constraint(equalTo: leadingAnchor),
+            jobScroll.trailingAnchor.constraint(equalTo: trailingAnchor),
+            jobScroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+            jobListHeight
+        ])
+        jobScroll.isHidden = true
+        refreshDisclosure()
+    }
+
+    private func configureAggregateViews() {
         statusLabel.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .medium)
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -67,7 +127,15 @@ final class QueueBarView: NSView {
         bar.minValue = 0
         bar.maxValue = 1
         bar.controlSize = .small
+    }
 
+    private func makeHeaderStack() -> NSStackView {
+        configure(
+            disclosureButton,
+            symbol: "chevron.right",
+            accessibility: "Show operation details",
+            action: #selector(disclosureClicked)
+        )
         configure(
             pauseButton,
             symbol: "pause.fill",
@@ -81,29 +149,35 @@ final class QueueBarView: NSView {
             action: #selector(cancelClicked)
         )
 
-        let stack = NSStackView(views: [statusLabel, bar, detailLabel, pauseButton, cancelButton])
+        let stack = NSStackView(
+            views: [disclosureButton, statusLabel, bar, detailLabel, pauseButton, cancelButton]
+        )
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 0, right: 12)
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
+        NSLayoutConstraint.activate([bar.widthAnchor.constraint(equalToConstant: 160)])
+        return stack
+    }
 
-        // A hairline separator divides the bar from the panes above it.
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
+    private func buildJobList() {
+        jobStack.orientation = .vertical
+        jobStack.alignment = .leading
+        jobStack.spacing = 0
+        jobStack.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(separator)
-        addSubview(stack)
+        jobScroll.drawsBackground = false
+        jobScroll.hasVerticalScroller = true
+        jobScroll.autohidesScrollers = true
+        jobScroll.borderType = .noBorder
+        jobScroll.documentView = jobStack
+
+        let clip = jobScroll.contentView
         NSLayoutConstraint.activate([
-            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
-            separator.topAnchor.constraint(equalTo: topAnchor),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: separator.bottomAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            bar.widthAnchor.constraint(equalToConstant: 160)
+            jobStack.topAnchor.constraint(equalTo: clip.topAnchor, constant: Self.listPadding / 2),
+            jobStack.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+            jobStack.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
+            jobStack.widthAnchor.constraint(equalTo: clip.widthAnchor)
         ])
     }
 
@@ -126,8 +200,9 @@ final class QueueBarView: NSView {
 
     // MARK: - Rendering
 
-    /// Render the current state of the queue. The window controller decides visibility (it
-    /// hides the bar when the queue is idle); this just fills in the content.
+    /// Render the current state of the queue. The window controller decides overall
+    /// visibility (it hides the bar when the queue is idle); this fills in the aggregate
+    /// header, refreshes the per-job list, and re-reports its height if the list grew or shrank.
     func update(with snapshot: QueueSnapshot) {
         let aggregate = snapshot.aggregate
         bar.doubleValue = aggregate.fraction
@@ -138,6 +213,10 @@ final class QueueBarView: NSView {
         let title = snapshot.isPaused ? "Resume" : "Pause"
         pauseButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
         pauseButton.toolTip = title
+
+        updateJobList(snapshot)
+        refreshDisclosure()
+        syncHeight()
     }
 
     private func statusText(for snapshot: QueueSnapshot) -> String {
@@ -182,4 +261,81 @@ final class QueueBarView: NSView {
 
     @objc private func pauseClicked() { onPauseToggle?() }
     @objc private func cancelClicked() { onCancelAll?() }
+
+    @objc private func disclosureClicked() {
+        isExpanded.toggle()
+        refreshDisclosure()
+        syncHeight()
+    }
+}
+
+// MARK: - Per-job list
+
+extension QueueBarView {
+    /// The bar's height including the disclosed job list: the collapsed header plus, when
+    /// expanded, up to `maxVisibleRows` rows (more scroll). The window controller sizes the
+    /// bar to this and follows `onPreferredHeightChanged` as it changes.
+    var preferredHeight: CGFloat { Self.collapsedHeight + listHeight }
+
+    /// Height of the job-list area alone — zero unless the list is expanded and non-empty.
+    private var listHeight: CGFloat {
+        guard isExpanded, !displayedJobIDs.isEmpty else { return 0 }
+        let visible = min(displayedJobIDs.count, Self.maxVisibleRows)
+        return CGFloat(visible) * QueueJobRowView.preferredHeight + Self.listPadding
+    }
+
+    /// The jobs worth listing individually: the ones still in flight or waiting. Terminal
+    /// jobs are summarized by the aggregate bar and cleared once the batch drains.
+    private func displayedJobs(in snapshot: QueueSnapshot) -> [JobSnapshot] {
+        snapshot.jobs.filter { $0.status == .waiting || $0.status == .running || $0.status == .paused }
+    }
+
+    /// Reconcile the row views against the snapshot. The common case — the same jobs in the
+    /// same order — just refreshes each row in place; a changed set rebuilds the list.
+    func updateJobList(_ snapshot: QueueSnapshot) {
+        let jobs = displayedJobs(in: snapshot)
+        let ids = jobs.map(\.id)
+        if ids == displayedJobIDs {
+            for job in jobs { jobRows[job.id]?.update(with: job) }
+        } else {
+            rebuildJobRows(jobs)
+            displayedJobIDs = ids
+        }
+    }
+
+    private func rebuildJobRows(_ jobs: [JobSnapshot]) {
+        for row in jobStack.arrangedSubviews { row.removeFromSuperview() }
+        jobRows.removeAll(keepingCapacity: true)
+        for job in jobs {
+            let row = QueueJobRowView()
+            row.onCancel = { [weak self] id in self?.onCancelJob?(id) }
+            jobStack.addArrangedSubview(row)
+            NSLayoutConstraint.activate([
+                row.heightAnchor.constraint(equalToConstant: QueueJobRowView.preferredHeight),
+                row.widthAnchor.constraint(equalTo: jobStack.widthAnchor)
+            ])
+            row.update(with: job)
+            jobRows[job.id] = row
+        }
+    }
+
+    /// Point the chevron at the current state and hide the list when there's nothing to show.
+    func refreshDisclosure() {
+        let symbol = isExpanded ? "chevron.down" : "chevron.right"
+        disclosureButton.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: isExpanded ? "Hide operation details" : "Show operation details"
+        )
+        jobScroll.isHidden = !(isExpanded && !displayedJobIDs.isEmpty)
+    }
+
+    /// Match the internal list-height constraint to the current state and, if the total bar
+    /// height changed, ask the window controller to resize the bar to fit.
+    func syncHeight() {
+        jobListHeight.constant = listHeight
+        let height = preferredHeight
+        guard height != lastReportedHeight else { return }
+        lastReportedHeight = height
+        onPreferredHeightChanged?()
+    }
 }
