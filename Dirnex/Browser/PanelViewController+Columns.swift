@@ -27,7 +27,9 @@ extension PanelViewController {
         /// also the fallback layout for a tab that has no persisted columns.
         var defaultWidth: CGFloat {
             switch self {
-            case .name: return 320
+            // Name flexes to fill the pane (`.firstColumnOnly` autoresizing), so this is
+            // only its floor at first show; Size/Date are fixed and sized to their content.
+            case .name: return 240
             case .size: return 90
             case .date: return 150
             }
@@ -35,9 +37,9 @@ extension PanelViewController {
 
         var minWidth: CGFloat {
             switch self {
-            case .name: return 140
+            case .name: return 120
             case .size: return 60
-            case .date: return 100
+            case .date: return 110
             }
         }
     }

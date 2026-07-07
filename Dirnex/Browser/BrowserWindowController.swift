@@ -37,6 +37,15 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     /// The last observed pause state, so the queue bar's button knows which way to toggle.
     var lastPaused = false
 
+    /// Autosave name for the panes split's divider geometry. A fresh install (or one still
+    /// on the pre-V2 name) has no saved entry, which is our signal to open the panes 50/50
+    /// rather than let AppKit squeeze the right pane to its minimum width.
+    private static let panesAutosaveName = "BrowserPanesV2"
+    /// Set at launch when no panes geometry is saved; consumed on first `showWindow` to
+    /// center the divider once. A later user drag persists under `panesAutosaveName` and
+    /// wins on subsequent launches.
+    private var shouldCenterPanesDivider = false
+
     init() {
         let backend = LocalBackend()
         queue = FileOperationQueue(backend: backend)
@@ -67,6 +76,11 @@ final class BrowserWindowController: NSWindowController, PanelHost {
 
         super.init(window: window)
 
+        // Read this before the split view lays out (which writes its autosave): a missing
+        // entry means a first launch, so the divider should open centered.
+        let panesGeometryKey = "NSSplitView Subview Frames \(Self.panesAutosaveName)"
+        shouldCenterPanesDivider = UserDefaults.standard.object(forKey: panesGeometryKey) == nil
+
         splitViewController.splitView.isVertical = true
         splitViewController.splitView.dividerStyle = .thin
         splitViewController.splitView.autosaveName = "BrowserSplit"
@@ -75,7 +89,7 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         // group as a whole and the panes keep their 50/50 ratio (see `panesSplitViewController`).
         panesSplitViewController.splitView.isVertical = true
         panesSplitViewController.splitView.dividerStyle = .thin
-        panesSplitViewController.splitView.autosaveName = "BrowserPanes"
+        panesSplitViewController.splitView.autosaveName = Self.panesAutosaveName
         for panel in [leftPanel, rightPanel] {
             let item = NSSplitViewItem(viewController: panel)
             item.holdingPriority = NSLayoutConstraint.Priority(250)
@@ -169,8 +183,22 @@ final class BrowserWindowController: NSWindowController, PanelHost {
 
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
+        if shouldCenterPanesDivider {
+            shouldCenterPanesDivider = false
+            centerPanesDivider()
+        }
         setActive(leftPanel)
         leftPanel.focusTable()
+    }
+
+    /// Split the two panes 50/50. Called once on a fresh layout (no saved divider
+    /// geometry), after the window is on screen so the split view has its real width.
+    private func centerPanesDivider() {
+        let splitView = panesSplitViewController.splitView
+        splitView.layoutSubtreeIfNeeded()
+        let available = splitView.bounds.width - splitView.dividerThickness
+        guard available > 0 else { return }
+        splitView.setPosition(available / 2, ofDividerAt: 0)
     }
 
     // MARK: - PanelHost

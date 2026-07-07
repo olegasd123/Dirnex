@@ -186,6 +186,9 @@ final class PanelViewController: NSViewController {
         }
 
         tableView.style = .plain
+        // Only the Name column absorbs slack as the pane resizes; Size and Date keep their
+        // set widths so they never scroll off-screen when a pane is narrow.
+        tableView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
         tableView.rowSizeStyle = .default
         tableView.usesAlternatingRowBackgroundColors = true
         tableView.allowsMultipleSelection = false

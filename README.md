@@ -52,6 +52,9 @@ swift test --package-path DirnexCore
 # App + app-target tests via Xcode:
 xcodebuild test -project Dirnex.xcodeproj -scheme Dirnex -destination 'platform=macOS'
 
+# Clean defaults
+defaults delete com.dirnex.Dirnex "NSWindow Frame MainWindow"
+
 # Run the app:
 open "$(xcodebuild -project Dirnex.xcodeproj -scheme Dirnex -showBuildSettings \
   -destination 'platform=macOS' 2>/dev/null | awk '/ BUILT_PRODUCTS_DIR /{d=$3} / FULL_PRODUCT_NAME /{p=$3} END{print d"/"p}')"
