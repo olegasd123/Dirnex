@@ -66,6 +66,10 @@ final class SidebarViewController: NSViewController {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
+        // Breathe a little between the top of the sidebar and the first "Favorites" header
+        // rather than butting the group row up against the window edge.
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsets(top: 12, left: 0, bottom: 0, right: 0)
 
         view = scrollView
     }
@@ -183,21 +187,56 @@ extension SidebarViewController: NSTableViewDelegate {
             header.configure(title: title)
             return header
         case let .place(place):
-            return itemCell(name: place.name, path: place.path, volume: nil)
+            return itemCell(name: place.name, path: place.path, kind: place.kind, volume: nil)
         case let .volume(volume):
-            return itemCell(name: volume.name, path: volume.path, volume: volume)
+            return itemCell(name: volume.name, path: volume.path, kind: nil, volume: volume)
         }
     }
 
-    /// Build (or reuse) an item cell. A `volume` argument that can eject gets the eject
-    /// button wired; places and non-ejectable volumes don't.
-    private func itemCell(name: String, path: VFSPath, volume: MountedVolume?) -> NSView {
+    /// Build (or reuse) an item cell. Favorites get a per-kind SF Symbol so Documents,
+    /// Downloads, Music, etc. read at a glance instead of all sharing the generic folder
+    /// icon; volumes keep their real Finder drive glyph. A `volume` that can eject also
+    /// gets the eject button wired.
+    private func itemCell(
+        name: String,
+        path: VFSPath,
+        kind: FavoritePlace.Kind?,
+        volume: MountedVolume?
+    ) -> NSView {
         let cell = reuse(SidebarCellView.identifier) as? SidebarCellView ?? SidebarCellView()
-        let icon = NSWorkspace.shared.icon(forFile: path.path)
+        let icon: NSImage
+        if let kind {
+            icon = Self.icon(for: kind)
+        } else {
+            icon = NSWorkspace.shared.icon(forFile: path.path)
+            icon.size = NSSize(width: 18, height: 18)
+        }
         let canEject = volume?.canEject ?? false
         cell.configure(name: name, image: icon, canEject: canEject, tooltip: capacityTooltip(volume))
         cell.onEject = canEject ? { [weak self] in volume.map { self?.eject($0) } } : nil
         return cell
+    }
+
+    /// A monochrome SF Symbol standing in for each favorite folder. Returned as a template
+    /// image so the source-list cell tints it with the row's text color (and white when the
+    /// row is selected), matching the label.
+    private static func icon(for kind: FavoritePlace.Kind) -> NSImage {
+        let symbol: String
+        switch kind {
+        case .home: symbol = "house"
+        case .desktop: symbol = "menubar.dock.rectangle"
+        case .documents: symbol = "doc"
+        case .downloads: symbol = "arrow.down.circle"
+        case .pictures: symbol = "photo"
+        case .music: symbol = "music.note"
+        case .movies: symbol = "film"
+        case .applications: symbol = "square.grid.3x3.fill"
+        }
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        image?.isTemplate = true
+        return image ?? NSImage()
     }
 
     private func reuse(_ identifier: NSUserInterfaceItemIdentifier) -> NSView? {

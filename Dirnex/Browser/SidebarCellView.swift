@@ -69,9 +69,11 @@ final class SidebarCellView: NSTableCellView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// The image arrives already sized by the caller (a fixed square for volume icons, an
+    /// SF Symbol's natural aspect for favorites); the 18×18 image view + proportional scaling
+    /// keeps it in bounds without squashing non-square symbols.
     func configure(name: String, image: NSImage, canEject: Bool, tooltip: String?) {
         label.stringValue = name
-        image.size = NSSize(width: 18, height: 18)
         icon.image = image
         ejectButton.isHidden = !canEject
         toolTip = tooltip
