@@ -40,6 +40,12 @@ protocol FileTableViewInput: AnyObject {
     func fileTableDeletePermanently(_ tableView: FileTableView)
     /// The table became first responder — its pane should become the active one.
     func fileTableDidBecomeFirstResponder(_ tableView: FileTableView)
+    /// A mouse button went down on `row` (or `-1` in empty space) with `modifiers`
+    /// held — the Finder-style click selection (plain / Cmd-toggle / Shift-range).
+    /// Returns `true` when the controller consumed it as a modifier selection and the
+    /// table should skip its own click handling (no cursor move, no drag); `false` for a
+    /// plain click, which the table still runs for cursor movement and drag-out.
+    func fileTable(_ tableView: FileTableView, didClickRow row: Int, modifiers: NSEvent.ModifierFlags) -> Bool
 }
 
 /// `NSTableView` subclass that intercepts the file-manager key model before the
@@ -64,6 +70,20 @@ final class FileTableView: NSTableView {
     /// type-to-filter (then the marks).
     override func cancelOperation(_ sender: Any?) {
         inputDelegate?.fileTableCancel(self)
+    }
+
+    /// Route clicks through the controller's Finder-style selection first. A Cmd/Shift
+    /// click is consumed there (it drives the mark set, not the table's own single
+    /// selection); a plain click leaves the marks alone and falls through to `super` so
+    /// the cursor moves and a drag-out can begin.
+    override func mouseDown(with event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let point = convert(event.locationInWindow, from: nil)
+        let row = row(at: point)
+        if inputDelegate?.fileTable(self, didClickRow: row, modifiers: flags) == true {
+            return
+        }
+        super.mouseDown(with: event)
     }
 
     override func keyDown(with event: NSEvent) {

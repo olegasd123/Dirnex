@@ -103,6 +103,48 @@ struct PanelTests {
         #expect(subject.selectionCount == 0)
     }
 
+    // MARK: - Mouse (Finder-style) selection
+
+    @Test("toggleMarkMovingCursor flips a mark and moves the cursor")
+    func toggleMarkMovesCursor() {
+        var subject = panel(["a", "b", "c"], sort: flatSort)
+        subject.toggleMarkMovingCursor(to: 1)
+        #expect(subject.selectedEntries.map(\.name) == ["b"])
+        #expect(subject.cursor == 1)
+        subject.toggleMarkMovingCursor(to: 1)
+        #expect(subject.selectionCount == 0)
+        #expect(subject.cursor == 1)
+    }
+
+    @Test("selectRange marks the inclusive run and unions onto the base")
+    func selectRangeUnionsBase() {
+        var subject = panel(["a", "b", "c", "d", "e"], sort: flatSort)
+        // Cmd-click a and d, then Shift-click from d back through b.
+        subject.toggleMark(at: 0) // base carries "a"
+        let base: Set<VFSPath> = subject.selection
+        subject.selectRange(from: 3, through: 1, base: base)
+        #expect(Set(subject.selectedEntries.map(\.name)) == ["a", "b", "c", "d"])
+        #expect(subject.cursor == 1)
+    }
+
+    @Test("re-sweeping from the same anchor replaces the previous run but keeps the base")
+    func selectRangeResweepReplaces() {
+        var subject = panel(["a", "b", "c", "d", "e"], sort: flatSort)
+        let base: Set<VFSPath> = [] // fresh plain click at index 1, no prior marks
+        subject.selectRange(from: 1, through: 4, base: base) // b..e
+        #expect(Set(subject.selectedEntries.map(\.name)) == ["b", "c", "d", "e"])
+        subject.selectRange(from: 1, through: 2, base: base) // shrink to b..c
+        #expect(Set(subject.selectedEntries.map(\.name)) == ["b", "c"])
+    }
+
+    @Test("selectRange clamps indices to the visible entries")
+    func selectRangeClamps() {
+        var subject = panel(["a", "b", "c"], sort: flatSort)
+        subject.selectRange(from: -5, through: 99, base: [])
+        #expect(Set(subject.selectedEntries.map(\.name)) == ["a", "b", "c"])
+        #expect(subject.cursor == 2)
+    }
+
     // MARK: - Pattern (glob) selection
 
     @Test("selectMatching adds glob matches, deselectMatching removes them")

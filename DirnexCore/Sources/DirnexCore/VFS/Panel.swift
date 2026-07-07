@@ -183,6 +183,34 @@ public struct Panel: Sendable {
         }
     }
 
+    // MARK: - Mouse (Finder-style) selection
+
+    /// Finder's Cmd-click: flip the mark on the entry at `index` and move the cursor
+    /// onto it (a no-op for an out-of-range index).
+    public mutating func toggleMarkMovingCursor(to index: Int) {
+        guard entry(at: index) != nil else { return }
+        toggleMark(at: index)
+        moveCursor(to: index)
+    }
+
+    /// Finder's Shift-click: mark the inclusive run of visible entries between `anchor`
+    /// and `index`, unioned onto `base` — the marks that predate this range sweep, so a
+    /// Shift-click keeps earlier Cmd-clicked marks and each re-sweep from the same anchor
+    /// replaces only the previous run. Both indices are clamped to the visible entries,
+    /// and the cursor lands on `index`.
+    public mutating func selectRange(from anchor: Int, through index: Int, base: Set<VFSPath>) {
+        guard !model.isEmpty else { return }
+        let lastRow = model.count - 1
+        let anchorRow = min(max(anchor, 0), lastRow)
+        let targetRow = min(max(index, 0), lastRow)
+        var marks = base
+        for row in min(anchorRow, targetRow)...max(anchorRow, targetRow) {
+            marks.insert(model[row].id)
+        }
+        selection = marks
+        moveCursor(to: index)
+    }
+
     // MARK: - Helpers
 
     private func entry(at index: Int) -> FileEntry? {

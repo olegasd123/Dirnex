@@ -81,6 +81,14 @@ final class PanelViewController: NSViewController {
     /// `panel.cursor` into the table, the resulting selection-changed callback must
     /// not write it straight back. Internal for the table delegate in its own file.
     var isSyncingSelection = false
+    /// Finder-style mouse-selection bookkeeping (see `PanelViewController+MouseSelect`).
+    /// `mouseSelectionAnchor` is the entry a Shift-click range extends from;
+    /// `mouseSelectionBase` is the mark set that predates the current range sweep, so a
+    /// Shift-click keeps earlier Cmd-clicked marks. Both are view-only — `Panel` stays
+    /// unaware — and identity-keyed so they survive a re-sort or refresh and self-heal
+    /// when the anchor entry disappears. Reset on navigation and when the marks are cleared.
+    var mouseSelectionAnchor: VFSPath?
+    var mouseSelectionBase: Set<VFSPath> = []
     /// Guards the column-layout capture against feedback: applying a tab's stored widths
     /// and order itself posts resize/move notifications, which must not be recorded back
     /// as if the user had dragged them. Internal for `PanelViewController+Columns`.
@@ -229,6 +237,7 @@ final class PanelViewController: NSViewController {
                 let listing = try await DirectoryLoader.list(backend, at: path)
                 guard token == loadToken else { return }
                 panel.setListing(listing)
+                resetMouseSelectionAnchor()
                 // Entering a directory starts fresh — a quick-filter from the folder we
                 // just left shouldn't silently hide the new folder's contents.
                 if !panel.model.filter.isEmpty {
@@ -397,6 +406,7 @@ extension PanelViewController: FileTableViewInput {
             setFilter("")
         } else if panel.selectionCount > 0 {
             panel.clearSelection()
+            resetMouseSelectionAnchor()
             tableView.reloadData()
             updateChrome()
             refreshQuickLookIfVisible()
@@ -463,38 +473,5 @@ extension PanelViewController: FileTableViewInput {
 
     func fileTableDidBecomeFirstResponder(_ tableView: FileTableView) {
         host?.panelDidBecomeActive(self)
-    }
-}
-
-// MARK: - PathBarViewDelegate
-
-extension PanelViewController: PathBarViewDelegate {
-    func pathBar(_ bar: PathBarView, didActivate path: VFSPath) {
-        // Landing on the branch we came from (when the path is an ancestor of the
-        // current directory) makes a multi-level crumb jump feel like walking up.
-        let focus = path.child(towards: panel.path)
-        navigate(to: path, focus: focus)
-        focusTable()
-    }
-
-    func pathBarDidCancel(_ bar: PathBarView) {
-        focusTable()
-    }
-
-    func pathBarDidBeginEditing(_ bar: PathBarView) {
-        host?.panelDidBecomeActive(self)
-    }
-
-    func pathBar(_ bar: PathBarView, childDirectoriesOf directory: VFSPath) async -> [String] {
-        let showHidden = panel.model.showHidden
-        do {
-            let listing = try await DirectoryLoader.list(backend, at: directory)
-            return listing.entries
-                .filter { $0.isDirectoryLike && (showHidden || !$0.isHidden) }
-                .map(\.name)
-                .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-        } catch {
-            return []
-        }
     }
 }
