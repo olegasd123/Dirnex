@@ -48,7 +48,7 @@ extension PanelViewController {
                 urls.compactMap { try? backend.stat(at: VFSPath.local($0.path)) }
             }.value
             guard !sources.isEmpty else { return }
-            _ = await submitTransfer(kind: kind, sources: sources, destination: destination)
+            submitTransfer(kind: kind, sources: sources, destination: destination)
             // A drop makes this pane the active one, matching Finder's focus-follows-drop.
             host?.panelDidBecomeActive(self)
             focusTable()

@@ -8,9 +8,19 @@ import DirnexCore
 extension BrowserWindowController {
     // MARK: - PanelHost
 
-    func enqueue(_ operation: FileOperation, conflictPolicy: ConflictPolicy) {
+    func enqueue(
+        _ operation: FileOperation,
+        conflictPolicy: ConflictPolicy,
+        resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)?
+    ) {
         let queue = queue
-        Task { await queue.enqueue(operation, conflictPolicy: conflictPolicy) }
+        Task {
+            await queue.enqueue(
+                operation,
+                conflictPolicy: conflictPolicy,
+                resolveConflict: resolveConflict
+            )
+        }
     }
 
     // MARK: - Observation

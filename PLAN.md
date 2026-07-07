@@ -394,8 +394,11 @@ Goal: TC's killer feature — queued, non-blocking, undoable file operations.
       non-blocking (replaced the modal progress sheet, now deleted) — plus an **expandable
       per-job list** ✅ (disclosure chevron → one scrollable row per queued copy/move, each
       with its own progress bar + cancel button)
-- [ ] Conflict engine: up-front ask/overwrite/skip/keep-both ✅ + newer-only ✅; "apply to
-      all" and the rich dialog (size/date, text diff, image thumbnails) still pending
+- [x] Conflict engine: ask/overwrite/skip/keep-both ✅ + newer-only ✅; **rich per-file
+      dialog** ✅ (side-by-side thumbnails + size + date, newer item flagged) with **"apply
+      to all"** ✅ — the engine now yields per conflict (`ConflictPolicy.ask` +
+      `resolveConflict` callback). Full side-by-side text diff still deferred (thumbnails
+      already give images a preview and text files a content peek)
 - [x] Undo journal: Cmd+Z reverses move/rename/copy/new-folder + delete-to-Trash restore ✅;
       journal survives relaunch (JSON in UserDefaults) ✅; overwrites marked non-reversible and
       surfaced ✅ — reversal logic + property tests in `DirnexCore/…/UndoJournal.swift`
@@ -774,6 +777,56 @@ the `QueueSnapshot.jobs` the window already receives, so there was **no core cha
   enough — the collapsed-layout launch check passed and the per-job data path is the one
   pass 6 already verified live. NEXT M2: rich per-file conflict dialog ("apply to all") and
   per-file skip/retry/abort (both need the engine to yield control mid-operation).
+
+Progress (2026-07-07, M2 pass 11): the **rich per-file conflict dialog with "apply to
+all"** landed — the last open piece of §M2's conflict engine. The engine now *yields
+control mid-operation* (the recurring blocker the prior passes flagged): instead of a
+single up-front policy, F5/F6/drop enqueue under a new `ConflictPolicy.ask` and the engine
+calls back into the app per colliding item, so the user resolves each conflict against a
+side-by-side comparison.
+
+- **Core** (`DirnexCore`, +7 tests → **138**). `ConflictPolicy` gained `.ask`; new value
+  types `ConflictContext` (the operation kind + the incoming `source` and the `existing`
+  destination `FileEntry`) and `ConflictResolution` (overwrite / overwriteIfNewer / skip /
+  keepBoth / **cancel** = abort the whole op). `CopyEngine.run` takes an optional
+  `resolveConflict: @Sendable (ConflictContext) -> ConflictResolution`; when the policy is
+  `.ask` and a destination is occupied, it calls the resolver **synchronously on the copy
+  thread** (never for a non-colliding source) and maps the answer onto the existing
+  temp-swap / keep-both / newer-only plans — `.cancel` throws `CancellationError`, unwinding
+  through the same path as a mid-copy cancel (`wasCancelled`, already-done items kept). A
+  missing resolver degrades to `.fail` (never clobbers). `FileOperationQueue.enqueue`
+  threads the resolver into the job and on to `CopyEngine.run`. New `CopyEngineAskTests`
+  cover each resolution, "only colliding sources ask", cancel-aborts-the-batch, and the
+  no-resolver fallback. The engine's serial top-level processing means the resolver is
+  called one conflict at a time, so "apply to all" is a pure caller concern (see below).
+- **App** (`Dirnex/Dialogs/`, new group per §3). `ConflictPrompter` (`@unchecked Sendable`,
+  one per enqueued op) is the bridge: the engine's copy-thread callback blocks on a
+  `DispatchSemaphore` while a `Task { @MainActor }` runs `ConflictDialog.present`, then reads
+  the answer back across the semaphore — the same background-parks-on-a-primitive shape the
+  queue already uses for pause (`JobControl.checkpoint`), so no `CopyEngine` change was
+  needed. A ticked **"Apply to all remaining conflicts"** stores a sticky `ConflictResolution`
+  (touched only on the single copy thread) that answers every later conflict without a
+  prompt — scoped to that one operation, like TC's "Overwrite all". `ConflictDialog` is an
+  `NSAlert` sheet with a `ConflictComparisonView` accessory: two cards (New vs. Already here)
+  each showing a **Quick Look thumbnail** (`QLThumbnailGenerator`, images preview / text a
+  content peek; falls back to the workspace icon), name, size-or-"Folder", and modification
+  date with the **newer item's date tinted**; buttons Replace / Keep Both / Skip / Replace If
+  Newer / Cancel + the suppression checkbox. `PanelViewController+Copy.submitTransfer` was
+  rewritten to build a prompter and enqueue with `.ask` (dropping the old up-front
+  detect-then-single-prompt); `PanelHost.enqueue` / `BrowserWindowController+Queue` grew the
+  resolver parameter; drag-drop is covered for free (it already routes through
+  `submitTransfer`). App builds clean; whole repo swiftformat/swiftlint-strict clean.
+- **Verified live via computer-use** (seeded both panes at a `~/conflict-verify/{left,right}`
+  fixture where every name collides, left files newer): copying `report.txt` raised the rich
+  dialog — both cards with thumbnails (the QL previews even showed the file text), "19 bytes
+  · 01.07.2026 · newer" tinted vs. "5 bytes · 01.01.2026", the queue bar parked at "Copying
+  re…" behind it — and **Replace** overwrote it byte-exact leaving `notes.txt` untouched, no
+  temp detritus; marking **both** files then **Apply to all + Replace** overwrote both from a
+  **single** dialog (no second prompt); **Keep Both** produced `report copy.txt` while keeping
+  the original. Backgrounding the app mid-dialog left the copy thread parked (no crash, no
+  deadlock) and the sheet resumed on refocus. GOTCHA: full side-by-side text *diff* is still
+  deferred — the thumbnails cover the common visual case; per-file skip/retry/abort remains
+  the last conflict-adjacent M2 item.
 
 Exit: 50 GB copy runs in background while browsing stays 60fps; yanking a USB drive
 mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixes it.

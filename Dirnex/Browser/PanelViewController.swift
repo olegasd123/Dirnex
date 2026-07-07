@@ -14,7 +14,14 @@ protocol PanelHost: AnyObject {
     /// Enqueue a byte-moving operation (copy/move) on the window's shared background
     /// queue (PLAN.md §M2 `FileOperationQueue`). Fire-and-forget from the pane's view:
     /// the window's queue bar shows progress and both panes re-list as jobs finish.
-    func enqueue(_ operation: FileOperation, conflictPolicy: ConflictPolicy)
+    /// `resolveConflict` is only used when `conflictPolicy` is `.ask` — the engine calls it
+    /// per colliding item (TC's per-file conflict dialog); it runs on the background copy
+    /// thread, so an app resolver bridges it to a main-actor prompt (`ConflictPrompter`).
+    func enqueue(
+        _ operation: FileOperation,
+        conflictPolicy: ConflictPolicy,
+        resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)?
+    )
 
     /// Record a completed, reversible operation (New Folder, rename, Move-to-Trash) on the
     /// window's shared undo journal so Cmd+Z can reverse it (PLAN.md §M2 "Undo journal").

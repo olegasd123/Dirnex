@@ -25,9 +25,9 @@ public struct FileOperation: Sendable {
     }
 }
 
-/// What to do when a source's destination is already occupied. Resolved up front for
-/// the whole operation in this first cut; the interactive per-file dialog (side-by-side
-/// sizes/dates, thumbnails, "apply to all") arrives with the M2 conflict-engine pass.
+/// What to do when a source's destination is already occupied. A single policy can be
+/// fixed for the whole operation, or `ask` can hand each conflict to a resolver so the
+/// app can raise its rich per-file dialog and remember an "apply to all" choice.
 public enum ConflictPolicy: Sendable, Equatable {
     /// Treat any existing destination as a per-item failure — the safe default, so a
     /// caller that forgets to resolve conflicts never silently clobbers data.
@@ -47,6 +47,47 @@ public enum ConflictPolicy: Sendable, Equatable {
     case newerOnly
     /// Copy the source under a fresh, non-colliding name ("file copy.txt", "file copy 2.txt").
     case keepBoth
+    /// Hand each conflict to the operation's resolver as the engine reaches it — the mode
+    /// behind TC's per-file conflict dialog with "apply to all". The engine blocks on the
+    /// resolver (the caller runs on a background task, so it can bridge to a main-actor
+    /// prompt), then acts on the returned `ConflictResolution`. Falls back to `fail` when
+    /// no resolver was supplied. See `CopyEngine.run(resolveConflict:)`.
+    case ask
+}
+
+/// One conflict handed to an `ask`-policy resolver: the source about to be written and the
+/// item already sitting at its destination, so the app can show a side-by-side comparison
+/// (names, sizes, dates, thumbnails) before deciding. Delivered synchronously on the
+/// engine's copy thread; the resolver may block it while a prompt is on screen.
+public struct ConflictContext: Sendable, Equatable {
+    /// Whether the operation is a copy or a move, for the dialog's wording.
+    public let kind: FileOperation.Kind
+    /// The item being transferred in.
+    public let source: FileEntry
+    /// The item already occupying the destination path.
+    public let existing: FileEntry
+
+    public init(kind: FileOperation.Kind, source: FileEntry, existing: FileEntry) {
+        self.kind = kind
+        self.source = source
+        self.existing = existing
+    }
+}
+
+/// One conflict's answer from an `ask`-policy resolver — the per-conflict analogue of a
+/// `ConflictPolicy`, plus `cancel` to abort the whole operation from the dialog.
+public enum ConflictResolution: Sendable, Equatable {
+    /// Replace the existing item (atomic temp-swap, like `ConflictPolicy.overwrite`).
+    case overwrite
+    /// Replace only if the source is strictly newer (like `ConflictPolicy.newerOnly`).
+    case overwriteIfNewer
+    /// Leave the existing item and skip this source.
+    case skip
+    /// Transfer under a fresh non-colliding name (like `ConflictPolicy.keepBoth`).
+    case keepBoth
+    /// Stop the whole operation now, leaving already-completed items in place — the engine
+    /// reports it as cancelled, exactly like a mid-copy cancel.
+    case cancel
 }
 
 /// A live snapshot of an operation's progress, delivered to the caller's progress UI.

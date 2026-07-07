@@ -67,12 +67,21 @@ public actor FileOperationQueue {
     /// Add an operation to the queue and try to start it. Returns the id used to cancel it
     /// or find it in a snapshot. Jobs keep FIFO order within a volume; across volumes they
     /// may overtake one another as slots free up.
+    ///
+    /// `resolveConflict` is only meaningful when `conflictPolicy` is `.ask`: it is handed to
+    /// the engine so a colliding item can be resolved per file (TC's conflict dialog). It
+    /// runs on the job's background copy thread, so the app bridges it to a main-actor prompt.
     @discardableResult
-    public func enqueue(_ operation: FileOperation, conflictPolicy: ConflictPolicy = .fail) -> OperationJobID {
+    public func enqueue(
+        _ operation: FileOperation,
+        conflictPolicy: ConflictPolicy = .fail,
+        resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)? = nil
+    ) -> OperationJobID {
         let id = OperationJobID()
         jobs[id] = Job(
             operation: operation,
             policy: conflictPolicy,
+            resolveConflict: resolveConflict,
             volumes: resolveVolumes(for: operation),
             status: .waiting,
             progress: nil,
@@ -136,6 +145,7 @@ public actor FileOperationQueue {
 
         let operation = job.operation
         let policy = job.policy
+        let resolveConflict = job.resolveConflict
         let backend = backend
         let (progressStream, progressContinuation) = AsyncStream<OperationProgress>.makeStream()
 
@@ -147,6 +157,7 @@ public actor FileOperationQueue {
                 operation,
                 using: backend,
                 conflictPolicy: policy,
+                resolveConflict: resolveConflict,
                 onProgress: { progressContinuation.yield($0) },
                 isCancelled: { control.checkpoint() }
             )
@@ -268,6 +279,8 @@ public actor FileOperationQueue {
     private struct Job {
         let operation: FileOperation
         let policy: ConflictPolicy
+        /// The per-file conflict resolver, only used when `policy` is `.ask` (see `enqueue`).
+        let resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)?
         let volumes: Set<String>
         var status: JobStatus
         var progress: OperationProgress?

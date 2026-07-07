@@ -15,6 +15,11 @@ public enum CopyEngine {
     ///
     /// - `conflictPolicy` is applied to every top-level source whose destination already
     ///   exists; non-colliding sources ignore it.
+    /// - `resolveConflict` is consulted for each conflict when `conflictPolicy` is `.ask` —
+    ///   the hook behind TC's per-file dialog. It is called synchronously on the copy
+    ///   thread (never for a non-colliding source), so the caller may block it while a
+    ///   prompt is on screen; returning `.cancel` aborts the whole operation. With any
+    ///   other policy it is ignored, and an `.ask` policy with no resolver behaves as `.fail`.
     /// - `onProgress` is called periodically (throttled by byte volume and at each item
     ///   boundary) — never per chunk, so a 50 GB copy doesn't flood the caller.
     /// - `isCancelled` is polled between chunks and items; cancelling leaves a report with
@@ -24,6 +29,7 @@ public enum CopyEngine {
         _ operation: FileOperation,
         using backend: any VFSBackend,
         conflictPolicy: ConflictPolicy = .fail,
+        resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)? = nil,
         onProgress: @escaping @Sendable (OperationProgress) -> Void = { _ in },
         isCancelled: @escaping @Sendable () -> Bool = { false }
     ) -> OperationReport {
@@ -31,6 +37,7 @@ public enum CopyEngine {
             operation: operation,
             backend: backend,
             policy: conflictPolicy,
+            resolveConflict: resolveConflict,
             onProgress: onProgress,
             isCancelled: isCancelled
         ).execute()
@@ -44,6 +51,7 @@ private final class CopyRun {
     private let operation: FileOperation
     private let backend: any VFSBackend
     private let policy: ConflictPolicy
+    private let resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)?
     private let onProgress: @Sendable (OperationProgress) -> Void
     private let isCancelled: @Sendable () -> Bool
 
@@ -63,12 +71,14 @@ private final class CopyRun {
         operation: FileOperation,
         backend: any VFSBackend,
         policy: ConflictPolicy,
+        resolveConflict: (@Sendable (ConflictContext) -> ConflictResolution)?,
         onProgress: @escaping @Sendable (OperationProgress) -> Void,
         isCancelled: @escaping @Sendable () -> Bool
     ) {
         self.operation = operation
         self.backend = backend
         self.policy = policy
+        self.resolveConflict = resolveConflict
         self.onProgress = onProgress
         self.isCancelled = isCancelled
     }
@@ -237,13 +247,42 @@ private final class CopyRun {
         case .overwrite:
             return overwritePlan(at: destination, name: entry.name)
         case .newerOnly:
-            // Replace only a strictly-older destination; an equal-or-newer one is kept.
-            guard entry.modificationDate > existing.modificationDate else { return .skip }
-            return overwritePlan(at: destination, name: entry.name)
+            return newerOnlyPlan(source: entry, existing: existing, at: destination)
         case .keepBoth:
-            let name = firstAvailableName(basedOn: entry.name)
-            return .proceed(operation.destinationDirectory.appending(name))
+            return keepBothPlan(for: entry)
+        case .ask:
+            return try askPlan(for: entry, existing: existing, at: destination)
         }
+    }
+
+    /// Consult the operation's resolver for one conflict and translate its answer into a
+    /// `Plan`. A missing resolver degrades to the safe `.fail` behaviour; `.cancel` aborts
+    /// the whole operation through the engine's normal cancellation path.
+    private func askPlan(for entry: FileEntry, existing: FileEntry, at destination: VFSPath) throws -> Plan {
+        guard let resolveConflict else { throw VFSError.alreadyExists(destination) }
+        let context = ConflictContext(kind: operation.kind, source: entry, existing: existing)
+        switch resolveConflict(context) {
+        case .overwrite:
+            return overwritePlan(at: destination, name: entry.name)
+        case .overwriteIfNewer:
+            return newerOnlyPlan(source: entry, existing: existing, at: destination)
+        case .skip:
+            return .skip
+        case .keepBoth:
+            return keepBothPlan(for: entry)
+        case .cancel:
+            throw CancellationError()
+        }
+    }
+
+    /// Replace only a strictly-older destination; an equal-or-newer one is kept (skipped).
+    private func newerOnlyPlan(source: FileEntry, existing: FileEntry, at destination: VFSPath) -> Plan {
+        guard source.modificationDate > existing.modificationDate else { return .skip }
+        return overwritePlan(at: destination, name: source.name)
+    }
+
+    private func keepBothPlan(for entry: FileEntry) -> Plan {
+        .proceed(operation.destinationDirectory.appending(firstAvailableName(basedOn: entry.name)))
     }
 
     /// The plan for replacing an existing `destination` in place: write the replacement to
