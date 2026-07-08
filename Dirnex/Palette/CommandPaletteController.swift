@@ -122,6 +122,7 @@ final class CommandPaletteController: NSObject {
     private func makeContentView() -> NSView {
         searchField.placeholderString = "Run a command…"
         searchField.font = .systemFont(ofSize: 20, weight: .regular)
+        searchField.usesSingleLineMode = true
         searchField.isBezeled = false
         searchField.drawsBackground = false
         searchField.focusRingType = .none
@@ -148,12 +149,17 @@ final class CommandPaletteController: NSObject {
         container.layer?.cornerRadius = 10
         [searchField, divider, scrollView].forEach(container.addSubview)
 
+        // The field sizes to its own text height and is centered within a fixed `fieldHeight`
+        // band (the divider caps the band). Centering the field itself — rather than stretching
+        // it to the full band — keeps both the placeholder and the caret on the band's midline.
         NSLayoutConstraint.activate([
-            searchField.topAnchor.constraint(equalTo: container.topAnchor),
+            searchField.centerYAnchor.constraint(
+                equalTo: container.topAnchor,
+                constant: Self.fieldHeight / 2
+            ),
             searchField.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 18),
             searchField.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -18),
-            searchField.heightAnchor.constraint(equalToConstant: Self.fieldHeight),
-            divider.topAnchor.constraint(equalTo: searchField.bottomAnchor),
+            divider.topAnchor.constraint(equalTo: container.topAnchor, constant: Self.fieldHeight),
             divider.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: divider.bottomAnchor),
