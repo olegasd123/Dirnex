@@ -53,7 +53,10 @@ enum MainMenuBuilder {
             .command("view.commandPalette"), .separator,
             .command("view.toggleSidebar"), .command("view.quickLook")
         ]),
-        MenuSpec(title: "Go", items: [.command("go.editLocation"), .command("go.parent")]),
+        MenuSpec(title: "Go", items: [
+            .command("go.editLocation"), .command("go.parent"), .separator,
+            .command("go.hotlist"), .command("go.addToHotlist")
+        ]),
         MenuSpec(title: "Window", items: [
             .command("window.minimize"), .command("window.close"), .separator,
             .command("window.previousTab"), .command("window.nextTab")

@@ -875,7 +875,7 @@ Goal: fix TC's adoption problem — nobody should need the manual.
 
 - [x] Cmd+K command palette: fuzzy search over every action, shows shortcuts,
       recents on top; palette actions and menu bar generated from one action registry ✅
-- [ ] Directory hotlist (Ctrl+D): pin, reorder, jump
+- [x] Directory hotlist (Ctrl+D): pin, reorder, jump ✅
 - [ ] Per-panel history (Alt+Down list; Cmd+[ / Cmd+] back/forward)
 - [ ] Frecency jump: SQLite-backed visit tracking; path bar accepts fuzzy fragments
       ("dl" → ~/Downloads), zoxide-style scoring
@@ -930,6 +930,53 @@ of truth; both the menu bar and the palette are generated from it, so they can't
   the ⌘K-toggle and click-away dismissals cover it. NEXT M3: hotlist (Ctrl+D), per-panel
   history, frecency jump, workspaces, Settings, rebindable shortcuts (the registry's
   `CommandShortcut` is already the data those last two will edit).
+
+Progress (2026-07-08, M3 pass 2): the **directory hotlist (Ctrl+D)** landed — TC's pinned-
+folder popup, the second M3 item. Pin / jump / reorder all work, and the whole thing hangs
+off the same command registry as pass 1.
+
+- **Core** (`DirnexCore/…/Services/Hotlist.swift`, new). A pure value type: `HotlistEntry`
+  (user-editable `name` + `VFSPath`, `Codable`, identity = path) and `Hotlist` (ordered,
+  de-duplicated-by-path list) with `add` (append unless already pinned → no-op, returns
+  whether added), `remove(path:)`/`remove(at:)`, `rename(path:to:)`, `move(from:to:)`
+  (Array-semantics reorder), and `contains`. Decoding routes through the de-duping init so a
+  legacy/corrupt store is sanitized on load. No AppKit, no persistence — the app owns those,
+  matching `Panel`/`SidebarLocations`/the command registry. `CommandCatalog` gains two
+  navigation commands: `go.hotlist` ("Directory Hotlist…", ⌃D) and `go.addToHotlist` ("Add
+  to Hotlist", palette-only). New `HotlistTests` (+10 → **core suite 174**), all green;
+  swiftformat/swiftlint-strict clean. GOTCHA (recurring): a `mutating` call can't live inside
+  `#expect(...)` — the macro captures the receiver as immutable — so `add`/`remove` results
+  are hoisted into a `let` first ([[swift-testing-expect-optional-arithmetic]]-adjacent).
+- **App.** `HotlistStore` (UserDefaults JSON, one app-wide list, read fresh each menu open —
+  no live-observation plumbing, like `TabPersistence`/`CommandRecents`).
+  `PanelViewController+Hotlist` owns the pane-relative actions dispatched through the
+  responder chain: `showHotlist` pops an `NSMenu` from the path bar's bottom edge (one item
+  per pin with a Finder folder icon + a bare 1–9 accelerator, then Add/Remove-Current-Folder
+  toggle + Organize…); `addToHotlist` pins the current dir; a jump reads the target off the
+  item's `representedObject` (index-shift-proof) and, for a vanished `.local` pin, offers to
+  unpin it instead of dropping onto a load-failure sheet. `HotlistOrganizerController` (new)
+  is the reorder editor — an `NSViewController` sheet (`presentAsSheet`, self-retaining) with
+  a drag-reorderable, inline-renameable, `−`-removable `NSTableView`; every edit saves to the
+  store immediately. `CommandBinding`/`MainMenuBuilder` wire the two commands into the Go
+  menu; `validateMenuItem` disables ⌃D while a text field is first responder so it falls
+  through to the field editor's delete-forward. App builds clean; touched + new files
+  swiftformat/swiftlint-strict clean (pre-existing repo-wide `op`/`st` `identifier_name`
+  strict failures in UNTOUCHED `UndoJournalTests`/`LocalBackend` flagged as a separate task,
+  not this pass's).
+- **Verified live via computer-use** (no overlay this session — mouse + keyboard worked;
+  drove the Go menu since it's the registry surface): the Go menu shows "Directory Hotlist…
+  ⌃D" + "Add to Hotlist"; Add pinned `/Users/oleg` then `/Users/oleg/Downloads`; the ⌃D
+  popup dropped under the path bar showing both with folder icons + 1/2 accelerators and the
+  toggle correctly reading "Remove Current Folder" (current dir pinned); picking **oleg**
+  jumped the active pane there; the organizer inline-renamed `oleg`→"Home Folder" (persisted,
+  confirmed in UserDefaults), drag-reordered Downloads above Home Folder (persisted), and the
+  `−` button removed the selected entry; the list survived an app relaunch. GOTCHA (caught +
+  fixed live): the first organizer drag no-op'd and left a collapsed row — `.gap` feedback
+  plus a too-strict `validateDrop` (source-identity check + `.above`-only) rejected the drop;
+  switching to a pasteboard-type check, retargeting `.on`→`.above`, and dropping `.gap` made
+  reorder land first try. Test pins cleared after (defaults delete) so no test state left in
+  the user's app. Deferred to later M3: per-panel history, frecency jump, workspaces,
+  Settings, rebindable shortcuts.
 
 Exit: a new user can discover copy/move/hotlist through the palette alone; power user
 can rebind everything.

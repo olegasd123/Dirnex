@@ -158,6 +158,19 @@ public enum CommandCatalog {
             category: .navigation,
             keywords: ["parent", "back", "out"],
             shortcut: CommandShortcut(key: "↑", modifiers: [.command, .function])
+        ),
+        Command(
+            id: "go.hotlist",
+            title: "Directory Hotlist…",
+            category: .navigation,
+            keywords: ["favorites", "bookmarks", "pinned", "jump", "ctrl d"],
+            shortcut: CommandShortcut(key: "d", modifiers: .control)
+        ),
+        Command(
+            id: "go.addToHotlist",
+            title: "Add to Hotlist",
+            category: .navigation,
+            keywords: ["pin", "bookmark", "favorite", "hotlist"]
         )
     ]
 

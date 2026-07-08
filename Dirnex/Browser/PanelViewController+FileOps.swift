@@ -256,6 +256,10 @@ extension PanelViewController: NSMenuItemValidation {
         case #selector(goToParentDirectory(_:)):
             // "Go Up" is meaningless at the root of a backend.
             return panel.parentPath != nil
+        case #selector(showHotlist(_:)):
+            // While a name/path field is being edited, let ⌃D fall through to the field
+            // editor's delete-forward instead of stealing it to open the hotlist.
+            return !(view.window?.firstResponder is NSText)
         default:
             return true
         }

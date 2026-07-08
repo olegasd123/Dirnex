@@ -33,6 +33,8 @@ enum CommandBinding {
         "view.quickLook": #selector(PanelViewController.toggleQuickLookPreview(_:)),
         "go.editLocation": #selector(PanelViewController.editLocation(_:)),
         "go.parent": #selector(PanelViewController.goToParentDirectory(_:)),
+        "go.hotlist": #selector(PanelViewController.showHotlist(_:)),
+        "go.addToHotlist": #selector(PanelViewController.addToHotlist(_:)),
         "window.minimize": #selector(NSWindow.performMiniaturize(_:)),
         "window.close": #selector(NSWindow.performClose(_:)),
         "window.previousTab": #selector(PanelViewController.showPreviousTab(_:)),
