@@ -67,7 +67,15 @@ extension PanelViewController {
         host?.enqueue(
             operation,
             conflictPolicy: .ask,
-            resolveConflict: { conflictPrompter.resolve($0) },
+            resolveConflict: { context in
+                // A source landing exactly on itself — Cmd+C then Cmd+V into its own folder —
+                // is a duplicate, not a collision: rename it "<name> copy" without a prompt,
+                // matching Finder. This only arises for a copy paste; F5/F6 target the other
+                // pane and drop rejects a same-folder drop, so neither reaches this branch, and
+                // a same-folder *move* is filtered out before it is ever enqueued.
+                if context.source.path == context.existing.path { return .keepBoth }
+                return conflictPrompter.resolve(context)
+            },
             onError: { errorPrompter.resolve($0) }
         )
     }

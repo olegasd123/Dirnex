@@ -273,6 +273,19 @@ extension PanelViewController: NSMenuItemValidation {
             return !selectionTargets().isEmpty
         case #selector(copyToOtherPane(_:)), #selector(moveToOtherPane(_:)):
             return !selectionTargets().isEmpty && host?.panelCounterpart(of: self) != nil
+        case #selector(copy(_:)):
+            // `copy:` only reaches the pane when the file table is first responder — a name/
+            // path field editor intercepts ⌘C for text copy — so this validates the file case.
+            return !selectionTargets().isEmpty
+        case #selector(paste(_:)):
+            // Likewise `paste:` reaches the pane only outside a text field; enable it when the
+            // pasteboard holds files and this pane can be written to.
+            return backend.capabilities.contains(.write) && clipboardHasFiles()
+        case #selector(pasteAndMoveFromClipboard(_:)):
+            // ⌥⌘V has no standard selector, so it would reach the pane even while a field is
+            // being edited — step it aside for a text field, else gate it like Paste.
+            return !(view.window?.firstResponder is NSText)
+                && backend.capabilities.contains(.write) && clipboardHasFiles()
         case #selector(renameSelection(_:)):
             // Rename is single-item on the cursor (not the marked set) and never `..`.
             return !cursorOnParentRow && panel.currentEntry != nil

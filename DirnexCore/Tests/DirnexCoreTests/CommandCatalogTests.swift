@@ -46,6 +46,25 @@ struct CommandCatalogTests {
         let workspace = CommandCatalog.all.filter { $0.category == .workspace }
         #expect(Set(workspace.map(\.id)) == ["workspace.list", "workspace.save"])
     }
+
+    @Test("the catalog carries the clipboard copy/paste commands on ⌘C/⌘V/⌥⌘V")
+    func coversClipboardCommands() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        #expect(byID["edit.copy"]?.shortcut == CommandShortcut(key: "c", modifiers: .command))
+        #expect(byID["edit.paste"]?.shortcut == CommandShortcut(key: "v", modifiers: .command))
+        #expect(
+            byID["edit.pasteMove"]?.shortcut
+                == CommandShortcut(key: "v", modifiers: [.command, .option])
+        )
+    }
+
+    @Test("the clipboard shortcuts don't collide with any other command")
+    func clipboardShortcutsAreConflictFree() {
+        let bindings = KeyBindings()
+        for id in ["edit.copy", "edit.paste", "edit.pasteMove"] {
+            #expect(bindings.conflicts(for: id).isEmpty)
+        }
+    }
 }
 
 @Suite("CommandShortcut display")

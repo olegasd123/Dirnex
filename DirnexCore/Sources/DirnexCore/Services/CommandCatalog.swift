@@ -91,6 +91,27 @@ public enum CommandCatalog {
             category: .edit,
             keywords: ["revert", "back"],
             shortcut: CommandShortcut(key: "z", modifiers: .command)
+        ),
+        Command(
+            id: "edit.copy",
+            title: "Copy",
+            category: .edit,
+            keywords: ["clipboard", "duplicate", "pasteboard"],
+            shortcut: CommandShortcut(key: "c", modifiers: .command)
+        ),
+        Command(
+            id: "edit.paste",
+            title: "Paste",
+            category: .edit,
+            keywords: ["clipboard", "pasteboard"],
+            shortcut: CommandShortcut(key: "v", modifiers: .command)
+        ),
+        Command(
+            id: "edit.pasteMove",
+            title: "Move Items Here",
+            category: .edit,
+            keywords: ["clipboard", "paste", "cut", "pasteboard"],
+            shortcut: CommandShortcut(key: "v", modifiers: [.command, .option])
         )
     ]
 

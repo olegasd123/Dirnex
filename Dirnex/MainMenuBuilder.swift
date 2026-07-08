@@ -49,7 +49,10 @@ enum MainMenuBuilder {
             .command("file.newFolder"), .separator,
             .command("file.trash"), .command("file.deletePermanently")
         ]),
-        MenuSpec(title: "Edit", items: [.command("edit.undo")]),
+        MenuSpec(title: "Edit", items: [
+            .command("edit.undo"), .separator,
+            .command("edit.copy"), .command("edit.paste"), .command("edit.pasteMove")
+        ]),
         MenuSpec(title: "Select", items: [
             .command("select.invert"), .separator,
             .command("select.byPattern"), .command("select.unselectByPattern")
