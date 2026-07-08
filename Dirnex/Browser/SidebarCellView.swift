@@ -15,6 +15,12 @@ final class SidebarCellView: NSTableCellView {
     private let label = NSTextField(labelWithString: "")
     private let ejectButton = NSButton()
 
+    /// The label's trailing edge has two possible anchors, swapped by `configure` per row:
+    /// against the eject button (volumes that can eject) or close to the cell's trailing edge
+    /// (everything else, so the name uses the full width instead of reserving eject space).
+    private var labelTrailingToEject: NSLayoutConstraint!
+    private var labelTrailingToEdge: NSLayoutConstraint!
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         identifier = SidebarCellView.identifier
@@ -45,6 +51,15 @@ final class SidebarCellView: NSTableCellView {
         ejectButton.toolTip = "Eject"
         addSubview(ejectButton)
 
+        labelTrailingToEject = ejectButton.leadingAnchor.constraint(
+            greaterThanOrEqualTo: label.trailingAnchor,
+            constant: 4
+        )
+        labelTrailingToEdge = label.trailingAnchor.constraint(
+            equalTo: trailingAnchor,
+            constant: -6
+        )
+
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -54,10 +69,6 @@ final class SidebarCellView: NSTableCellView {
             label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-            ejectButton.leadingAnchor.constraint(
-                greaterThanOrEqualTo: label.trailingAnchor,
-                constant: 4
-            ),
             ejectButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             ejectButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             ejectButton.widthAnchor.constraint(equalToConstant: 16)
@@ -77,6 +88,10 @@ final class SidebarCellView: NSTableCellView {
         icon.image = image
         ejectButton.isHidden = !canEject
         toolTip = tooltip
+
+        // Give the name the full width unless this row actually shows an eject button.
+        labelTrailingToEject.isActive = canEject
+        labelTrailingToEdge.isActive = !canEject
     }
 
     @objc private func eject() {
