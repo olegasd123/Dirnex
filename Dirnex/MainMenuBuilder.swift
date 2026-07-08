@@ -8,14 +8,19 @@ import DirnexCore
 /// lives here, a presentation concern the registry deliberately stays out of.
 ///
 /// The app menu keeps its standard About/Hide items hand-built (they aren't registry
-/// commands a user searches for); Quit is a registry command like the rest.
+/// commands a user searches for); Settings and Quit are registry commands like the rest.
+///
+/// Each item's key equivalent comes from the *effective* shortcut in `KeyBindingStore` — the
+/// user's rebinding or the catalog default (PLAN.md §M3 "rebindable shortcuts") — so
+/// regenerating the menu (which `AppDelegate` does whenever bindings change) is what makes a
+/// new shortcut take effect.
 @MainActor
 enum MainMenuBuilder {
-    static func build() -> NSMenu {
+    static func build(bindings: KeyBindingStore = .shared) -> NSMenu {
         let mainMenu = NSMenu()
-        mainMenu.addItem(appMenuItem())
+        mainMenu.addItem(appMenuItem(bindings: bindings))
         for spec in layout {
-            mainMenu.addItem(menu(for: spec))
+            mainMenu.addItem(menu(for: spec, bindings: bindings))
         }
         return mainMenu
     }
@@ -69,7 +74,7 @@ enum MainMenuBuilder {
 
     // MARK: - Building
 
-    private static func menu(for spec: MenuSpec) -> NSMenuItem {
+    private static func menu(for spec: MenuSpec, bindings: KeyBindingStore) -> NSMenuItem {
         let menuItem = NSMenuItem()
         let submenu = NSMenu(title: spec.title)
         menuItem.submenu = submenu
@@ -78,7 +83,7 @@ enum MainMenuBuilder {
             case .separator:
                 submenu.addItem(.separator())
             case let .command(id):
-                if let built = commandItem(for: id) { submenu.addItem(built) }
+                if let built = commandItem(for: id, bindings: bindings) { submenu.addItem(built) }
             }
         }
         if spec.isWindow {
@@ -87,21 +92,23 @@ enum MainMenuBuilder {
         return menuItem
     }
 
-    /// One menu item, fully described by the registry: title + shortcut from `CommandCatalog`,
-    /// action from `CommandBinding` (dispatched through the responder chain via a nil target).
-    private static func commandItem(for id: String) -> NSMenuItem? {
+    /// One menu item, fully described by the registry: title from `CommandCatalog`, effective
+    /// shortcut from `KeyBindingStore`, action from `CommandBinding` (dispatched through the
+    /// responder chain via a nil target).
+    private static func commandItem(for id: String, bindings: KeyBindingStore) -> NSMenuItem? {
         guard let command = CommandCatalog.command(for: id),
               let selector = CommandBinding.selector(for: id) else { return nil }
+        let shortcut = bindings.shortcut(for: id)
         let item = NSMenuItem(
             title: command.title,
             action: selector,
-            keyEquivalent: command.shortcut?.keyEquivalent ?? ""
+            keyEquivalent: shortcut?.keyEquivalent ?? ""
         )
-        item.keyEquivalentModifierMask = command.shortcut?.modifierMask ?? []
+        item.keyEquivalentModifierMask = shortcut?.modifierMask ?? []
         return item
     }
 
-    private static func appMenuItem() -> NSMenuItem {
+    private static func appMenuItem(bindings: KeyBindingStore) -> NSMenuItem {
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
         appMenuItem.submenu = appMenu
@@ -112,6 +119,10 @@ enum MainMenuBuilder {
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: ""
         )
+        appMenu.addItem(.separator())
+        if let settings = commandItem(for: "app.settings", bindings: bindings) {
+            appMenu.addItem(settings)
+        }
         appMenu.addItem(.separator())
         appMenu.addItem(
             withTitle: "Hide \(appName)",
@@ -125,7 +136,7 @@ enum MainMenuBuilder {
         )
         hideOthers.keyEquivalentModifierMask = [.command, .option]
         appMenu.addItem(.separator())
-        if let quit = commandItem(for: "app.quit") { appMenu.addItem(quit) }
+        if let quit = commandItem(for: "app.quit", bindings: bindings) { appMenu.addItem(quit) }
         return appMenuItem
     }
 }

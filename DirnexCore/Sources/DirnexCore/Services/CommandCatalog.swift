@@ -248,6 +248,13 @@ public enum CommandCatalog {
 
     private static let application: [Command] = [
         Command(
+            id: "app.settings",
+            title: "Settings…",
+            category: .application,
+            keywords: ["preferences", "options", "shortcuts", "config"],
+            shortcut: CommandShortcut(key: ",", modifiers: .command)
+        ),
+        Command(
             id: "app.quit",
             title: "Quit Dirnex",
             category: .application,

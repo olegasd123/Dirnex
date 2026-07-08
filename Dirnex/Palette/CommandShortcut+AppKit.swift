@@ -48,3 +48,68 @@ extension CommandShortcut {
         }
     }
 }
+
+// MARK: - Recording
+
+extension CommandShortcut {
+    /// Build a shortcut from a captured key-down `event` (the Settings shortcut recorder), or
+    /// `nil` when the combination isn't bindable: a bare character with no ⌘/⌃/⌥ is rejected
+    /// so it can't shadow the panel's type-to-filter, and modifier-only / control-key presses
+    /// (Return, Tab, Esc, Delete) produce no token. Named keys — the F-keys and the arrows —
+    /// are bindable on their own and carry the `fn` layer, matching the catalog convention.
+    ///
+    /// Known limitation: a shifted-punctuation combo (e.g. ⇧2) records the *shifted* glyph as
+    /// its key, since `charactersIgnoringModifiers` applies Shift; letters and the common
+    /// F-key / ⌘-letter / arrow combinations record exactly.
+    init?(event: NSEvent) {
+        guard let token = Self.recordingToken(for: event) else { return nil }
+
+        var modifiers: Modifiers = []
+        let flags = event.modifierFlags
+        if flags.contains(.command) { modifiers.insert(.command) }
+        if flags.contains(.shift) { modifiers.insert(.shift) }
+        if flags.contains(.option) { modifiers.insert(.option) }
+        if flags.contains(.control) { modifiers.insert(.control) }
+
+        if Self.isNamedKey(token) {
+            modifiers.insert(.function)
+        } else if modifiers.isDisjoint(with: [.command, .control, .option]) {
+            return nil
+        }
+        self.init(key: token, modifiers: modifiers)
+    }
+
+    /// Whether `token` is a self-standing named key (an "F<n>" function key or an arrow glyph).
+    private static func isNamedKey(_ token: String) -> Bool {
+        if token.hasPrefix("F"), Int(token.dropFirst()) != nil { return true }
+        return ["↑", "↓", "←", "→"].contains(token)
+    }
+
+    /// The registry key token for a key-down `event`: an "F<n>" name, an arrow glyph, or the
+    /// (Shift-applied, letter-lowercased) character. `nil` for modifier-only / control keys.
+    private static func recordingToken(for event: NSEvent) -> String? {
+        guard let chars = event.charactersIgnoringModifiers,
+              let scalar = chars.unicodeScalars.first else { return nil }
+        let value = Int(scalar.value)
+
+        if value >= NSF1FunctionKey, value <= NSF35FunctionKey {
+            return "F\(value - NSF1FunctionKey + 1)"
+        }
+        switch value {
+        case NSUpArrowFunctionKey: return "↑"
+        case NSDownArrowFunctionKey: return "↓"
+        case NSLeftArrowFunctionKey: return "←"
+        case NSRightArrowFunctionKey: return "→"
+        default: break
+        }
+
+        // Reject control characters (Return, Tab, Esc, Delete) and modifier-only presses.
+        guard scalar.value >= 0x20, !CharacterSet.controlCharacters.contains(scalar) else {
+            return nil
+        }
+        if chars.count == 1, CharacterSet.uppercaseLetters.contains(scalar) {
+            return chars.lowercased()
+        }
+        return chars
+    }
+}

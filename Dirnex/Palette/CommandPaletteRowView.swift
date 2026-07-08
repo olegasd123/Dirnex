@@ -55,15 +55,17 @@ final class CommandPaletteRowView: NSTableCellView {
     }
 
     /// Render `match`, emphasizing the matched characters and dimming when `selected` is
-    /// false so the highlighted row's text stays legible over the selection fill.
-    func configure(with match: CommandMatch, selected: Bool) {
+    /// false so the highlighted row's text stays legible over the selection fill. `shortcut`
+    /// is the command's *effective* binding (the user's rebinding or the catalog default),
+    /// resolved by the palette so a rebound shortcut shows the same here as in the menu.
+    func configure(with match: CommandMatch, shortcut: CommandShortcut?, selected: Bool) {
         titleLabel.attributedStringValue = Self.highlightedTitle(
             match.command.title,
             offsets: match.titleMatchOffsets,
             selected: selected
         )
         categoryLabel.stringValue = match.command.category.title.uppercased()
-        shortcutLabel.stringValue = match.command.shortcut?.display ?? ""
+        shortcutLabel.stringValue = shortcut?.display ?? ""
 
         categoryLabel.textColor = selected ? .white.withAlphaComponent(0.7) : .tertiaryLabelColor
         shortcutLabel.textColor = selected ? .white.withAlphaComponent(0.85) : .secondaryLabelColor

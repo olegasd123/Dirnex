@@ -18,7 +18,12 @@ extension CommandPaletteController: NSTableViewDataSource, NSTableViewDelegate {
             return view
         }()
         guard matches.indices.contains(row) else { return cell }
-        cell.configure(with: matches[row], selected: row == selectedIndex)
+        let match = matches[row]
+        cell.configure(
+            with: match,
+            shortcut: keyBindings.shortcut(for: match.command.id),
+            selected: row == selectedIndex
+        )
         return cell
     }
 
@@ -37,7 +42,12 @@ extension CommandPaletteController: NSTableViewDataSource, NSTableViewDelegate {
             guard matches.indices.contains(row),
                   let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
                   as? CommandPaletteRowView else { continue }
-            cell.configure(with: matches[row], selected: row == selectedIndex)
+            let match = matches[row]
+            cell.configure(
+                with: match,
+                shortcut: keyBindings.shortcut(for: match.command.id),
+                selected: row == selectedIndex
+            )
         }
     }
 }

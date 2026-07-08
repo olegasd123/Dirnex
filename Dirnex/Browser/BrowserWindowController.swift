@@ -51,16 +51,20 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         queue = FileOperationQueue(backend: backend)
         undoController = UndoController(backend: backend)
         let home = VFSPath.local(NSHomeDirectory())
-        // Each pane restores its own tabs from the last session, keyed by side.
+        // Each pane restores its own tabs from the last session, keyed by side — unless the
+        // user has turned session restore off (General settings), in which case both panes
+        // open fresh at Home. The panes still persist their tabs so the setting can be
+        // toggled back on without losing them.
+        let restoreSession = AppPreferences.shared.restoreSession
         leftPanel = PanelViewController(
             backend: backend,
-            restoration: TabPersistence.load(paneKey: "left"),
+            restoration: restoreSession ? TabPersistence.load(paneKey: "left") : nil,
             defaultPath: home,
             restorationKey: "left"
         )
         rightPanel = PanelViewController(
             backend: backend,
-            restoration: TabPersistence.load(paneKey: "right"),
+            restoration: restoreSession ? TabPersistence.load(paneKey: "right") : nil,
             defaultPath: home,
             restorationKey: "right"
         )

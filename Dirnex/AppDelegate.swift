@@ -15,6 +15,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.mainMenu = MainMenuBuilder.build()
 
+        // Rebuild the registry-driven menu whenever the user rebinds a shortcut, so the new
+        // key equivalents take effect immediately (PLAN.md §M3 "rebindable shortcuts").
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(rebuildMainMenu),
+            name: KeyBindingStore.didChange,
+            object: nil
+        )
+
         let controller = BrowserWindowController()
         controller.showWindow(nil)
         browserWindowController = controller
@@ -26,6 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    @objc private func rebuildMainMenu() {
+        NSApp.mainMenu = MainMenuBuilder.build()
+    }
+
     // MARK: - Command palette
 
     /// ⌘K (and View ▸ Command Palette…) — open the fuzzy command palette over the key window,
@@ -33,5 +46,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// delegate is its final link, so a menu item with a nil target lands here.
     @objc func showCommandPalette(_ sender: Any?) {
         commandPalette.toggle(over: NSApp.keyWindow ?? browserWindowController?.window)
+    }
+
+    // MARK: - Settings
+
+    /// ⌘, (and the palette's "Settings…") — open the SwiftUI settings window. Reached through
+    /// the responder chain, with the app delegate as its final link.
+    @objc func showSettings(_ sender: Any?) {
+        SettingsWindowController.shared.present()
     }
 }

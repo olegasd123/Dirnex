@@ -135,7 +135,8 @@ final class PanelViewController: NSViewController {
         self.backend = backend
         self.restorationKey = restorationKey
         let restored = PanelViewController.restoredTabs(from: restoration)
-        tabs = restored.isEmpty ? [PanelTab(path: defaultPath)] : restored
+        let showHidden = AppPreferences.shared.showHiddenByDefault
+        tabs = restored.isEmpty ? [PanelTab(path: defaultPath, showHidden: showHidden)] : restored
         activeTabIndex = restored.isEmpty
             ? 0
             : min(max(restoration?.activeIndex ?? 0, 0), restored.count - 1)

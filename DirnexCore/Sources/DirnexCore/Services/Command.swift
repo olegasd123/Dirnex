@@ -5,12 +5,26 @@ import Foundation
 /// equivalent when building the menu, and renders `display` in the command palette. Keeping
 /// it headless lets the whole action registry (and its fuzzy search) be unit-tested, and
 /// makes the M3 "rebindable shortcuts" item a change to data rather than to AppKit wiring.
-public struct CommandShortcut: Sendable, Equatable, Hashable {
+///
+/// `Codable` so a user's rebindings (`KeyBindings`) can be persisted as boring JSON, matching
+/// the rest of the app's stores.
+public struct CommandShortcut: Sendable, Equatable, Hashable, Codable {
     /// The modifier keys held with the shortcut. Rendered in the canonical macOS order
     /// (⌃⌥⇧⌘) regardless of insertion order.
-    public struct Modifiers: OptionSet, Sendable, Hashable {
+    public struct Modifiers: OptionSet, Sendable, Hashable, Codable {
         public let rawValue: Int
         public init(rawValue: Int) { self.rawValue = rawValue }
+
+        /// Encode as the bare raw `Int` (`{"modifiers": 5}`) rather than a wrapper object, so
+        /// a persisted binding reads cleanly.
+        public init(from decoder: Decoder) throws {
+            rawValue = try decoder.singleValueContainer().decode(Int.self)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            try container.encode(rawValue)
+        }
 
         public static let command = Modifiers(rawValue: 1 << 0)
         public static let shift = Modifiers(rawValue: 1 << 1)

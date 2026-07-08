@@ -23,6 +23,9 @@ final class CommandPaletteController: NSObject {
     var selectedIndex = 0
 
     private let recents = CommandRecents()
+    /// Resolves each command's effective (possibly rebound) shortcut so the palette shows the
+    /// same glyph the menu does. Read live on each open, so a rebind is reflected next time.
+    let keyBindings = KeyBindingStore.shared
     /// The window the palette floats over and re-keys on dismiss, so the dispatched command
     /// runs against that window's focused pane rather than the palette.
     private weak var targetWindow: NSWindow?

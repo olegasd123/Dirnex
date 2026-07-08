@@ -124,8 +124,34 @@ extension PanelViewController {
             confirmPermanentDelete(of: targets) { [weak self] in
                 self?.runDelete(targets, permanent: true)
             }
+        } else if AppPreferences.shared.confirmTrash {
+            confirmTrash(of: targets) { [weak self] in
+                self?.runDelete(targets, permanent: false)
+            }
         } else {
             runDelete(targets, permanent: false)
+        }
+    }
+
+    /// Move-to-Trash normally skips confirmation (it's recoverable, matching Finder), but the
+    /// user can opt into a prompt via Operations settings ("Ask before moving items to Trash").
+    private func confirmTrash(of targets: [FileEntry], proceed: @escaping () -> Void) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = targets.count == 1
+            ? "Move “\(targets[0].name)” to the Trash?"
+            : "Move \(targets.count) items to the Trash?"
+        alert.informativeText = "You can restore items from the Trash later."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+
+        let handler: (NSApplication.ModalResponse) -> Void = { response in
+            if response == .alertFirstButtonReturn { proceed() }
+        }
+        if let window = view.window {
+            alert.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            handler(alert.runModal())
         }
     }
 

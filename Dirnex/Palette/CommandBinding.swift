@@ -44,6 +44,7 @@ enum CommandBinding {
         "window.close": #selector(NSWindow.performClose(_:)),
         "window.previousTab": #selector(PanelViewController.showPreviousTab(_:)),
         "window.nextTab": #selector(PanelViewController.showNextTab(_:)),
+        "app.settings": #selector(AppDelegate.showSettings(_:)),
         "app.quit": #selector(NSApplication.terminate(_:))
     ]
 }

@@ -881,8 +881,8 @@ Goal: fix TC's adoption problem — nobody should need the manual.
       ("dl" → ~/Downloads), zoxide-style scoring ✅ (JSON store; SQLite deferred like undo)
 - [x] Workspaces: save/restore both panels with all tabs, named, switchable from palette ✅
       (JSON store; per-workspace palette entries deferred — surfaced via the "Workspaces…" popup)
-- [ ] Settings window (SwiftUI): general, panels, operations, shortcuts
-- [ ] Rebindable shortcuts with conflict detection; TC-compatible preset and macOS preset
+- [x] Settings window (SwiftUI): general, panels, operations, shortcuts ✅
+- [x] Rebindable shortcuts with conflict detection; TC-compatible preset and macOS preset ✅
 
 Progress (2026-07-08, M3 pass 1): the **action registry + Cmd+K command palette** landed —
 M3's headline, and the piece the rest of M3 leans on. The registry is one headless source
@@ -1136,8 +1136,67 @@ JSON store, and wiring into the command registry.
   (Settings is the container, the rebind UI its "shortcuts" tab; both edit the registry's
   `CommandShortcut` data), the last two M3 items.
 
+Progress (2026-07-08, M3 pass 6): **Settings window + rebindable shortcuts** landed — the
+final two M3 items, done together as planned (Settings is the SwiftUI container; the rebind
+UI is its Shortcuts tab). **M3 is now complete.** This is the app's first SwiftUI surface
+(§2 "SwiftUI for settings"); the file panes stay AppKit.
+
+- **Core** (`DirnexCore/…/Services/KeyBindings.swift`, new). Made `CommandShortcut` (+ its
+  `Modifiers` option-set, via a single-value `Int` container) **`Codable`** so rebindings
+  persist as boring JSON. New pure value type `KeyBindings` layered over `CommandCatalog`'s
+  defaults: `overrides: [String: Binding]` where `Binding = .shortcut(_)|.unbound` (so a
+  default can be *removed*, not just replaced), keyed by command id. `shortcut(for:)` resolves
+  the effective binding (override else catalog default); `setShortcut`/`reset`/`resetAll` keep
+  the override map minimal (a rebind equal to the default drops the override, so it always
+  reads "not customized"); `conflicts(for:)`/`allConflicts()`/`hasConflicts` detect two
+  commands sharing an effective shortcut (registry-primary only — the table's secondary
+  Finder gestures like ⌘⌫ stay an app concern); `preset(.macOS|.totalCommander)` produces a
+  whole scheme (macOS = plain defaults; TC = F3-previews + ⇧F6-rename over the already-TC F5/
+  F6/F7/F8) and `matchingPreset` reflects it back (nil = "Custom"). `CommandCatalog` gains
+  `app.settings` ("Settings…" ⌘,). New `KeyBindingsTests` (+18 → **core suite 229**): resolve/
+  set/unbind/reset, conflict detection, both presets + conflict-freeness, `matchingPreset`,
+  and JSON round-trips incl. the Codable-shortcut check. All green; swiftformat/swiftlint clean.
+- **App** (`Dirnex/Settings/`, new group per §3). `KeyBindingStore` (`ObservableObject`
+  singleton, UserDefaults JSON `Dirnex.keyBindings`, posts `didChange`) + `AppPreferences`
+  (`ObservableObject` singleton for the non-shortcut tabs' toggles). `MainMenuBuilder` now
+  reads each item's key equivalent from the store's **effective** shortcut (not `Command.shortcut`);
+  `AppDelegate` observes `didChange` and **rebuilds the whole menu bar** so a rebind takes
+  effect immediately (menu key-equivalents are the firing mechanism — the panel key model was
+  untouched). The Cmd+K palette resolves effective shortcuts the same way (`CommandPaletteRowView.configure`
+  gained a `shortcut:` param). `app.settings` → `AppDelegate.showSettings` opens
+  `SettingsWindowController` (a shared `NSWindowController` hosting the SwiftUI `SettingsView`
+  — the AppKit-hosted app can't use SwiftUI's `Settings` scene). The **Shortcuts tab**
+  (`ShortcutsSettingsView`) lists every command grouped by category with an inline
+  `ShortcutRecorder` (an `NSViewRepresentable` over an AppKit key-capture view that becomes
+  first responder and — crucially — overrides `performKeyEquivalent` while recording so ⌘-combos
+  are captured, not dispatched to a menu; Esc cancels, Delete unbinds; `CommandShortcut(event:)`
+  in `CommandShortcut+AppKit` does the NSEvent→token translation), a preset picker (macOS/TC/
+  Custom), a filter field, per-row conflict warnings (red glyph + ⚠︎ + "also assigned to …"),
+  a per-command reset, and Restore-Defaults. General/Panels/Operations tabs wire three real,
+  behavior-preserving-default `AppPreferences` toggles read at a single point each: **reopen
+  last session** (gates the panes' `TabPersistence` restore in `BrowserWindowController`),
+  **show hidden files in new tabs** (threaded into the default + restored `PanelTab`s), and
+  **confirm before Trash** (a prompt in the F8 flow; permanent delete always confirms). App
+  builds clean; whole repo swiftformat/swiftlint-strict clean (121 files, 0 violations).
+- **Verified live via computer-use** (mouse + keyboard both worked; no overlay): Dirnex ▸
+  Settings… ⌘, opened the window; all four tabs render (General's session toggle shown). The
+  Shortcuts tab listed the File commands with correct glyph pills; clicking Rename's pill →
+  "Type shortcut…" (accent border) → **⌘R was captured** (proving `performKeyEquivalent`
+  intercept — it did *not* fire any menu) → pill showed ⌘R + a reset button + preset flipped
+  to **Custom**; the **File menu rebuilt live** to "Rename… ⌘R" (proving the didChange→menu
+  rebuild). Binding **New Folder to the same ⌘R** flagged **both** rows red with ⚠︎ and lit the
+  header warning (conflict detection). **Restore Defaults** cleared everything (F2/F7 back, no
+  warnings); the **Total Commander preset** rebound Rename→⇧F6; the **filter** narrowed to
+  "Move to Trash" on "trash". Header polished mid-verification (cramped conflict text →
+  icon-only warning + wider 600pt window). Left pristine: persisted blob is `{"overrides":{}}`
+  (= defaults), all prefs unset. GOTCHA (recurring): a `mutating` call can't sit in
+  `#expect(...)` — results hoisted into a `let`. Deferred: per-workspace palette entries
+  (noted in pass 5); the recorder records a *shifted-punctuation* combo as its shifted glyph
+  (letters/F-keys/⌘-combos/arrows record exactly) — documented in `CommandShortcut(event:)`.
+
 Exit: a new user can discover copy/move/hotlist through the palette alone; power user
-can rebind everything.
+can rebind everything. ✅ met — palette (pass 1) + a full rebind UI with conflict detection
+and two presets.
 
 ### M4 — VFS payoff (L)
 
