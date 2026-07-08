@@ -13,8 +13,8 @@ public struct DirectoryListing: Sendable, Hashable {
 
 /// How a panel orders its rows. Persisted per tab (PLAN.md §M1 "sort/column state
 /// per tab"), so the `Key` raw values are part of the on-disk format.
-public struct FileSort: Sendable, Hashable {
-    public enum Key: String, Sendable, Hashable, CaseIterable {
+public struct FileSort: Sendable, Hashable, Codable {
+    public enum Key: String, Sendable, Hashable, CaseIterable, Codable {
         case name
         case size
         case modified

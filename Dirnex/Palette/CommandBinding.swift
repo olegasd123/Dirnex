@@ -38,6 +38,8 @@ enum CommandBinding {
         "go.history": #selector(PanelViewController.showHistory(_:)),
         "go.hotlist": #selector(PanelViewController.showHotlist(_:)),
         "go.addToHotlist": #selector(PanelViewController.addToHotlist(_:)),
+        "workspace.list": #selector(PanelViewController.showWorkspaces(_:)),
+        "workspace.save": #selector(PanelViewController.saveWorkspace(_:)),
         "window.minimize": #selector(NSWindow.performMiniaturize(_:)),
         "window.close": #selector(NSWindow.performClose(_:)),
         "window.previousTab": #selector(PanelViewController.showPreviousTab(_:)),

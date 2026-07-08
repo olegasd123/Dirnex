@@ -65,6 +65,7 @@ public enum CommandCategory: String, Sendable, CaseIterable {
     case selection
     case view
     case navigation
+    case workspace
     case window
     case application
 
@@ -76,6 +77,7 @@ public enum CommandCategory: String, Sendable, CaseIterable {
         case .selection: return "Select"
         case .view: return "View"
         case .navigation: return "Go"
+        case .workspace: return "Workspace"
         case .window: return "Window"
         case .application: return "Dirnex"
         }

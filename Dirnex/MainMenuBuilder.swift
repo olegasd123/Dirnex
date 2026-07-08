@@ -58,6 +58,9 @@ enum MainMenuBuilder {
             .command("go.editLocation"), .command("go.parent"), .separator,
             .command("go.hotlist"), .command("go.addToHotlist")
         ]),
+        MenuSpec(title: "Workspace", items: [
+            .command("workspace.list"), .command("workspace.save")
+        ]),
         MenuSpec(title: "Window", items: [
             .command("window.minimize"), .command("window.close"), .separator,
             .command("window.previousTab"), .command("window.nextTab")

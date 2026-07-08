@@ -36,6 +36,14 @@ protocol PanelHost: AnyObject {
     /// The label of the action Cmd+Z would reverse next, for the menu title, or `nil` when
     /// the journal is empty.
     var nextUndoLabel: String? { get }
+
+    /// Capture both panes' current tabs into a named workspace (PLAN.md §M3 "Workspaces").
+    /// The window owns this because a workspace spans both panes, which a single pane can't see.
+    func captureWorkspace(named name: String) -> Workspace
+
+    /// Restore both panes from a saved workspace, replacing their tab sets, then focus the
+    /// left pane. Directories that have since vanished are dropped as the panes rebuild.
+    func applyWorkspace(_ workspace: Workspace)
 }
 
 /// One file pane: a path bar, an `NSTableView` of the current directory, and a status
@@ -360,7 +368,9 @@ final class PanelViewController: NSViewController {
     /// scrolls the cursor into view; a live refresh (`scroll: false`) does not. The
     /// `..` position is honored via `cursorOnParentRow` so a refresh doesn't bump the
     /// user off it, and an empty directory parks the cursor on `..` when one exists.
-    private func syncCursorToTable(scroll: Bool = true) {
+    /// Internal so the table-input callbacks in `PanelViewController+TableInput` can
+    /// re-apply the cursor after marking a row.
+    func syncCursorToTable(scroll: Bool = true) {
         isSyncingSelection = true
         defer { isSyncingSelection = false }
         let targetRow: Int
@@ -383,118 +393,5 @@ final class PanelViewController: NSViewController {
         if scroll {
             tableView.scrollRowToVisible(targetRow)
         }
-    }
-
-    private func redrawRow(_ row: Int) {
-        guard row >= 0, row < tableView.numberOfRows else { return }
-        let columns = IndexSet(integersIn: 0..<tableView.numberOfColumns)
-        tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: columns)
-    }
-
-    /// Replace the type-to-filter and re-render. `Panel`/`DirectoryModel` re-anchor the
-    /// cursor by identity across the change, so the cursor stays on the same file when
-    /// it survives the narrowing.
-    private func setFilter(_ text: String) {
-        panel.setFilter(text)
-        reloadEverything()
-        refreshQuickLookIfVisible()
-    }
-}
-
-// MARK: - FileTableViewInput
-
-extension PanelViewController: FileTableViewInput {
-    func fileTableOpenSelection(_ tableView: FileTableView) {
-        if cursorOnParentRow {
-            goToParent()
-        } else {
-            openCurrentEntry()
-        }
-    }
-
-    func fileTableGoToParent(_ tableView: FileTableView) {
-        goToParent()
-    }
-
-    func fileTableBackspace(_ tableView: FileTableView) {
-        if panel.model.filter.isEmpty {
-            goToParent()
-        } else {
-            setFilter(String(panel.model.filter.dropLast()))
-        }
-    }
-
-    func fileTableCancel(_ tableView: FileTableView) {
-        if !panel.model.filter.isEmpty {
-            setFilter("")
-        } else if panel.selectionCount > 0 {
-            panel.clearSelection()
-            resetMouseSelectionAnchor()
-            tableView.reloadData()
-            updateChrome()
-            refreshQuickLookIfVisible()
-        }
-    }
-
-    func fileTable(_ tableView: FileTableView, didType text: String) {
-        setFilter(panel.model.filter + text)
-    }
-
-    func fileTableToggleMarkAndAdvance(_ tableView: FileTableView) {
-        guard !panel.isEmpty else { return }
-        // Space on `..` marks nothing (it isn't a real entry) — just step onto the
-        // first entry, matching the "advance" half of the gesture.
-        if cursorOnParentRow {
-            tableView.selectRowIndexes(
-                IndexSet(integer: parentRowCount),
-                byExtendingSelection: false
-            )
-            tableView.scrollRowToVisible(parentRowCount)
-            return
-        }
-        // Capture the entry under the cursor before we advance past it: Space on a
-        // directory also computes its size in place (TC), applied when the walk lands.
-        let sizedDirectory = panel.currentEntry.flatMap { $0.isDirectoryLike ? $0 : nil }
-        let markedRow = row(forEntryIndex: panel.cursor)
-        panel.toggleMarkAtCursorAndAdvance()
-        redrawRow(markedRow)
-        syncCursorToTable()
-        updateChrome()
-        refreshQuickLookIfVisible()
-        if let sizedDirectory {
-            computeDirectorySize(for: sizedDirectory)
-        }
-    }
-
-    func fileTableSwitchPanel(_ tableView: FileTableView) {
-        host?.panelRequestsFocusSwitch(self)
-    }
-
-    func fileTableMarkAll(_ tableView: FileTableView) {
-        panel.selectAll()
-        tableView.reloadData()
-        updateChrome()
-        refreshQuickLookIfVisible()
-    }
-
-    func fileTableInvertMarks(_ tableView: FileTableView) {
-        invertMarks()
-    }
-
-    func fileTableToggleQuickLook(_ tableView: FileTableView) {
-        guard let previewPanel = QLPreviewPanel.shared() else { return }
-        if QLPreviewPanel.sharedPreviewPanelExists(), previewPanel.isVisible {
-            previewPanel.orderOut(nil)
-        } else {
-            previewPanel.makeKeyAndOrderFront(nil)
-        }
-    }
-
-    func fileTableEditPath(_ tableView: FileTableView) {
-        pathBar.beginEditing(base: panel.path)
-    }
-
-    func fileTableDidBecomeFirstResponder(_ tableView: FileTableView) {
-        host?.panelDidBecomeActive(self)
     }
 }

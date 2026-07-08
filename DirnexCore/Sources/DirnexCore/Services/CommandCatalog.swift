@@ -12,7 +12,8 @@ import Foundation
 public enum CommandCatalog {
     /// Every command, grouped by category in presentation order. The app filters by category
     /// to build each menu and searches the whole list for the palette.
-    public static let all: [Command] = file + edit + selection + view + navigation + window + application
+    public static let all: [Command] =
+        file + edit + selection + view + navigation + workspace + window + application
 
     /// The command with `id`, or `nil` if unknown — the app's menu builder and palette look
     /// commands up by id to join them with AppKit selectors.
@@ -192,6 +193,23 @@ public enum CommandCatalog {
             title: "Add to Hotlist",
             category: .navigation,
             keywords: ["pin", "bookmark", "favorite", "hotlist"]
+        )
+    ]
+
+    // MARK: - Workspace
+
+    private static let workspace: [Command] = [
+        Command(
+            id: "workspace.list",
+            title: "Workspaces…",
+            category: .workspace,
+            keywords: ["session", "switch", "restore", "open", "layout", "panes"]
+        ),
+        Command(
+            id: "workspace.save",
+            title: "Save Workspace…",
+            category: .workspace,
+            keywords: ["session", "snapshot", "store", "layout", "panes"]
         )
     ]
 

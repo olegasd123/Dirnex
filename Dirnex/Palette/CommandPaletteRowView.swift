@@ -28,6 +28,7 @@ final class CommandPaletteRowView: NSTableCellView {
 
         categoryLabel.font = .systemFont(ofSize: 11)
         categoryLabel.textColor = .tertiaryLabelColor
+        categoryLabel.lineBreakMode = .byTruncatingTail
         categoryLabel.setContentHuggingPriority(.required, for: .horizontal)
         categoryLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
@@ -48,8 +49,9 @@ final class CommandPaletteRowView: NSTableCellView {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             stack.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
-        // Pin the category tag to a fixed width so titles line up across rows.
-        categoryLabel.widthAnchor.constraint(equalToConstant: 62).isActive = true
+        // Pin the category tag to a fixed width so titles line up across rows — wide enough
+        // for the longest tag ("WORKSPACE").
+        categoryLabel.widthAnchor.constraint(equalToConstant: 72).isActive = true
     }
 
     /// Render `match`, emphasizing the matched characters and dimming when `selected` is

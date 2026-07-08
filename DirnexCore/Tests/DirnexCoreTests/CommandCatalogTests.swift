@@ -40,6 +40,12 @@ struct CommandCatalogTests {
             #expect(ids.contains(expected))
         }
     }
+
+    @Test("the catalog carries the M3 workspace commands")
+    func coversWorkspaceCommands() {
+        let workspace = CommandCatalog.all.filter { $0.category == .workspace }
+        #expect(Set(workspace.map(\.id)) == ["workspace.list", "workspace.save"])
+    }
 }
 
 @Suite("CommandShortcut display")

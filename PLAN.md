@@ -879,7 +879,8 @@ Goal: fix TC's adoption problem — nobody should need the manual.
 - [x] Per-panel history (Alt+Down list; Cmd+[ / Cmd+] back/forward) ✅
 - [x] Frecency jump: visit tracking; path bar accepts fuzzy fragments
       ("dl" → ~/Downloads), zoxide-style scoring ✅ (JSON store; SQLite deferred like undo)
-- [ ] Workspaces: save/restore both panels with all tabs, named, switchable from palette
+- [x] Workspaces: save/restore both panels with all tabs, named, switchable from palette ✅
+      (JSON store; per-workspace palette entries deferred — surfaced via the "Workspaces…" popup)
 - [ ] Settings window (SwiftUI): general, panels, operations, shortcuts
 - [ ] Rebindable shortcuts with conflict detection; TC-compatible preset and macOS preset
 
@@ -1077,6 +1078,63 @@ Cmd+L path bar the earlier passes built.
   both panes' launch-into-home recorded through the same hook.) Test frecency default deleted
   after so no test state remains in the user's app. NEXT M3: workspaces, Settings (SwiftUI),
   rebindable shortcuts (the registry's `CommandShortcut` is the data those edit).
+
+Progress (2026-07-08, M3 pass 5): **workspaces** landed — the fifth M3 item, a named snapshot
+of the *whole window* (both panes + all their tabs) the user can save and switch back to. It
+follows the same recipe as passes 2–4: a pure headless value type + tests, a `UserDefaults`
+JSON store, and wiring into the command registry.
+
+- **Core** (`DirnexCore/…/Services/Workspaces.swift`, new). Pure value types: `WorkspaceTab`
+  (a tab's `VFSPath` + `FileSort` — column geometry is deliberately left out, a per-tab view
+  nicety not part of a named layout's identity), `WorkspacePane` (`tabs` + a `activeTabIndex`
+  that's **clamped into range** on init *and* on decode so a hand-edited/truncated store can't
+  point past the end), and `Workspace` (name + left/right panes, identity = name). `Workspaces`
+  is the ordered, **name-de-duplicated** collection: `save` overwrites an existing name *in
+  place* (keeping its position) else appends and reports which; `remove(name:)`/`remove(at:)`;
+  `rename` that **rejects an empty or already-used name** so two entries never collapse into
+  one; `move` (Array-semantics reorder); `contains`/`workspace(named:)`. Decoding routes
+  through the de-duping init (matching `Hotlist`). Made `FileSort` (+ its `Key`) `Codable` — a
+  small, purely-additive core change so `WorkspaceTab` serializes cleanly (the app's
+  `PersistedTab` still uses its own hand-rolled key/ascending encoding, untouched).
+  `CommandCatalog` gains a new **`.workspace` category** ("Workspace" menu) with `workspace.list`
+  ("Workspaces…") + `workspace.save` ("Save Workspace…"). New `WorkspacesTests` (+12) + catalog
+  coverage (+1) → **core suite 211**, all green; swiftformat/swiftlint-strict clean. GOTCHA (hit
+  yet again, per [[swift-testing-expect-optional-arithmetic]]-adjacent): a `mutating` call can't
+  sit inside `#expect(...)` — `save`/`remove`/`rename` results were hoisted into a `let`.
+- **App.** New `WorkspaceStore` (UserDefaults JSON `Dirnex.workspaces`, read-fresh-per-open like
+  `HotlistStore` — no live-observation plumbing). A workspace spans both panes, which no single
+  pane can see, so capture/restore lives on the **window controller**
+  (`BrowserWindowController+Workspaces`: `captureWorkspace(named:)` snapshots both panes,
+  `applyWorkspace` restores them + focuses left), reached through two new `PanelHost` methods —
+  the same pane→host forwarding the undo surface uses. `PanelViewController+Workspaces` owns the
+  per-pane `workspaceSnapshot()`/`restore(workspacePane:)` (restore drops vanished dirs like
+  relaunch does, and keeps the current dir rather than ending up tab-less if all vanish) plus the
+  responder-chain actions: `showWorkspaces` pops an `NSMenu` from the path-bar edge (one switch
+  item per workspace carrying its *name* + a 1–9 accelerator + a `square.split.2x1` glyph, then
+  Save/Manage), `saveWorkspace` prompts for a name (NSAlert + field) and **confirms before
+  replacing** an existing one. `WorkspaceOrganizerController` (new) mirrors the hotlist organizer
+  — a drag-reorder / inline-rename / `−`-remove sheet, every edit saved immediately; rename that's
+  rejected snaps the field back. `CommandBinding`/`MainMenuBuilder` wire both commands into the
+  new Workspace menu; the palette's category tag widened 62→72pt (+ truncation) to fit
+  "WORKSPACE" (68.5pt overflowed). **Forced the decomposition the pass-3/4 notes predicted**: the
+  new `PanelHost` methods pushed `PanelViewController.swift` past its 500-line `file_length`
+  limit, so the whole `FileTableViewInput` extension (+ its `redrawRow`/`setFilter` helpers) moved
+  to a new `PanelViewController+TableInput.swift` (dropping the file to ~410 lines;
+  `syncCursorToTable` went `private`→internal for the cross-file call). App builds clean; whole
+  repo swiftformat/swiftlint-strict clean (**110 files**, 0 violations).
+- **Verified live via computer-use** (mouse-driven; no overlay): the Workspace menu shows
+  "Workspaces…"/"Save Workspace…"; Save prompted, typed **"Work"**, saved with left=Downloads /
+  right=~/oleg; changed both panes (left→Documents, right→Movies); Workspaces… ▸ **Work** restored
+  *both* panes at once (Downloads 31 / oleg 18). The persisted `Dirnex.workspaces` blob decoded
+  to exactly that layout incl. the now-`Codable` `FileSort`. Saved a 2nd ("Browsing"), opened the
+  organizer: **drag-reorder landed first try** (the hotlist drag fix carried over), inline-rename
+  Work→"Projects" persisted, `−` deleted it leaving one; every edit survived a **quit+relaunch**
+  (store read `['Browsing']` off disk, popup re-rendered it). Test workspaces deleted after so no
+  test state remains in the user's app. Noted UX quirk (shared with the hotlist organizer, not new):
+  Return in a rename field also fires the Done button (its `\r` key-equivalent), committing +
+  closing in one press. NEXT M3: Settings (SwiftUI) + rebindable shortcuts — best done together
+  (Settings is the container, the rebind UI its "shortcuts" tab; both edit the registry's
+  `CommandShortcut` data), the last two M3 items.
 
 Exit: a new user can discover copy/move/hotlist through the palette alone; power user
 can rebind everything.
