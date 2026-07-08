@@ -74,6 +74,18 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         window.title = "Dirnex"
         window.minSize = NSSize(width: 640, height: 360)
 
+        // Modern chrome (like Notes/Xcode/Claude): no visible title bar. The content —
+        // the vibrant sidebar and the two panes — runs edge-to-edge to the top of the
+        // window, with the traffic lights floating over the sidebar. The title bar space
+        // becomes usable window height instead of a dead strip. A leading titlebar
+        // accessory (installed below) puts a sidebar show/hide button beside the traffic
+        // lights; pane and sidebar content inset themselves below this zone via the safe
+        // area, so nothing hides under the buttons.
+        window.styleMask.insert(.fullSizeContentView)
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+
         super.init(window: window)
 
         // Read this before the split view lays out (which writes its autosave): a missing
@@ -125,11 +137,47 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         }
         window.setFrameAutosaveName("MainWindow")
 
+        installSidebarToggle()
+
         queueBar.onPauseToggle = { [weak self] in self?.togglePause() }
         queueBar.onCancelAll = { [weak self] in self?.cancelAllJobs() }
         queueBar.onCancelJob = { [weak self] id in self?.cancelJob(id) }
         queueBar.onPreferredHeightChanged = { [weak self] in self?.updateQueueBarHeight() }
         startObservingQueue()
+    }
+
+    /// Put a sidebar show/hide button immediately to the right of the traffic lights, in
+    /// the otherwise-empty transparent title bar. A `.leading` titlebar accessory is the
+    /// standard slot for it; the button drives the split controller's `toggleSidebar`, the
+    /// same action as View ▸ Show Sidebar (⌃⌘S).
+    private func installSidebarToggle() {
+        let button = NSButton()
+        button.bezelStyle = .toolbar
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.image = NSImage(
+            systemSymbolName: "sidebar.leading",
+            accessibilityDescription: "Toggle Sidebar"
+        )
+        button.image?.isTemplate = true
+        button.toolTip = "Hide or show the sidebar"
+        button.target = splitViewController
+        button.action = #selector(NSSplitViewController.toggleSidebar(_:))
+        button.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 40, height: 28))
+        container.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            button.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            button.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            button.heightAnchor.constraint(equalToConstant: 22)
+        ])
+
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.view = container
+        accessory.layoutAttribute = .leading
+        window?.addTitlebarAccessoryViewController(accessory)
     }
 
     deinit {

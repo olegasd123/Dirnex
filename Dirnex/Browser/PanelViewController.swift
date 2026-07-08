@@ -166,7 +166,21 @@ final class PanelViewController: NSViewController {
         statusLabel.setContentHuggingPriority(.required, for: .vertical)
         scrollView.setContentHuggingPriority(.defaultLow, for: .vertical)
 
-        view = stack
+        // The pane fills the window to the top (the title bar is transparent and content
+        // runs edge-to-edge). Pin the chrome stack's top to the safe-area guide so the tab
+        // strip / path bar clear the traffic-light zone when the sidebar is collapsed and
+        // this pane slides under the buttons; the sides and bottom stay flush.
+        let container = NSView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+
+        view = container
         view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             view.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),

@@ -66,10 +66,11 @@ final class SidebarViewController: NSViewController {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
-        // Breathe a little between the top of the sidebar and the first "Favorites" header
-        // rather than butting the group row up against the window edge.
-        scrollView.automaticallyAdjustsContentInsets = false
-        scrollView.contentInsets = NSEdgeInsets(top: 12, left: 0, bottom: 0, right: 0)
+        // The sidebar's vibrant material runs full-height behind the transparent title bar,
+        // so its rows must start below the traffic lights. Tracking the window's safe area
+        // insets the first "Favorites" header clear of them automatically, with no extra
+        // padding on top of that — the material is flush to the window's left/top/bottom.
+        scrollView.automaticallyAdjustsContentInsets = true
 
         view = scrollView
     }
