@@ -246,9 +246,11 @@ final class PanelViewController: NSViewController {
 
     /// Load `path` and install it in the active tab. When `focus` names a child that
     /// still exists (used when walking up), the cursor lands on it — the expected "go up,
-    /// land on where I came from" behavior. Internal so `PanelViewController+Tabs` can
-    /// load a freshly opened tab.
-    func navigate(to path: VFSPath, focus child: VFSPath? = nil) {
+    /// land on where I came from" behavior. A successful load records the visit in the tab's
+    /// back/forward history (PLAN.md §M3) unless `recordHistory` is `false` — the flag
+    /// back/forward/jump navigation passes so walking the trail doesn't append to it.
+    /// Internal so `PanelViewController+Tabs` can load a freshly opened tab.
+    func navigate(to path: VFSPath, focus child: VFSPath? = nil, recordHistory: Bool = true) {
         loadToken += 1
         let token = loadToken
         let tabIndex = activeTabIndex
@@ -269,6 +271,7 @@ final class PanelViewController: NSViewController {
                 // Land on a real entry; only an empty directory parks the cursor on `..`.
                 cursorOnParentRow = panel.isEmpty && panel.parentPath != nil
                 tabs[tabIndex].hasLoaded = true
+                if recordHistory { tabs[tabIndex].history.visit(path) }
                 reloadEverything()
                 refreshTabBar()
                 startWatching(path)

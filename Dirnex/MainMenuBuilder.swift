@@ -54,6 +54,7 @@ enum MainMenuBuilder {
             .command("view.toggleSidebar"), .command("view.quickLook")
         ]),
         MenuSpec(title: "Go", items: [
+            .command("go.back"), .command("go.forward"), .command("go.history"), .separator,
             .command("go.editLocation"), .command("go.parent"), .separator,
             .command("go.hotlist"), .command("go.addToHotlist")
         ]),

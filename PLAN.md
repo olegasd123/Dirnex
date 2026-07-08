@@ -876,7 +876,7 @@ Goal: fix TC's adoption problem — nobody should need the manual.
 - [x] Cmd+K command palette: fuzzy search over every action, shows shortcuts,
       recents on top; palette actions and menu bar generated from one action registry ✅
 - [x] Directory hotlist (Ctrl+D): pin, reorder, jump ✅
-- [ ] Per-panel history (Alt+Down list; Cmd+[ / Cmd+] back/forward)
+- [x] Per-panel history (Alt+Down list; Cmd+[ / Cmd+] back/forward) ✅
 - [ ] Frecency jump: SQLite-backed visit tracking; path bar accepts fuzzy fragments
       ("dl" → ~/Downloads), zoxide-style scoring
 - [ ] Workspaces: save/restore both panels with all tabs, named, switchable from palette
@@ -977,6 +977,50 @@ off the same command registry as pass 1.
   reorder land first try. Test pins cleared after (defaults delete) so no test state left in
   the user's app. Deferred to later M3: per-panel history, frecency jump, workspaces,
   Settings, rebindable shortcuts.
+
+Progress (2026-07-08, M3 pass 3): **per-panel history** landed — the third M3 item and
+the browser-style back/forward trail each tab keeps. Cmd+[ / Cmd+] walk it, Alt+Down pops
+the visited-directory list; all three hang off the same command registry as passes 1–2.
+
+- **Core** (`DirnexCore/…/Services/NavigationHistory.swift`, new). A pure value type — the
+  browser tab-history model: `entries: [VFSPath]` oldest→newest + a `currentIndex`, seeded
+  with the tab's starting path so it's never empty. `visit(path)` records a fresh navigation
+  (drops the forward entries, appends, points current at the tip) but **no-ops when the path
+  equals the current one** (a refresh, or the initial load landing on the seed, never bloats
+  the trail); `back()`/`forward()` only move the cursor and return where to go (`nil` at an
+  edge); `jump(to:)` lands on an arbitrary entry (the Alt+Down popup) without truncating;
+  `canGoBack`/`canGoForward` drive menu enablement. Bounded (default 100), trimming the oldest
+  while shifting `currentIndex` so it keeps pointing at the same path. No AppKit/persistence —
+  session-scoped, the app owns the tab that stores it (frecency's *persistent* visit tracking
+  is the next M3 item). `CommandCatalog` gains three nav commands: `go.back` (⌘[), `go.forward`
+  (⌘]), `go.history` ("Directory History…", ⌥↓). New `NavigationHistoryTests` (+9) + catalog
+  presence/shortcut-display cases (+2) → **core suite 185**, all green; swiftformat/
+  swiftlint-strict clean.
+- **App.** `PanelTab` gains a `NavigationHistory` seeded at its path. `navigate(to:…)` grew a
+  `recordHistory: Bool = true` flag and records the visit on *successful* load (a vanished dir
+  never pollutes the trail); back/forward/jump navigate with `recordHistory: false` so walking
+  the trail doesn't rewrite it. New `PanelViewController+History` owns the pane-relative
+  actions dispatched through the responder chain: `goBack`/`goForward` step the active tab's
+  trail, `showHistory` pops an `NSMenu` from the path-bar edge (matching the ⌃D hotlist popup)
+  listing the entries **newest-first, current check-marked, folder icon + tooltip path**, a
+  pick → `jump`. `CommandBinding`/`MainMenuBuilder` wire all three into the Go menu (a new
+  Back/Forward/History group above Go-to-Location); `validateMenuItem` disables Back/Forward
+  at the trail edges and steps ⌥↓ aside for a first-responder text field (like ⌃D). Cmd+[ /
+  Cmd+] / ⌥↓ ride the menu key-equivalent path, so no `FileTableView` key-model change was
+  needed (plain ↑/↓ still move the cursor — the modifiers don't collide). App builds clean;
+  app test target green; whole repo swiftformat/swiftlint-strict clean. (`PanelViewController.swift`
+  is now exactly at SwiftLint's 500-line `file_length` limit — a further edit there wants a
+  decomposition pass, like `+Table`/`+Chrome` before it.)
+- **Verified live via computer-use** (no overlay this session — mouse + keyboard both worked;
+  navigated the real tree through a `~/history-verify/alpha/x` fixture): the Go menu showed
+  Back ⌘[ / Forward ⌘] **greyed at a fresh single-entry history** and Directory History… ⌥↓
+  enabled; navigating oleg→history-verify→alpha→x then **⌘[** stepped x→alpha→history-verify
+  and **⌘]** returned →alpha (keyboard equivalents fire through the responder chain); **⌥↓**
+  dropped the popup listing x / ✓alpha / history-verify / oleg (newest-first, current
+  check-marked, home-folder icon on oleg); clicking **oleg** jumped straight there and left
+  **Back disabled / Forward enabled** — proving the jump preserved the full trail; then a fresh
+  navigate to Downloads **truncated the forward entries** (the popup collapsed to ✓Downloads /
+  oleg). Deferred to later M3: frecency jump, workspaces, Settings, rebindable shortcuts.
 
 Exit: a new user can discover copy/move/hotlist through the palette alone; power user
 can rebind everything.

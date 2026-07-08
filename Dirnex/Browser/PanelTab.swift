@@ -13,6 +13,10 @@ import Foundation
 @MainActor
 final class PanelTab {
     var panel: Panel
+    /// This tab's back/forward navigation trail (PLAN.md §M3 "Per-panel history"). Seeded at
+    /// the tab's starting directory and grown as navigation records visits; session-scoped,
+    /// so a relaunched tab starts a fresh trail at its restored path.
+    var history: NavigationHistory
     /// The visible cursor is parked on the `..` row (UI-only; see `PanelViewController`).
     var cursorOnParentRow = false
     /// Set once this tab's directory has been listed. A tab restored from disk starts
@@ -26,6 +30,7 @@ final class PanelTab {
 
     init(panel: Panel) {
         self.panel = panel
+        history = NavigationHistory(initialPath: panel.path)
     }
 
     /// A new tab rooted at `path`, inheriting the sort/hidden settings — and, when given,

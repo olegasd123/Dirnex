@@ -32,6 +32,14 @@ struct CommandCatalogTests {
             #expect(count > 0, "category \(category) has no commands")
         }
     }
+
+    @Test("the catalog carries the M3 per-panel history commands")
+    func coversHistoryCommands() {
+        let ids = Set(CommandCatalog.all.map(\.id))
+        for expected in ["go.back", "go.forward", "go.history"] {
+            #expect(ids.contains(expected))
+        }
+    }
 }
 
 @Suite("CommandShortcut display")
@@ -56,5 +64,12 @@ struct CommandShortcutTests {
     @Test("literal punctuation keys pass through unchanged")
     func punctuationDisplay() {
         #expect(CommandShortcut(key: "[", modifiers: [.command, .shift]).display == "⇧⌘[")
+    }
+
+    @Test("the back/forward and history shortcuts render as expected")
+    func historyShortcutDisplay() {
+        #expect(CommandShortcut(key: "[", modifiers: .command).display == "⌘[")
+        #expect(CommandShortcut(key: "]", modifiers: .command).display == "⌘]")
+        #expect(CommandShortcut(key: "↓", modifiers: [.option, .function]).display == "⌥↓")
     }
 }

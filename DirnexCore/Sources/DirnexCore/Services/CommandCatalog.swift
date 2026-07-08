@@ -156,8 +156,29 @@ public enum CommandCatalog {
             id: "go.parent",
             title: "Go Up",
             category: .navigation,
-            keywords: ["parent", "back", "out"],
+            keywords: ["parent", "out"],
             shortcut: CommandShortcut(key: "↑", modifiers: [.command, .function])
+        ),
+        Command(
+            id: "go.back",
+            title: "Back",
+            category: .navigation,
+            keywords: ["history", "previous", "backward"],
+            shortcut: CommandShortcut(key: "[", modifiers: .command)
+        ),
+        Command(
+            id: "go.forward",
+            title: "Forward",
+            category: .navigation,
+            keywords: ["history", "next"],
+            shortcut: CommandShortcut(key: "]", modifiers: .command)
+        ),
+        Command(
+            id: "go.history",
+            title: "Directory History…",
+            category: .navigation,
+            keywords: ["recent", "visited", "trail", "alt down"],
+            shortcut: CommandShortcut(key: "↓", modifiers: [.option, .function])
         ),
         Command(
             id: "go.hotlist",
