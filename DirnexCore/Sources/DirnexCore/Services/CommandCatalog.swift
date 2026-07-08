@@ -1,0 +1,206 @@
+import Foundation
+
+/// The registry of every discoverable action, in the order the palette lists them within a
+/// category and the menu bar builds them. This is the single source of truth the app joins
+/// with AppKit selectors to generate *both* the menu bar and the Cmd+K palette (PLAN.md §M3
+/// "palette actions and menu bar generated from one action registry").
+///
+/// Shortcuts here are the *primary* binding shown to the user. Some commands also answer to
+/// a second, Finder-style gesture wired directly in the table's key model (e.g. Move to
+/// Trash on ⌘⌫ as well as F8) — those secondary bindings are an app concern and intentionally
+/// not modeled here; the registry advertises the one canonical shortcut per command.
+public enum CommandCatalog {
+    /// Every command, grouped by category in presentation order. The app filters by category
+    /// to build each menu and searches the whole list for the palette.
+    public static let all: [Command] = file + edit + selection + view + navigation + window + application
+
+    /// The command with `id`, or `nil` if unknown — the app's menu builder and palette look
+    /// commands up by id to join them with AppKit selectors.
+    public static func command(for id: String) -> Command? {
+        all.first { $0.id == id }
+    }
+
+    // MARK: - File
+
+    private static let file: [Command] = [
+        Command(
+            id: "file.newTab",
+            title: "New Tab",
+            category: .file,
+            keywords: ["tab"],
+            shortcut: CommandShortcut(key: "t", modifiers: .command)
+        ),
+        Command(
+            id: "file.closeTab",
+            title: "Close Tab",
+            category: .file,
+            keywords: ["tab"],
+            shortcut: CommandShortcut(key: "w", modifiers: .command)
+        ),
+        Command(
+            id: "file.copy",
+            title: "Copy to Other Panel",
+            category: .file,
+            keywords: ["f5", "duplicate", "transfer"],
+            shortcut: CommandShortcut(key: "F5", modifiers: .function)
+        ),
+        Command(
+            id: "file.move",
+            title: "Move to Other Panel",
+            category: .file,
+            keywords: ["f6", "transfer"],
+            shortcut: CommandShortcut(key: "F6", modifiers: .function)
+        ),
+        Command(
+            id: "file.rename",
+            title: "Rename…",
+            category: .file,
+            keywords: ["f2"],
+            shortcut: CommandShortcut(key: "F2", modifiers: .function)
+        ),
+        Command(
+            id: "file.newFolder",
+            title: "New Folder",
+            category: .file,
+            keywords: ["f7", "directory", "mkdir", "create"],
+            shortcut: CommandShortcut(key: "F7", modifiers: .function)
+        ),
+        Command(
+            id: "file.trash",
+            title: "Move to Trash",
+            category: .file,
+            keywords: ["f8", "delete", "remove"],
+            shortcut: CommandShortcut(key: "F8", modifiers: .function)
+        ),
+        Command(
+            id: "file.deletePermanently",
+            title: "Delete Immediately…",
+            category: .file,
+            keywords: ["destroy", "remove", "erase"],
+            shortcut: CommandShortcut(key: "F8", modifiers: [.function, .shift])
+        )
+    ]
+
+    // MARK: - Edit
+
+    private static let edit: [Command] = [
+        Command(
+            id: "edit.undo",
+            title: "Undo",
+            category: .edit,
+            keywords: ["revert", "back"],
+            shortcut: CommandShortcut(key: "z", modifiers: .command)
+        )
+    ]
+
+    // MARK: - Select
+
+    private static let selection: [Command] = [
+        Command(
+            id: "select.invert",
+            title: "Invert Selection",
+            category: .selection,
+            keywords: ["toggle", "flip"]
+        ),
+        Command(
+            id: "select.byPattern",
+            title: "Select by Pattern…",
+            category: .selection,
+            keywords: ["wildcard", "glob", "mark"]
+        ),
+        Command(
+            id: "select.unselectByPattern",
+            title: "Unselect by Pattern…",
+            category: .selection,
+            keywords: ["wildcard", "glob", "deselect", "unmark"]
+        )
+    ]
+
+    // MARK: - View
+
+    private static let view: [Command] = [
+        Command(
+            id: "view.commandPalette",
+            title: "Command Palette…",
+            category: .view,
+            keywords: ["actions", "commands", "search", "run"],
+            shortcut: CommandShortcut(key: "k", modifiers: .command)
+        ),
+        Command(
+            id: "view.toggleSidebar",
+            title: "Show Sidebar",
+            category: .view,
+            keywords: ["places", "volumes", "hide"],
+            shortcut: CommandShortcut(key: "s", modifiers: [.control, .command])
+        ),
+        Command(
+            id: "view.quickLook",
+            title: "Quick Look",
+            category: .view,
+            keywords: ["preview", "peek"],
+            shortcut: CommandShortcut(key: "y", modifiers: .command)
+        )
+    ]
+
+    // MARK: - Go
+
+    private static let navigation: [Command] = [
+        Command(
+            id: "go.editLocation",
+            title: "Go to Location…",
+            category: .navigation,
+            keywords: ["path", "address", "type", "url"],
+            shortcut: CommandShortcut(key: "l", modifiers: .command)
+        ),
+        Command(
+            id: "go.parent",
+            title: "Go Up",
+            category: .navigation,
+            keywords: ["parent", "back", "out"],
+            shortcut: CommandShortcut(key: "↑", modifiers: [.command, .function])
+        )
+    ]
+
+    // MARK: - Window
+
+    private static let window: [Command] = [
+        Command(
+            id: "window.minimize",
+            title: "Minimize",
+            category: .window,
+            shortcut: CommandShortcut(key: "m", modifiers: .command)
+        ),
+        Command(
+            id: "window.close",
+            title: "Close Window",
+            category: .window,
+            shortcut: CommandShortcut(key: "w", modifiers: [.command, .shift])
+        ),
+        Command(
+            id: "window.previousTab",
+            title: "Show Previous Tab",
+            category: .window,
+            keywords: ["tab"],
+            shortcut: CommandShortcut(key: "[", modifiers: [.command, .shift])
+        ),
+        Command(
+            id: "window.nextTab",
+            title: "Show Next Tab",
+            category: .window,
+            keywords: ["tab"],
+            shortcut: CommandShortcut(key: "]", modifiers: [.command, .shift])
+        )
+    ]
+
+    // MARK: - Application
+
+    private static let application: [Command] = [
+        Command(
+            id: "app.quit",
+            title: "Quit Dirnex",
+            category: .application,
+            keywords: ["exit"],
+            shortcut: CommandShortcut(key: "q", modifiers: .command)
+        )
+    ]
+}

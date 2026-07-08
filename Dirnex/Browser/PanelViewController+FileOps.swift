@@ -253,6 +253,9 @@ extension PanelViewController: NSMenuItemValidation {
                 && backend.capabilities.contains(.rename)
         case #selector(undoLastOperation(_:)):
             return validateUndoItem(menuItem)
+        case #selector(goToParentDirectory(_:)):
+            // "Go Up" is meaningless at the root of a backend.
+            return panel.parentPath != nil
         default:
             return true
         }

@@ -873,8 +873,8 @@ mid-copy produces a sane error, not a hang; Cmd+Z after a bad move actually fixe
 
 Goal: fix TC's adoption problem — nobody should need the manual.
 
-- [ ] Cmd+K command palette: fuzzy search over every action, shows shortcuts,
-      recents on top; palette actions and menu bar generated from one action registry
+- [x] Cmd+K command palette: fuzzy search over every action, shows shortcuts,
+      recents on top; palette actions and menu bar generated from one action registry ✅
 - [ ] Directory hotlist (Ctrl+D): pin, reorder, jump
 - [ ] Per-panel history (Alt+Down list; Cmd+[ / Cmd+] back/forward)
 - [ ] Frecency jump: SQLite-backed visit tracking; path bar accepts fuzzy fragments
@@ -882,6 +882,54 @@ Goal: fix TC's adoption problem — nobody should need the manual.
 - [ ] Workspaces: save/restore both panels with all tabs, named, switchable from palette
 - [ ] Settings window (SwiftUI): general, panels, operations, shortcuts
 - [ ] Rebindable shortcuts with conflict detection; TC-compatible preset and macOS preset
+
+Progress (2026-07-08, M3 pass 1): the **action registry + Cmd+K command palette** landed —
+M3's headline, and the piece the rest of M3 leans on. The registry is one headless source
+of truth; both the menu bar and the palette are generated from it, so they can't drift.
+
+- **Core** (`DirnexCore/…/Services/`, new group per §2). `Command` (stable dotted `id` +
+  title + `CommandCategory` + search `keywords` + optional `CommandShortcut`) is a pure value
+  type — no AppKit. `CommandShortcut` carries a display token + a modifier `OptionSet` and
+  renders a macOS glyph string (`⌘Z`, `⇧F8`, `⌘↑`; the `fn` layer is never drawn).
+  `CommandCatalog.all` is the ordered registry of ~22 commands (the whole current menu surface
+  incl. F5/F6/F2/F7/F8, tabs, undo, select-by-pattern, sidebar, Quick Look, Go-to-Location,
+  Go-Up, window/app). `CommandMatcher.search` fuzzy-ranks for the palette: fzf-lite subsequence
+  scoring (word-boundary + consecutive-run + prefix bonuses, gap penalty), title preferred over
+  a keyword-only hit, empty query → registry order with **recents floated on top**, recency as
+  the tie-break; returns matched title offsets for highlighting. New `CommandCatalogTests` /
+  `CommandMatcherTests` / shortcut-display tests (+16 → **core suite 164**), all green,
+  swiftformat/swiftlint-strict clean.
+- **App.** `Dirnex/Palette/` = `CommandBinding` (the join table: command `id` → AppKit
+  `Selector`, every one dispatched to `nil` so it rides the responder chain to the focused
+  pane / key window / app exactly as a menu item does), `CommandShortcut+AppKit` (token →
+  key-equivalent scalar incl. F-keys/arrows + modifier mask), `CommandRecents` (newest-first
+  ids in `UserDefaults`, capped, registry-filtered), and the palette itself:
+  `CommandPaletteController` (a floating `NSPanel`; a large search field stays first responder
+  and drives the result `NSTableView` from `control(_:doCommandBy:)` — ↑/↓ move, ⏎ runs, ⎋
+  closes; picking a command records it recent, dismisses, re-keys the browser window, then
+  `NSApp.sendAction(_:to:nil)` on the next tick so the action lands on the pane, not the closed
+  palette) + `CommandPaletteRowView` (category tag · title with matched chars bold · shortcut).
+  New `MainMenuBuilder` rebuilds the whole menu bar from `CommandCatalog` + `CommandBinding`
+  (app owns only the per-menu layout/separators; titles/shortcuts/actions all come from the
+  registry) — the hand-built menu in `AppDelegate` is gone; a new **Go** menu (Go to Location,
+  Go Up) joins File/Edit/Select/View/Window. Three thin `@objc` wrappers
+  (`PanelViewController+Commands`: Quick Look / edit-location / go-parent) expose the previously
+  keyboard-only actions to the registry; `validateMenuItem` disables Go Up at a backend root.
+  ⌘K is owned by `AppDelegate.showCommandPalette` (toggles). App builds clean; whole repo
+  swiftlint-strict clean; app smoke target green.
+- **Verified live via computer-use**: ⌘K opened the palette (empty resting state, correct
+  ⌘T/F5/F2/⇧F8/⌘Z glyphs + category tags); "gotoloc" fuzzy-narrowed to **Go to Location…**
+  with "Go to Loc" bold; ↓↓ moved the highlight; ⏎ dispatched to the **focused** pane (Go to
+  Location opened its path-bar editor; a separate "newtab" run added a 2nd tab to the left
+  pane) — proving the close→re-key→responder-chain path; reopening floated the just-run
+  commands to the top (**recents persist across relaunch**); the reused field clears on reopen
+  (fixed a stale-query bug caught live); ⌘K toggles the palette closed and a click into the
+  window dismisses it; the File menu is fully registry-generated (right separators + F-keys)
+  and ⌘T/⌘W still fire. GOTCHA (unchanged from M1/M2): synthetic ⎋ is swallowed by the OS
+  before reaching the app, so ⎋-to-close is correct-by-implementation but unverified-live —
+  the ⌘K-toggle and click-away dismissals cover it. NEXT M3: hotlist (Ctrl+D), per-panel
+  history, frecency jump, workspaces, Settings, rebindable shortcuts (the registry's
+  `CommandShortcut` is already the data those last two will edit).
 
 Exit: a new user can discover copy/move/hotlist through the palette alone; power user
 can rebind everything.
