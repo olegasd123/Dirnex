@@ -45,7 +45,11 @@ protocol FileTableViewInput: AnyObject {
     /// Returns `true` when the controller consumed it as a modifier selection and the
     /// table should skip its own click handling (no cursor move, no drag); `false` for a
     /// plain click, which the table still runs for cursor movement and drag-out.
-    func fileTable(_ tableView: FileTableView, didClickRow row: Int, modifiers: NSEvent.ModifierFlags) -> Bool
+    func fileTable(
+        _ tableView: FileTableView,
+        didClickRow row: Int,
+        modifiers: NSEvent.ModifierFlags
+    ) -> Bool
 }
 
 /// `NSTableView` subclass that intercepts the file-manager key model before the
