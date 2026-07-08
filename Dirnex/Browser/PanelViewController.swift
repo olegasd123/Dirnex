@@ -271,7 +271,7 @@ final class PanelViewController: NSViewController {
                 // Land on a real entry; only an empty directory parks the cursor on `..`.
                 cursorOnParentRow = panel.isEmpty && panel.parentPath != nil
                 tabs[tabIndex].hasLoaded = true
-                if recordHistory { tabs[tabIndex].history.visit(path) }
+                recordVisit(path, tab: tabIndex, recordHistory: recordHistory)
                 reloadEverything()
                 refreshTabBar()
                 startWatching(path)

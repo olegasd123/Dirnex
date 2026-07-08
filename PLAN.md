@@ -877,8 +877,8 @@ Goal: fix TC's adoption problem — nobody should need the manual.
       recents on top; palette actions and menu bar generated from one action registry ✅
 - [x] Directory hotlist (Ctrl+D): pin, reorder, jump ✅
 - [x] Per-panel history (Alt+Down list; Cmd+[ / Cmd+] back/forward) ✅
-- [ ] Frecency jump: SQLite-backed visit tracking; path bar accepts fuzzy fragments
-      ("dl" → ~/Downloads), zoxide-style scoring
+- [x] Frecency jump: visit tracking; path bar accepts fuzzy fragments
+      ("dl" → ~/Downloads), zoxide-style scoring ✅ (JSON store; SQLite deferred like undo)
 - [ ] Workspaces: save/restore both panels with all tabs, named, switchable from palette
 - [ ] Settings window (SwiftUI): general, panels, operations, shortcuts
 - [ ] Rebindable shortcuts with conflict detection; TC-compatible preset and macOS preset
@@ -1021,6 +1021,62 @@ the visited-directory list; all three hang off the same command registry as pass
   **Back disabled / Forward enabled** — proving the jump preserved the full trail; then a fresh
   navigate to Downloads **truncated the forward entries** (the popup collapsed to ✓Downloads /
   oleg). Deferred to later M3: frecency jump, workspaces, Settings, rebindable shortcuts.
+
+Progress (2026-07-08, M3 pass 4): **frecency jump** landed — the fourth M3 item, TC has no
+equivalent; it's the zoxide-style "type a fragment, land in the right folder" the path bar
+gains. Persistent visit tracking + fuzzy resolution, hanging off the same `navigate` and
+Cmd+L path bar the earlier passes built.
+
+- **Core** (`DirnexCore/…/Services/Frecency.swift`, new). Pure value types: `FrecencyEntry`
+  (path + `rank` + `lastAccess`, `Codable`, identity = path) and `Frecency` (the index,
+  de-duplicated by path). `visit(_:now:)` bumps a directory's rank (or inserts at 1) and
+  stamps the time, then **ages** — zoxide's algorithm: once the summed rank exceeds `maxAge`
+  (default 10,000) scale every rank by `0.9·maxAge/total` and drop entries below 1, so the
+  index is self-bounding no matter how long the app runs. `score(for:now:)` is rank × a
+  recency multiplier (within the hour 4×, day 2×, week ½×, older ¼×; a future/skewed stamp
+  falls into the most-recent bucket). `matches(for:now:)`/`bestMatch` filter to entries whose
+  **last path component** is a case-insensitive subsequence of the query ("dl" ⊆ "downloads")
+  then sort by score, most-recent, then path — so a folder opened twice this morning beats one
+  opened ten times last month. Decoding routes through the de-duping init (legacy/corrupt
+  store sanitized; a pre-`maxAge` blob gets the default). New `FrecencyTests` (+13 → **core
+  suite 198**): insert/bump, the four recency buckets incl. clock-skew, recency-beats-raw-
+  frequency, `dl→Downloads`, last-component-only matching, case-insensitivity, aging-drops-
+  below-1, de-dup, and JSON round-trip incl. the legacy-without-`maxAge` case. All green;
+  swiftformat/swiftlint-strict clean. GOTCHA per §2: the plan pencils **SQLite** for frecency;
+  landed as JSON in `UserDefaults` like the undo journal did (the index is self-bounded by
+  aging, so JSON's rewrite-per-visit cost is a non-issue) — SQLite still deferred to when undo
+  shares the DB. `CommandCatalog` `go.editLocation` gained keywords (jump/frecency/fuzzy/
+  recent) so the palette surfaces it.
+- **App.** New `FrecencyStore` (`@MainActor`, one app-wide `.shared` instance held in memory —
+  unlike `HotlistStore`'s read-per-open, because visits stream in continuously from every
+  navigation and separate per-window copies would clobber each other): loads the index once,
+  `recordVisit` bumps + persists (JSON in `UserDefaults` `Dirnex.frecency`), `rankedMatches`
+  reads. Visit recording hooks the **one** place a load succeeds — `navigate`'s success path —
+  via a new `PanelViewController+Visits.recordVisit(_:tab:recordHistory:)` that records history
+  (conditionally) *and* frecency (always: a back-button jump is still a visit); folded into the
+  existing history line as a 1-for-1 replacement so `PanelViewController.swift` stays exactly at
+  the 500-line `file_length` limit (its decomposition is still pending, just not forced here).
+  So the index learns from crumb clicks, the sidebar, hotlist jumps, and back/forward alike.
+  The path bar's Return now routes through a new `PathBarViewDelegate.didCommit(rawText:resolved:)`
+  (crumb clicks still use `didActivate`); `PanelViewController+PathBar` resolves it: an explicit
+  path that `stat`s to a real directory wins, else a **slash-free** fragment falls back to
+  `firstExistingFrecencyMatch` (walks the ranked candidates, `stat`-verifying each so a since-
+  deleted top hit is skipped, capped at 10), else the typed path navigates so the normal
+  not-found sheet still shows. A path *with* a slash is always taken literally, so a mistyped
+  explicit path never silently leaps elsewhere. New `DirectoryLoader.stat` bridges the off-main
+  existence check. App builds clean (no warnings); whole repo swiftformat/swiftlint-strict clean.
+- **Verified live via computer-use** (no overlay this session — mouse worked; drove the Go menu
+  since Cmd delivery is unreliable): seeded the index by navigating the active pane oleg →
+  Downloads → Documents via the sidebar; Go ▸ Go to Location… prefilled+selected the current
+  path, typing **`dl`** replaced it, and **Return jumped the pane straight to ~/Downloads**
+  (breadcrump Downloads, 31 items — from Documents' 27) purely through the fuzzy index. The
+  persisted `Dirnex.frecency` then read `/Users/oleg` rank 4 / Downloads rank 2 / Documents
+  rank 2 — proving visit recording from the sidebar, rank accumulation on revisit, and
+  **persistence across relaunch** (the home rank carried over from earlier launches). (Also
+  confirmed earlier-in-session by decoding the blob the app-test run left: `/Users/oleg` rank 2,
+  both panes' launch-into-home recorded through the same hook.) Test frecency default deleted
+  after so no test state remains in the user's app. NEXT M3: workspaces, Settings (SwiftUI),
+  rebindable shortcuts (the registry's `CommandShortcut` is the data those edit).
 
 Exit: a new user can discover copy/move/hotlist through the palette alone; power user
 can rebind everything.

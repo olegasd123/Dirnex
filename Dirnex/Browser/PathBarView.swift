@@ -5,8 +5,13 @@ import DirnexCore
 /// the pane (PLAN.md §2 "UI is a thin client"); the bar only reports intent.
 @MainActor
 protocol PathBarViewDelegate: AnyObject {
-    /// A crumb was clicked, or an edited path was committed with Return.
+    /// A crumb was clicked — navigate straight to this already-real path.
     func pathBar(_ bar: PathBarView, didActivate path: VFSPath)
+    /// Edited text was committed with Return. `resolved` is the literal location the text
+    /// expands to (tilde/relative resolved); `rawText` is exactly what was typed, so the
+    /// pane can fall back to a frecency fuzzy match ("dl" → ~/Downloads) when `resolved`
+    /// isn't a real directory (PLAN.md §M3 "path bar accepts fuzzy fragments").
+    func pathBar(_ bar: PathBarView, didCommit rawText: String, resolved: VFSPath)
     /// Editing was abandoned (Esc) — the pane should take keyboard focus back.
     func pathBarDidCancel(_ bar: PathBarView)
     /// Text editing began — the pane should become the active one.
@@ -210,9 +215,10 @@ final class PathBarView: NSView, NSTextFieldDelegate {
     }
 
     private func commit() {
-        let target = resolvedPath(from: editField.stringValue)
+        let raw = editField.stringValue
+        let target = resolvedPath(from: raw)
         endEditing(restoreFocus: false)
-        delegate?.pathBar(self, didActivate: target)
+        delegate?.pathBar(self, didCommit: raw, resolved: target)
     }
 
     /// Resolve typed text into a location: expand a leading `~`, and treat non-absolute

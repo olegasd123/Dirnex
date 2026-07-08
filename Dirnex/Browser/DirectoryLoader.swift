@@ -16,6 +16,16 @@ enum DirectoryLoader {
         }.value
     }
 
+    /// Stat a single path off the main thread — used to check whether a typed location is a
+    /// real directory before deciding to fall back to a frecency fuzzy match. Returns `nil`
+    /// on any failure (not found, permission, …), so the caller treats a missing path the
+    /// same as an un-stattable one.
+    static func stat(_ backend: any VFSBackend, at path: VFSPath) async -> FileEntry? {
+        await Task.detached(priority: .userInitiated) {
+            try? backend.stat(at: path)
+        }.value
+    }
+
     /// Recursively total a directory's size off the main thread (Space-on-dir sizing).
     /// Returns `nil` only if the top-level walk fails outright; unreadable subtrees are
     /// skipped inside `DirectorySizer`, not fatal. Runs at `.utility` — sizing is a

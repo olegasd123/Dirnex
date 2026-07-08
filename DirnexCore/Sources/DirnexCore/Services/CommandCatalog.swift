@@ -149,7 +149,7 @@ public enum CommandCatalog {
             id: "go.editLocation",
             title: "Go to Location…",
             category: .navigation,
-            keywords: ["path", "address", "type", "url"],
+            keywords: ["path", "address", "type", "url", "jump", "frecency", "fuzzy", "recent"],
             shortcut: CommandShortcut(key: "l", modifiers: .command)
         ),
         Command(
