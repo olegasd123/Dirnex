@@ -111,11 +111,13 @@ final class PathBarView: NSView, NSTextFieldDelegate {
 
     // MARK: - Breadcrumb mode
 
-    /// Rebuild the crumb row for `path`. A no-op when the path is unchanged (so it's
-    /// cheap to call from the pane's per-keystroke chrome refresh), unless editing is
-    /// active — committing new text must always redraw.
+    /// Rebuild the crumb row for `path`. A no-op when the path is unchanged, so it's
+    /// cheap to call from the pane's per-keystroke chrome refresh — and, crucially, a
+    /// background refresh that re-reports the same location never disturbs an open Cmd+L
+    /// edit field. A genuine change rebuilds, dropping out of edit mode first if it was
+    /// active (the location moved underneath the editor).
     func setPath(_ path: VFSPath) {
-        guard self.path != path || isEditing else { return }
+        guard self.path != path else { return }
         self.path = path
         if isEditing { endEditing(restoreFocus: false) }
         rebuildCrumbs(for: path)
