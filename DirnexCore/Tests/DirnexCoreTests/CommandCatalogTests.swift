@@ -66,6 +66,15 @@ struct CommandCatalogTests {
         }
     }
 
+    @Test("the M4 multi-rename tool is a conflict-free File command on ⇧F2")
+    func coversMultiRename() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        let multiRename = byID["file.multiRename"]
+        #expect(multiRename?.category == .file)
+        #expect(multiRename?.shortcut == CommandShortcut(key: "F2", modifiers: [.function, .shift]))
+        #expect(KeyBindings().conflicts(for: "file.multiRename").isEmpty)
+    }
+
     @Test("the show-hidden toggle is a conflict-free View command on ⇧⌘.")
     func coversShowHiddenToggle() {
         let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })

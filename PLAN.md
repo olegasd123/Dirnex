@@ -1205,7 +1205,7 @@ Goal: cash in the VFS abstraction from M0.
 - [ ] `ArchiveBackend` via libarchive: browse zip/tar/tgz/7z as folders; copy out with F5;
       pack via F5-with-archive-target; nested archives read-only
 - [ ] Archive writes: add/delete inside zip (rewrite strategy, journal-safe temp file)
-- [ ] Multi-rename tool: pattern tokens ([N] name, [C] counter, [E] ext, date tokens),
+- [x] Multi-rename tool: pattern tokens ([N] name, [C] counter, [E] ext, date tokens),
       regex find/replace, case transforms, live preview table, applies as one undoable batch
 - [ ] Search (Alt+F7 / palette): mdfind-backed name+content search with filter chips
       (kind, size, date, tag); streamed results; content grep fallback for non-indexed volumes
@@ -1216,6 +1216,46 @@ Goal: cash in the VFS abstraction from M0.
 
 Exit: open a zip, fish two files out, repack — no temp-folder dance; rename 500 photos
 by date pattern and undo it; search feeds a panel.
+
+Progress (2026-07-09, M4 pass 1): the **multi-rename tool** landed — TC's Multi-Rename Tool
+(⇧F2), a headline M4 item and the batch-rename power feature (**M4 line 3 now `[x]`**; started
+here rather than ArchiveBackend because it's pure-Swift and slots straight into the tested
+core→app rhythm, whereas libarchive needs a C-module + vendored-headers infra pass first). Core
+`DirnexCore/Services/MultiRename.swift` = a pure planner: `RenameSpec` (name mask + extension
+mask + literal/regex find-replace + `RenameCase` fold + `RenameCounter` start/step/zero-pad) →
+`MultiRename.plan(for:spec:existingNames:)` → one `RenameProposal` per item (old→new +
+`RenameStatus`). Token substitution is a single left-to-right scan (`[N]` base, `[E]` ext,
+`[C]` counter, `[Y][M][D]` date + `[h][n][s]` time read off the mtime in the local calendar) so
+a filename that literally contains "[C]" is never re-expanded, and unknown/malformed brackets
+pass through verbatim. Collision model is deliberately strict-and-safe: a new name may only equal
+its own item's original (a pure case change on case-insensitive APFS) — a target that collides
+with any *other* existing name, incl. another batch member's original (a swap/chain), is a
+blocking `.collision`, and two rows producing the same name are `.duplicate`; that keeps every
+applied rename order-independent AND cleanly undoable with plain `moveItem` (no temp-name
+juggling). +20 `MultiRenameTests` +1 catalog +2 undo-builder → **254 core tests**; `CommandCatalog`
+gains `file.multiRename` (⇧F2, conflict-free); NEW `UndoRecord.multiRename` builder folds the
+batch into ONE record of `.restore` steps, so a single Cmd+Z reverses the whole rename. App =
+`MultiRenameController` (a `presentAsSheet` NSViewController — NSGridView of controls + tokens
+legend + a live two-column preview NSTableView that re-plans on every keystroke via
+`controlTextDidChange`; red new-name cells, an "N name conflicts" footer, and a disabled/enabled
+"Rename N Items" default button) + `PanelViewController+MultiRename` (gathers `selectionTargets()`
++ the directory's full name set, presents the sheet, and on commit performs the moves off-main
+through `moveItem` then journals `UndoRecord.multiRename`); `CommandBinding`/`MainMenuBuilder` wire
+it into the File menu right after Rename; `validateMenuItem` enables it on a non-empty selection +
+`.rename` capability. Whole repo swiftformat/swiftlint-strict clean. Verified live (mouse-driven,
+no overlay; had to fully quit a stale running instance first — `open` re-focuses the old process,
+so the new menu item only appeared after a clean relaunch): marked 2 of 4 files, ⇧F2 opened the
+tool with an identity preview; typed `photo_[C]` + Digits 2 → live preview
+IMG_three.jpg→photo_01.jpg / IMG_two.jpg→photo_02.jpg (counter + zero-pad + `.jpg` preserved),
+Rename applied byte-exact on disk (contents intact, IMG_one/notes.txt untouched), and Edit▸**Undo
+Rename** reversed the entire batch in one Cmd+Z (both original names + contents back on disk); a
+constant `same` mask flagged both rows red with a "2 name conflicts" footer and a disabled Rename
+button. GOTCHA (recurring, hit again): `#expect(coll.allSatisfy(\.x))` trips the Testing macro's
+throwing analysis — hoist the result into a `let` first. Left the app on Home; test fixtures
+deleted. Groundwork note for the ArchiveBackend pass: the macOS SDK ships `libarchive.tbd`
+(so `-larchive` links) but has NO `archive.h`/`archive_entry.h` — a C-module target with vendored
+headers (or shelling out to `bsdtar`/`ditto`) is the gate. NEXT M4: ArchiveBackend (libarchive),
+mdfind search (Alt+F7) → virtual panel, quick-view panel.
 
 ### M5 — Network and sync (M)
 

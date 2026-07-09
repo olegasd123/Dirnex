@@ -21,6 +21,7 @@ enum CommandBinding {
         "file.copy": #selector(PanelViewController.copyToOtherPane(_:)),
         "file.move": #selector(PanelViewController.moveToOtherPane(_:)),
         "file.rename": #selector(PanelViewController.renameSelection(_:)),
+        "file.multiRename": #selector(PanelViewController.multiRenameSelection(_:)),
         "file.newFolder": #selector(PanelViewController.newFolder(_:)),
         "file.trash": #selector(PanelViewController.moveSelectionToTrash(_:)),
         "file.deletePermanently": #selector(PanelViewController.deleteSelectionPermanently(_:)),

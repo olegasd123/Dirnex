@@ -111,6 +111,20 @@ public extension UndoRecord {
         UndoRecord(label: "Rename", date: date, steps: [.restore(from: new, to: old)])
     }
 
+    /// Undo a Multi-Rename batch by moving each renamed item back to its original name — one
+    /// record, so a single Cmd+Z reverses the whole batch (PLAN.md §M4 "applies as one undoable
+    /// batch"). Returns `nil` when nothing was renamed. Because the tool never applies a rename
+    /// whose target equals another still-present name, every original is free at undo time and
+    /// `.restore`'s clobber guard never trips on a batch of its own making.
+    static func multiRename(
+        _ items: [(original: VFSPath, renamed: VFSPath)],
+        date: Date = Date()
+    ) -> UndoRecord? {
+        let steps = items.map { UndoStep.restore(from: $0.renamed, to: $0.original) }
+        guard !steps.isEmpty else { return nil }
+        return UndoRecord(label: "Rename", date: date, steps: steps)
+    }
+
     /// Undo a Move-to-Trash by restoring each item from the Trash location it landed at back
     /// to where it came from. Returns `nil` if nothing was actually trashed (e.g. the backend
     /// reported no Trash location for any item).

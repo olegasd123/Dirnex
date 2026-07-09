@@ -60,6 +60,13 @@ public enum CommandCatalog {
             shortcut: CommandShortcut(key: "F2", modifiers: .function)
         ),
         Command(
+            id: "file.multiRename",
+            title: "Multi-Rename Tool…",
+            category: .file,
+            keywords: ["batch", "rename", "pattern", "counter", "regex", "mask"],
+            shortcut: CommandShortcut(key: "F2", modifiers: [.function, .shift])
+        ),
+        Command(
             id: "file.newFolder",
             title: "New Folder",
             category: .file,
