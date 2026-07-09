@@ -83,6 +83,15 @@ struct CommandCatalogTests {
         #expect(toggle?.shortcut == CommandShortcut(key: ".", modifiers: [.command, .shift]))
         #expect(KeyBindings().conflicts(for: "view.toggleHidden").isEmpty)
     }
+
+    @Test("the M4 quick-view panel is a conflict-free View command on ⌃Q")
+    func coversQuickViewPanel() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        let quickView = byID["view.quickView"]
+        #expect(quickView?.category == .view)
+        #expect(quickView?.shortcut == CommandShortcut(key: "q", modifiers: .control))
+        #expect(KeyBindings().conflicts(for: "view.quickView").isEmpty)
+    }
 }
 
 @Suite("CommandShortcut display")

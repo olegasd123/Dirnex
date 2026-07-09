@@ -44,6 +44,19 @@ protocol PanelHost: AnyObject {
     /// Restore both panes from a saved workspace, replacing their tab sets, then focus the
     /// left pane. Directories that have since vanished are dropped as the panes rebuild.
     func applyWorkspace(_ workspace: Workspace)
+
+    /// Quick View (⌃Q): flip the window-wide mode where the *inactive* pane shows a live
+    /// preview of the file under the *active* pane's cursor. The window owns the state
+    /// because the mode spans both panes, which a single pane can't coordinate.
+    func toggleQuickView()
+
+    /// Whether Quick View is currently on — drives the View ▸ Quick View Panel checkmark.
+    var isQuickViewEnabled: Bool { get }
+
+    /// The active pane reports its cursor (or directory) changed so the window can re-drive
+    /// the inactive pane's Quick View preview. A no-op unless Quick View is on and `panel`
+    /// is the active pane.
+    func panelCursorDidChange(_ panel: PanelViewController)
 }
 
 /// One file pane: a path bar, an `NSTableView` of the current directory, and a status
@@ -78,7 +91,21 @@ final class PanelViewController: NSViewController {
     /// Internal (not private) so the Quick Look extension in its own file can map the
     /// cursor row to a source frame for the zoom animation.
     let tableView = FileTableView()
-    private let scrollView = NSScrollView()
+    // Internal so the Quick View extension can pin its preview overlay over the file list.
+    let scrollView = NSScrollView()
+
+    /// The opaque overlay that covers the file list while this pane is the *inactive* pane and
+    /// Quick View (⌃Q) is on. It hosts `quickViewPreview` and supplies the solid background —
+    /// a Quick Look preview that doesn't fill the view (a tiny image, a failed preview) would
+    /// otherwise let the table show through. Lazily built on first use; `nil` until then.
+    /// Managed by `PanelViewController+QuickView`.
+    var quickViewContainer: NSView?
+    /// The embedded Quick Look preview inside `quickViewContainer` — a live preview of the file
+    /// under the *other* pane's cursor.
+    var quickViewPreview: QLPreviewView?
+    /// The URL currently loaded into `quickViewPreview`, so an unrelated refresh that
+    /// re-drives the same file is skipped instead of flickering the preview.
+    var quickViewLoadedURL: URL?
     // Internal so `PanelViewController+Chrome` can update them from its own file.
     let pathBar = PathBarView()
     let statusLabel = NSTextField(labelWithString: "")

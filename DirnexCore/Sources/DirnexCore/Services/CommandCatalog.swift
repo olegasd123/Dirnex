@@ -175,6 +175,13 @@ public enum CommandCatalog {
             category: .view,
             keywords: ["preview", "peek"],
             shortcut: CommandShortcut(key: "y", modifiers: .command)
+        ),
+        Command(
+            id: "view.quickView",
+            title: "Quick View Panel",
+            category: .view,
+            keywords: ["preview", "peek", "pane", "inactive", "ctrl q"],
+            shortcut: CommandShortcut(key: "q", modifiers: .control)
         )
     ]
 

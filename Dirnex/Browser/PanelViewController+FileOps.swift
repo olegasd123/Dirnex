@@ -268,6 +268,9 @@ extension PanelViewController {
 
 extension PanelViewController: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        // Boolean view toggles set a checkmark and are always enabled — handled apart from the
+        // enable/disable switch below so it stays under the complexity limit.
+        if let toggle = validateToggleItem(menuItem) { return toggle }
         switch menuItem.action {
         case #selector(moveSelectionToTrash(_:)), #selector(deleteSelectionPermanently(_:)):
             return !selectionTargets().isEmpty
@@ -293,11 +296,6 @@ extension PanelViewController: NSMenuItemValidation {
         case #selector(multiRenameSelection(_:)):
             // The batch tool operates on the marked set (else the cursor entry), never `..`.
             return !selectionTargets().isEmpty && backend.capabilities.contains(.rename)
-        case #selector(toggleShowHidden(_:)):
-            // A static "Show Hidden Files" title with a checkmark tracking the app-wide state,
-            // the standard macOS convention for a boolean view toggle.
-            menuItem.state = AppPreferences.shared.showHidden ? .on : .off
-            return true
         case #selector(undoLastOperation(_:)):
             return validateUndoItem(menuItem)
         case #selector(goToParentDirectory(_:)):
@@ -317,6 +315,24 @@ extension PanelViewController: NSMenuItemValidation {
             return !(view.window?.firstResponder is NSText)
         default:
             return true
+        }
+    }
+
+    /// Boolean view toggles that carry a checkmark tracking their state and are always
+    /// enabled (the standard macOS convention). Returns `nil` for any other selector so the
+    /// main enable/disable switch handles it.
+    private func validateToggleItem(_ menuItem: NSMenuItem) -> Bool? {
+        switch menuItem.action {
+        case #selector(toggleShowHidden(_:)):
+            // "Show Hidden Files" checkmark tracks the app-wide state.
+            menuItem.state = AppPreferences.shared.showHidden ? .on : .off
+            return true
+        case #selector(toggleQuickViewPanel(_:)):
+            // "Quick View Panel" checkmark tracks the window-wide Quick View state.
+            menuItem.state = (host?.isQuickViewEnabled ?? false) ? .on : .off
+            return true
+        default:
+            return nil
         }
     }
 

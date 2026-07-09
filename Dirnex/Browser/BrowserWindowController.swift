@@ -18,6 +18,11 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     private let panesSplitViewController = NSSplitViewController()
     private weak var activePanel: PanelViewController?
 
+    /// Quick View (⌃Q) on/off for this window. When on, the inactive pane shows a live Quick
+    /// Look preview of the file under the active pane's cursor (PLAN.md §M4). Owned here
+    /// because the mode spans both panes and follows whichever is active.
+    private var isQuickViewOn = false
+
     /// The shared background operation engine both panes route F5/F6 through, so copies and
     /// moves queue and run without blocking browsing (PLAN.md §M2). Volume-aware scheduling
     /// keys off the same `backend` the panes use.
@@ -277,6 +282,34 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         counterpart(of: panel)
     }
 
+    var isQuickViewEnabled: Bool { isQuickViewOn }
+
+    func toggleQuickView() {
+        isQuickViewOn.toggle()
+        updateQuickView()
+    }
+
+    func panelCursorDidChange(_ panel: PanelViewController) {
+        guard isQuickViewOn, panel === (activePanel ?? leftPanel) else { return }
+        counterpart(of: panel).showQuickViewPreview(of: panel.quickViewSourceURL)
+    }
+
+    /// Reconcile both panes with the current Quick View state: the active pane shows its file
+    /// list, the inactive pane previews the file under the active cursor. With the mode off,
+    /// both panes drop any preview. Run on every toggle and whenever the active pane changes,
+    /// so the preview always sits opposite the focused pane.
+    private func updateQuickView() {
+        let active = activePanel ?? leftPanel
+        let inactive = counterpart(of: active)
+        guard isQuickViewOn else {
+            leftPanel.hideQuickViewPreview()
+            rightPanel.hideQuickViewPreview()
+            return
+        }
+        active.hideQuickViewPreview()
+        inactive.showQuickViewPreview(of: active.quickViewSourceURL)
+    }
+
     private func counterpart(of panel: PanelViewController) -> PanelViewController {
         panel === leftPanel ? rightPanel : leftPanel
     }
@@ -286,6 +319,9 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         activePanel?.isActivePanel = false
         panel.isActivePanel = true
         activePanel = panel
+        // The preview always sits opposite the active pane, so a focus switch swaps which pane
+        // shows its list and which shows the preview.
+        if isQuickViewOn { updateQuickView() }
     }
 }
 

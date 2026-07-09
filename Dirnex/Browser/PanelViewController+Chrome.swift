@@ -8,6 +8,9 @@ extension PanelViewController {
     func updateChrome() {
         pathBar.setPath(panel.path)
         statusLabel.stringValue = statusText()
+        // If this is the active pane and Quick View is on, the file under the cursor just
+        // changed — re-drive the preview showing in the inactive pane. A no-op otherwise.
+        host?.panelCursorDidChange(self)
     }
 
     /// The status line: a selection summary when anything is marked, otherwise the item

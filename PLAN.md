@@ -1210,7 +1210,7 @@ Goal: cash in the VFS abstraction from M0.
 - [ ] Search (Alt+F7 / palette): mdfind-backed name+content search with filter chips
       (kind, size, date, tag); streamed results; content grep fallback for non-indexed volumes
 - [ ] Search results → virtual panel listing: normal cursor/selection/F5 on results
-- [ ] Quick view panel (Cmd+Q toggle… verify: likely Cmd+Shift+Q or Ctrl+Q; Cmd+Q quits):
+- [x] Quick view panel (⌃Q toggle — Cmd+Q quits, Cmd+Shift+Q was free but ⌃Q is the TC key):
       inactive panel becomes live Quick Look/text preview of the file under cursor
 - [ ] Saved searches as virtual folders in the places strip
 
@@ -1256,6 +1256,43 @@ deleted. Groundwork note for the ArchiveBackend pass: the macOS SDK ships `libar
 (so `-larchive` links) but has NO `archive.h`/`archive_entry.h` — a C-module target with vendored
 headers (or shelling out to `bsdtar`/`ditto`) is the gate. NEXT M4: ArchiveBackend (libarchive),
 mdfind search (Alt+F7) → virtual panel, quick-view panel.
+
+Progress (2026-07-09, M4 pass 2): the **quick-view panel** landed — TC's ⌃Q, the smallest
+unblocked M4 item (**that M4 line now `[x]`**; picked over ArchiveBackend/search because it's
+pure app-layer AppKit with no core changes and no C-module infra). It's a window-wide mode: the
+*inactive* pane stops showing its list and becomes a live embedded Quick Look of the file under
+the *active* pane's cursor — distinct from the ⌘Y Quick Look, which floats a separate window
+over the active pane. NEW `Dirnex/Browser/PanelViewController+QuickView.swift`: each pane lazily
+builds a `QLPreviewView(style: .compact)` overlay pinned over its scroll view and toggles it via
+`showQuickViewPreview(of:)` / `hideQuickViewPreview()`; `quickViewSourceURL` reports the file
+under this pane's cursor (nil on `..`/empty). `BrowserWindowController` owns the on/off flag and
+orchestrates: `toggleQuickView` flips it; `updateQuickView` puts the preview opposite the active
+pane (active shows its list, inactive previews the active cursor); `panelCursorDidChange` (called
+from `updateChrome`, the one hook every cursor move / navigation / mark change / refresh already
+funnels through) re-drives the preview; and `setActive` re-runs `updateQuickView` so a Tab focus
+switch swaps which pane lists and which previews. Wiring is registry-driven per the M3 rhythm:
+`CommandCatalog` gains `view.quickView` (⌃Q, conflict-free — verified by a new `CommandCatalog`
+test → **255 core tests**), `CommandBinding` maps it to `toggleQuickViewPanel`, `MainMenuBuilder`
+adds it to View after Quick Look, and `validateMenuItem` shows a checkmark tracking the state
+(the two checkmark toggles were hoisted into a `validateToggleItem` helper so `validateMenuItem`
+stayed under SwiftLint's cyclomatic-complexity 15). Repo swiftformat/swiftlint-strict clean;
+app `xcodebuild build` + `swift test` green. VERIFIED LIVE (mouse+keyboard, no overlay; fully
+quit the stale instance first per the recurring gotcha): ⌃Q on a fixture folder turned the right
+pane into a text preview of `notes.txt`, ↓ tracked the cursor to `readme.md` live; Tab swapped
+roles (right pane went active+listing, left pane previewed the right cursor's folder icon), a
+real 95 KB PNG rendered its image, and the View menu showed **Quick View Panel ⌃Q** checked;
+⌃Q / the menu item toggled it back off, both lists restored. Left the app on Home; fixtures
+deleted. GOTCHA 1 (design, cost one rebuild): `QLPreviewView` is NOT opaque — a preview that
+doesn't fill the view (a 1×1 PNG, a failed preview) let the covered table bleed through the
+margins. Fix: back the preview with an opaque `NSBox` (custom, borderless, `fillColor =
+.textBackgroundColor` so it re-resolves on a light/dark switch, unlike a captured `cgColor`) as
+its content view. GOTCHA 2 (AppKit API): `QLPreviewView.init(frame:style:)` imports as a genuine
+failable `init?` (returns `QLPreviewView?`), not an IUO — so it needs a `guard let`, and the
+build errors if you treat the result as non-optional. GOTCHA 3 (test-only): setting `previewItem`
+twice in rapid succession (a fast synthetic key batch) races Quick Look's async load and can
+leave the *first* item showing — stepping the cursor one key at a time previews correctly, so
+this is a synthetic-input artifact, not a user-facing bug. NEXT M4: ArchiveBackend (libarchive),
+mdfind search (Alt+F7) → virtual panel.
 
 ### M5 — Network and sync (M)
 

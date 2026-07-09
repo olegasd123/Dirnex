@@ -36,6 +36,7 @@ enum CommandBinding {
         "view.toggleSidebar": #selector(NSSplitViewController.toggleSidebar(_:)),
         "view.toggleHidden": #selector(PanelViewController.toggleShowHidden(_:)),
         "view.quickLook": #selector(PanelViewController.toggleQuickLookPreview(_:)),
+        "view.quickView": #selector(PanelViewController.toggleQuickViewPanel(_:)),
         "go.editLocation": #selector(PanelViewController.editLocation(_:)),
         "go.parent": #selector(PanelViewController.goToParentDirectory(_:)),
         "go.back": #selector(PanelViewController.goBack(_:)),
