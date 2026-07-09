@@ -101,9 +101,14 @@ final class PanelViewController: NSViewController {
     /// Managed by `PanelViewController+QuickView`.
     var quickViewContainer: NSView?
     /// The embedded Quick Look preview inside `quickViewContainer` — a live preview of the file
-    /// under the *other* pane's cursor.
+    /// under the *other* pane's cursor. Used for everything except PDFs.
     var quickViewPreview: QLPreviewView?
-    /// The URL currently loaded into `quickViewPreview`, so an unrelated refresh that
+    /// A PDFKit preview, used for PDFs instead of `quickViewPreview`: `QLPreviewView` only wires
+    /// up magnify-to-zoom for single-page PDFs, so multi-page documents can't be zoomed. `PDFView`
+    /// zooms and scrolls every PDF. Lives inside `quickViewContainer` alongside the Quick Look
+    /// view; whichever backend fits the current file is unhidden. Managed by `+QuickView`.
+    var quickViewPDFView: PDFView?
+    /// The URL currently loaded into the active preview backend, so an unrelated refresh that
     /// re-drives the same file is skipped instead of flickering the preview.
     var quickViewLoadedURL: URL?
     // Internal so `PanelViewController+Chrome` can update them from its own file.

@@ -31,6 +31,10 @@ extension PanelViewController: FileTableViewInput {
     func fileTableCancel(_ tableView: FileTableView) {
         if !panel.model.filter.isEmpty {
             setFilter("")
+        } else if host?.isQuickViewEnabled == true {
+            // Esc backs out of Quick View before touching the marks — it's a distinct mode the
+            // user stepped into, and the inactive pane's preview is the obvious thing to dismiss.
+            host?.toggleQuickView()
         } else if panel.selectionCount > 0 {
             panel.clearSelection()
             resetMouseSelectionAnchor()
