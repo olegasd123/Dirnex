@@ -66,6 +66,18 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         NSSize(width: NSView.noIntrinsicMetric, height: 20)
     }
 
+    /// A double-click on the bar's empty area enters text-edit mode — the mouse-driven
+    /// equivalent of Cmd+L "Go to Location". Clicks that land on a crumb are consumed by
+    /// the button (single-click navigates), so only the gap propagates here; single clicks
+    /// still fall through so nothing changes for an ordinary tap.
+    override func mouseDown(with event: NSEvent) {
+        guard !isEditing, event.clickCount == 2, let path else {
+            super.mouseDown(with: event)
+            return
+        }
+        beginEditing(base: path)
+    }
+
     private func configure() {
         translatesAutoresizingMaskIntoConstraints = false
         setContentHuggingPriority(.required, for: .vertical)
@@ -275,6 +287,14 @@ final class PathBarView: NSView, NSTextFieldDelegate {
     }
 
     // MARK: - NSTextFieldDelegate
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        // Losing first responder (a click on the table or the other pane) abandons the
+        // edit and drops back to breadcrumbs — no commit, no focus grab. Return and Esc
+        // reach endEditing through their own paths first, so isEditing is already false
+        // by the time this fires for them and it's a no-op.
+        endEditing(restoreFocus: false)
+    }
 
     func controlTextDidChange(_ obj: Notification) {
         guard isEditing, !isCompleting else { return }
