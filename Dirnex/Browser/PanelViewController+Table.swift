@@ -23,6 +23,7 @@ extension PanelViewController: NSTableViewDelegate {
             ?? FileCellView(showsImage: column == .name, identifier: tableColumn.identifier)
 
         cell.marked = panel.isMarked(entry)
+        cell.dimmed = entry.isHidden
         switch column {
         case .name:
             cell.imageView?.image = FileIconProvider.icon(for: entry)

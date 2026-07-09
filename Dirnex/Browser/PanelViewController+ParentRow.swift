@@ -38,6 +38,7 @@ extension PanelViewController {
         let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? FileCellView
             ?? FileCellView(showsImage: column == .name, identifier: identifier)
         cell.marked = false
+        cell.dimmed = false
         switch column {
         case .name:
             cell.imageView?.image = FileIconProvider.parentIcon

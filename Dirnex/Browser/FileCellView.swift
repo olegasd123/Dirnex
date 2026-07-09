@@ -11,6 +11,9 @@ import AppKit
 /// for legibility and we keep the bold weight so the mark is still visible.
 final class FileCellView: NSTableCellView {
     var marked = false
+    /// Fades the whole cell — icon and text alike — for a hidden (dot) entry, the way
+    /// Finder greys out invisibles once you reveal them. Set per render alongside `marked`.
+    var dimmed = false
 
     init(showsImage: Bool, identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
@@ -58,6 +61,10 @@ final class FileCellView: NSTableCellView {
 
     func applyStyle() {
         guard let textField else { return }
+        // Dim the whole item (icon + every column) for a hidden entry. The row's selection
+        // highlight is drawn behind the cell by `NSTableRowView`, so a dimmed hidden row still
+        // shows a full-strength cursor background — only its content fades, as in Finder.
+        alphaValue = dimmed ? 0.5 : 1
         let size = NSFont.systemFontSize
         textField.font = marked ? .boldSystemFont(ofSize: size) : .systemFont(ofSize: size)
 
@@ -77,6 +84,9 @@ final class FileCellView: NSTableCellView {
     /// sized to the same text area beside the icon. `delegate` receives the edit lifecycle.
     func beginNameEditing(delegate: NSTextFieldDelegate) {
         guard let textField else { return }
+        // Editing a hidden file — show the field at full opacity so the text stays legible;
+        // the next render pass reapplies the dim once editing ends.
+        alphaValue = 1
         textField.isEditable = true
         textField.isSelectable = true
         textField.isBordered = true
