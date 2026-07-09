@@ -156,6 +156,13 @@ public enum CommandCatalog {
             shortcut: CommandShortcut(key: "s", modifiers: [.control, .command])
         ),
         Command(
+            id: "view.toggleHidden",
+            title: "Show Hidden Files",
+            category: .view,
+            keywords: ["dotfiles", "invisible", "dot", "hide", "reveal"],
+            shortcut: CommandShortcut(key: ".", modifiers: [.command, .shift])
+        ),
+        Command(
             id: "view.quickLook",
             title: "Quick Look",
             category: .view,
@@ -264,7 +271,11 @@ public enum CommandCatalog {
             shortcut: CommandShortcut(key: "]", modifiers: [.command, .shift])
         )
     ]
+}
 
+// The last category lives in an extension so the main enum body stays under SwiftLint's
+// `type_body_length` limit; `all` above still composes it in with the rest.
+extension CommandCatalog {
     // MARK: - Application
 
     private static let application: [Command] = [

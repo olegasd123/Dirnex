@@ -21,10 +21,26 @@ final class AppPreferences: ObservableObject {
         didSet { defaults.set(restoreSession, forKey: Keys.restoreSession) }
     }
 
-    /// Panels ▸ show hidden (dot) files in newly opened tabs (default off — the existing
-    /// behavior). A per-tab toggle can still override an individual tab later.
-    @Published var showHiddenByDefault: Bool {
-        didSet { defaults.set(showHiddenByDefault, forKey: Keys.showHiddenByDefault) }
+    /// Panels ▸ show hidden (dot) files (default off — Finder's behavior). This is a single
+    /// app-wide toggle, not a per-tab one: every pane and tab reflects it. Changing it posts
+    /// `showHiddenDidChange` so the open panes re-filter live, and the Settings toggle, the
+    /// header button, and ⇧⌘. all drive this one value.
+    @Published var showHidden: Bool {
+        didSet {
+            guard showHidden != oldValue else { return }
+            defaults.set(showHidden, forKey: Keys.showHidden)
+            NotificationCenter.default.post(name: Self.showHiddenDidChange, object: self)
+        }
+    }
+
+    /// Posted (on the main actor) whenever `showHidden` flips, so every open pane can apply the
+    /// new value to its tabs and re-render. `object` is the `AppPreferences` that changed.
+    static let showHiddenDidChange = Notification.Name("Dirnex.showHiddenDidChange")
+
+    /// Flip the app-wide show-hidden state. The shared entry point for the header button, the
+    /// ⇧⌘. shortcut, and the palette/menu command — all of which want the same one-line effect.
+    func toggleShowHidden() {
+        showHidden.toggle()
     }
 
     /// Operations ▸ ask for confirmation before moving items to the Trash (default off —
@@ -36,13 +52,13 @@ final class AppPreferences: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         restoreSession = defaults.object(forKey: Keys.restoreSession) as? Bool ?? true
-        showHiddenByDefault = defaults.bool(forKey: Keys.showHiddenByDefault)
+        showHidden = defaults.bool(forKey: Keys.showHidden)
         confirmTrash = defaults.bool(forKey: Keys.confirmTrash)
     }
 
     private enum Keys {
         static let restoreSession = "Dirnex.pref.restoreSession"
-        static let showHiddenByDefault = "Dirnex.pref.showHiddenByDefault"
+        static let showHidden = "Dirnex.pref.showHidden"
         static let confirmTrash = "Dirnex.pref.confirmTrash"
     }
 }

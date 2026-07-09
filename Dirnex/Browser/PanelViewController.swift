@@ -135,7 +135,7 @@ final class PanelViewController: NSViewController {
         self.backend = backend
         self.restorationKey = restorationKey
         let restored = PanelViewController.restoredTabs(from: restoration)
-        let showHidden = AppPreferences.shared.showHiddenByDefault
+        let showHidden = AppPreferences.shared.showHidden
         tabs = restored.isEmpty ? [PanelTab(path: defaultPath, showHidden: showHidden)] : restored
         activeTabIndex = restored.isEmpty
             ? 0
@@ -236,6 +236,7 @@ final class PanelViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        observeShowHiddenPreference()
         activateTab()
     }
 

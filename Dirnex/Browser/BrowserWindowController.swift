@@ -46,6 +46,10 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     /// wins on subsequent launches.
     private var shouldCenterPanesDivider = false
 
+    /// The trailing titlebar button that toggles hidden files app-wide (the ⇧⌘. command in
+    /// button form). Held so `showHiddenDidChange` can restyle it to track the current state.
+    let hiddenToggleButton = NSButton()
+
     init() {
         let backend = LocalBackend()
         queue = FileOperationQueue(backend: backend)
@@ -142,6 +146,7 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         window.setFrameAutosaveName("MainWindow")
 
         installSidebarToggle()
+        installHiddenToggle()
 
         queueBar.onPauseToggle = { [weak self] in self?.togglePause() }
         queueBar.onCancelAll = { [weak self] in self?.cancelAllJobs() }
@@ -186,6 +191,7 @@ final class BrowserWindowController: NSWindowController, PanelHost {
 
     deinit {
         queueObservation?.cancel()
+        NotificationCenter.default.removeObserver(self)
     }
 
     @available(*, unavailable)

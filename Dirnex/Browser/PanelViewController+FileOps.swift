@@ -290,6 +290,11 @@ extension PanelViewController: NSMenuItemValidation {
             // Rename is single-item on the cursor (not the marked set) and never `..`.
             return !cursorOnParentRow && panel.currentEntry != nil
                 && backend.capabilities.contains(.rename)
+        case #selector(toggleShowHidden(_:)):
+            // A static "Show Hidden Files" title with a checkmark tracking the app-wide state,
+            // the standard macOS convention for a boolean view toggle.
+            menuItem.state = AppPreferences.shared.showHidden ? .on : .off
+            return true
         case #selector(undoLastOperation(_:)):
             return validateUndoItem(menuItem)
         case #selector(goToParentDirectory(_:)):

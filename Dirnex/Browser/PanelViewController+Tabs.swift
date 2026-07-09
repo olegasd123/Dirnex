@@ -132,9 +132,9 @@ extension PanelViewController {
     /// vanished so a relaunch never opens onto a dead path or an error sheet.
     static func restoredTabs(from restoration: PersistedPane?) -> [PanelTab] {
         guard let restoration else { return [] }
-        // Per-tab hidden-files state isn't persisted, so a restored tab adopts the app-wide
-        // "show hidden by default" preference — the same value a fresh tab gets.
-        let showHidden = AppPreferences.shared.showHiddenByDefault
+        // Show-hidden is a single app-wide toggle, so every restored tab adopts it — the same
+        // value a fresh tab gets. An in-session ⇧⌘. re-syncs them all live.
+        let showHidden = AppPreferences.shared.showHidden
         return restoration.tabs.compactMap { persisted in
             let path = persisted.vfsPath
             var isDirectory: ObjCBool = false

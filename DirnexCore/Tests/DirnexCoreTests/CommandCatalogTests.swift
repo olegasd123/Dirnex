@@ -65,6 +65,15 @@ struct CommandCatalogTests {
             #expect(bindings.conflicts(for: id).isEmpty)
         }
     }
+
+    @Test("the show-hidden toggle is a conflict-free View command on ⇧⌘.")
+    func coversShowHiddenToggle() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        let toggle = byID["view.toggleHidden"]
+        #expect(toggle?.category == .view)
+        #expect(toggle?.shortcut == CommandShortcut(key: ".", modifiers: [.command, .shift]))
+        #expect(KeyBindings().conflicts(for: "view.toggleHidden").isEmpty)
+    }
 }
 
 @Suite("CommandShortcut display")

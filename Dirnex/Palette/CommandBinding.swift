@@ -33,6 +33,7 @@ enum CommandBinding {
         "select.unselectByPattern": #selector(PanelViewController.unselectFilesByPattern(_:)),
         "view.commandPalette": #selector(AppDelegate.showCommandPalette(_:)),
         "view.toggleSidebar": #selector(NSSplitViewController.toggleSidebar(_:)),
+        "view.toggleHidden": #selector(PanelViewController.toggleShowHidden(_:)),
         "view.quickLook": #selector(PanelViewController.toggleQuickLookPreview(_:)),
         "go.editLocation": #selector(PanelViewController.editLocation(_:)),
         "go.parent": #selector(PanelViewController.goToParentDirectory(_:)),

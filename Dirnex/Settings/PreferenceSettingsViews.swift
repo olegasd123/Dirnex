@@ -27,11 +27,13 @@ struct PanelsSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Show hidden files in new tabs", isOn: $preferences.showHiddenByDefault)
+                Toggle("Show hidden files", isOn: $preferences.showHidden)
             } footer: {
-                Text("Existing tabs keep their current setting.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(
+                    "Reveals dotfiles like .git and .env in every pane. Also on the toolbar and ⇧⌘."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
