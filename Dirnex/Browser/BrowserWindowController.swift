@@ -23,6 +23,14 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     /// because the mode spans both panes and follows whichever is active.
     private var isQuickViewOn = false
 
+    /// Local key monitor that lets Esc close Quick View no matter where focus sits in this
+    /// window (e.g. after the user clicked into the preview). A raw-event monitor rather than a
+    /// `cancelOperation:` override because a focused `PDFView` may never translate the Esc key
+    /// into that action, so the message would never bubble. `nonisolated(unsafe)` so the
+    /// nonisolated `deinit` can hand the token to `NSEvent.removeMonitor` — it's only ever
+    /// touched on the main actor. See `installEscapeMonitor()`.
+    nonisolated(unsafe) private var escapeMonitor: Any?
+
     /// The shared background operation engine both panes route F5/F6 through, so copies and
     /// moves queue and run without blocking browsing (PLAN.md §M2). Volume-aware scheduling
     /// keys off the same `backend` the panes use.
@@ -158,6 +166,30 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         queueBar.onCancelJob = { [weak self] id in self?.cancelJob(id) }
         queueBar.onPreferredHeightChanged = { [weak self] in self?.updateQueueBarHeight() }
         startObservingQueue()
+        installEscapeMonitor()
+    }
+
+    /// Esc closes Quick View from anywhere in this window. A window-scoped local monitor sees the
+    /// raw key event ahead of responder dispatch, so it works even when the focused view (the
+    /// preview `PDFView`) would otherwise swallow the key. It deliberately stands aside for the
+    /// responders that own Esc themselves: a focused file table runs its progressive Esc (clear
+    /// filter → close Quick View → clear marks) via `fileTableCancel`, and a text field editor
+    /// cancels the edit. Only fires while this window is key, so a sheet, the ⌘K palette, or the
+    /// Settings window keep their own Esc.
+    private func installEscapeMonitor() {
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self,
+                  event.keyCode == 53, // Esc
+                  event.modifierFlags.isDisjoint(with: [.command, .control, .option, .shift]),
+                  self.window?.isKeyWindow == true,
+                  self.isQuickViewOn
+            else { return event }
+            let responder = self.window?.firstResponder
+            // A file table or a text edit owns Esc for its own purpose — let the event through.
+            if responder is FileTableView || responder is NSText { return event }
+            self.toggleQuickView()
+            return nil
+        }
     }
 
     /// Put a sidebar show/hide button immediately to the right of the traffic lights, in
@@ -197,6 +229,7 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     deinit {
         queueObservation?.cancel()
         NotificationCenter.default.removeObserver(self)
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
     }
 
     @available(*, unavailable)
@@ -287,6 +320,9 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     func toggleQuickView() {
         isQuickViewOn.toggle()
         updateQuickView()
+        // Keep focus on a real pane. Matters most when closing: Esc may arrive while the preview
+        // (a `PDFView` the user clicked into) is first responder, and that view is about to hide.
+        (activePanel ?? leftPanel).focusTable()
     }
 
     func panelCursorDidChange(_ panel: PanelViewController) {
