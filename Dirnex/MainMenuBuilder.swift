@@ -54,7 +54,7 @@ enum MainMenuBuilder {
             .command("edit.copy"), .command("edit.paste"), .command("edit.pasteMove")
         ]),
         MenuSpec(title: "Select", items: [
-            .command("select.invert"), .separator,
+            .command("select.all"), .command("select.invert"), .separator,
             .command("select.byPattern"), .command("select.unselectByPattern")
         ]),
         MenuSpec(title: "View", items: [

@@ -76,6 +76,24 @@ final class FileTableView: NSTableView {
         inputDelegate?.fileTableCancel(self)
     }
 
+    /// Cmd+A — mark every visible entry. Routed through the standard `selectAll:` action
+    /// (bound to Cmd+A by the "Select All" menu item) rather than `keyDown:` so that, while
+    /// an inline rename field is being edited, the *field editor* wins the shortcut and
+    /// selects all of the name (extension included) instead of this marking the whole pane.
+    override func selectAll(_ sender: Any?) {
+        inputDelegate?.fileTableMarkAll(self)
+    }
+
+    /// Keep the "Select All" menu item live even though the table is single-selection
+    /// (`allowsMultipleSelection == false`), which would otherwise let `NSTableView` disable
+    /// it — here `selectAll:` marks the whole pane rather than extending the row selection.
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(selectAll(_:)) {
+            return numberOfRows > 0
+        }
+        return super.validateUserInterfaceItem(item)
+    }
+
     /// Route clicks through the controller's Finder-style selection first. A Cmd/Shift
     /// click is consumed there (it drives the mark set, not the table's own single
     /// selection); a plain click leaves the marks alone and falls through to `super` so
@@ -100,7 +118,8 @@ final class FileTableView: NSTableView {
                 return
             }
             switch event.charactersIgnoringModifiers {
-            case "a": inputDelegate?.fileTableMarkAll(self); return
+            // Cmd+A (mark all) is handled via the `selectAll:` action so the rename field
+            // editor can claim it while editing — see `selectAll(_:)` above.
             case "y": inputDelegate?.fileTableToggleQuickLook(self); return
             case "l": inputDelegate?.fileTableEditPath(self); return
             default: break

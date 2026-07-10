@@ -126,6 +126,13 @@ public enum CommandCatalog {
 
     private static let selection: [Command] = [
         Command(
+            id: "select.all",
+            title: "Select All",
+            category: .selection,
+            keywords: ["mark", "everything", "whole"],
+            shortcut: CommandShortcut(key: "a", modifiers: .command)
+        ),
+        Command(
             id: "select.invert",
             title: "Invert Selection",
             category: .selection,

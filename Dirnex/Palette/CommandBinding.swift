@@ -29,6 +29,7 @@ enum CommandBinding {
         "edit.copy": #selector(PanelViewController.copy(_:)),
         "edit.paste": #selector(PanelViewController.paste(_:)),
         "edit.pasteMove": #selector(PanelViewController.pasteAndMoveFromClipboard(_:)),
+        "select.all": #selector(NSResponder.selectAll(_:)),
         "select.invert": #selector(PanelViewController.invertSelectionFiles(_:)),
         "select.byPattern": #selector(PanelViewController.selectFilesByPattern(_:)),
         "select.unselectByPattern": #selector(PanelViewController.unselectFilesByPattern(_:)),

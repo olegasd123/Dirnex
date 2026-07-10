@@ -93,6 +93,16 @@ struct CommandCatalogTests {
         #expect(KeyBindings().conflicts(for: "view.quickView").isEmpty)
     }
 
+    @Test("Select All is a conflict-free Select command on ⌘A")
+    func coversSelectAll() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        let selectAll = byID["select.all"]
+        #expect(selectAll?.category == .selection)
+        #expect(selectAll?.shortcut == CommandShortcut(key: "a", modifiers: .command))
+        // ⌘A doubles as the text-field "select all" — it must not collide with any pane command.
+        #expect(KeyBindings().conflicts(for: "select.all").isEmpty)
+    }
+
     @Test("the M4 file search is a conflict-free Go command on ⌥F7")
     func coversFindFiles() {
         let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
