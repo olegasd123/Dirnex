@@ -21,10 +21,13 @@ extension PanelViewController {
     }
 
     /// The pasteboard item for a dragged row: the entry's file URL, or `nil` for the
-    /// synthetic `..` row (which has no backing entry and must not be draggable).
+    /// synthetic `..` row (no backing entry) or a non-local entry (an archive member has no
+    /// on-disk URL to hand another app until extraction lands in a later M4 pass).
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
         guard let index = entryIndex(forRow: row) else { return nil }
-        return panel.model[index].path.localURL as NSURL
+        let entry = panel.model[index]
+        guard entry.path.backend == .local else { return nil }
+        return entry.path.localURL as NSURL
     }
 
     /// When the grab starts on a marked file, drag the whole marked set (Total Commander

@@ -77,7 +77,9 @@ extension PanelViewController {
         row: Int,
         dropOperation: NSTableView.DropOperation
     ) -> DropPlan? {
-        guard backend.capabilities.contains(.write) else { return nil }
+        // Only a real, writable on-disk directory can receive a drop — never a virtual pane
+        // (search results, or a read-only archive whose write support lands in a later M4 pass).
+        guard panel.path.backend == .local, backend.capabilities.contains(.write) else { return nil }
         guard let urls = droppedFileURLs(info), !urls.isEmpty else { return nil }
 
         let (destination, highlightRow) = dropDestination(row: row, dropOperation: dropOperation)

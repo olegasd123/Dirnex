@@ -64,7 +64,10 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     let hiddenToggleButton = NSButton()
 
     init() {
-        let backend = LocalBackend()
+        // A composite backend so a pane can browse into an archive (`archive:…` paths route
+        // to a lazily-mounted read-only `ArchiveBackend`) while every local path still runs
+        // through `LocalBackend` unchanged — including the shared queue and undo journal.
+        let backend = CompositeBackend(local: LocalBackend())
         queue = FileOperationQueue(backend: backend)
         undoController = UndoController(backend: backend)
         let home = VFSPath.local(NSHomeDirectory())

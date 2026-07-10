@@ -49,9 +49,11 @@ extension PanelViewController {
     }
 
     /// The file under this pane's cursor as a URL, for the *other* pane to preview — `nil` on
-    /// the `..` row or in an empty directory, where there is nothing meaningful to show.
+    /// the `..` row, in an empty directory, or for a non-local entry (an archive member has no
+    /// on-disk URL until extraction lands in a later M4 pass).
     var quickViewSourceURL: URL? {
-        guard !cursorOnParentRow, let entry = panel.currentEntry else { return nil }
+        guard !cursorOnParentRow, let entry = panel.currentEntry,
+              entry.path.backend == .local else { return nil }
         return entry.path.localURL
     }
 

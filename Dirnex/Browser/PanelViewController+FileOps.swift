@@ -48,7 +48,7 @@ extension PanelViewController {
     // MARK: - New Folder (F7)
 
     private func promptForNewFolder() {
-        guard !isSearchResults else { return } // no directory to create into on a results pane
+        guard !isVirtualDirectory else { return } // no real directory to create into here
         let alert = NSAlert()
         alert.messageText = "New Folder"
         alert.informativeText = "Create a folder in “\(panel.path.lastComponent)”."
@@ -119,7 +119,7 @@ extension PanelViewController {
     }
 
     private func deleteSelection(permanent: Bool) {
-        guard !isSearchResults else { return } // results are a read-only view
+        guard !isVirtualDirectory else { return } // a virtual listing is a read-only view
         let targets = selectionTargets()
         guard !targets.isEmpty else { return }
         if permanent {
@@ -280,17 +280,20 @@ extension PanelViewController: NSMenuItemValidation {
         switch menuItem.action {
         case #selector(copyToOtherPane(_:)), #selector(moveToOtherPane(_:)):
             // Copy/Move to the other pane is the point of a results panel (TC's F5 on results):
-            // each target carries its real on-disk path, so it works from a virtual pane too.
-            return !selectionTargets().isEmpty && host?.panelCounterpart(of: self) != nil
+            // each target carries its real on-disk path, so it works from there. An archive's
+            // entries have no local path yet — extracting them (F5 copy-out) is a later M4 pass.
+            return !isArchive && !selectionTargets().isEmpty && host?.panelCounterpart(of: self) != nil
         case #selector(copy(_:)):
             // `copy:` only reaches the pane when the file table is first responder — a name/
             // path field editor intercepts ⌘C for text copy — so this validates the file case.
-            return !selectionTargets().isEmpty
+            // An archive entry has no on-disk URL to place on the pasteboard yet.
+            return !isArchive && !selectionTargets().isEmpty
         case #selector(undoLastOperation(_:)):
             return validateUndoItem(menuItem)
         case #selector(goToParentDirectory(_:)):
-            // "Go Up" is meaningless at the root of a backend or on a virtual results pane.
-            return panel.path.backend == .local && panel.parentPath != nil
+            // "Go Up" walks out of an archive too, but is meaningless at a backend root or on a
+            // virtual search-results pane.
+            return isArchive || (panel.path.backend == .local && panel.parentPath != nil)
         case #selector(goBack(_:)):
             return tabs[activeTabIndex].history.canGoBack
         case #selector(goForward(_:)):
@@ -317,8 +320,8 @@ extension PanelViewController: NSMenuItemValidation {
         case #selector(newFolder(_:)):
             return canWriteHere
         case #selector(moveSelectionToTrash(_:)), #selector(deleteSelectionPermanently(_:)):
-            // Results are a read-only view; deleting from it would leave stale rows behind.
-            return !isSearchResults && !selectionTargets().isEmpty
+            // A virtual listing is read-only; deleting from it would leave stale rows behind.
+            return !isVirtualDirectory && !selectionTargets().isEmpty
         case #selector(paste(_:)):
             return canWriteHere && clipboardHasFiles()
         case #selector(pasteAndMoveFromClipboard(_:)):
@@ -337,14 +340,14 @@ extension PanelViewController: NSMenuItemValidation {
     }
 
     /// This pane can create/paste into its directory — a real, writable location (never a
-    /// virtual results pane).
+    /// virtual pane: search results or a read-only archive).
     private var canWriteHere: Bool {
-        !isSearchResults && backend.capabilities.contains(.write)
+        !isVirtualDirectory && backend.capabilities.contains(.write)
     }
 
     /// This pane can rename an item in place — a real, rename-capable location.
     private var canRenameHere: Bool {
-        !isSearchResults && backend.capabilities.contains(.rename)
+        !isVirtualDirectory && backend.capabilities.contains(.rename)
     }
 
     /// Boolean view toggles that carry a checkmark tracking their state and are always

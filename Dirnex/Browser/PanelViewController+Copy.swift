@@ -25,6 +25,9 @@ extension PanelViewController {
     // MARK: - Flow
 
     private func beginTransfer(kind: FileOperation.Kind) {
+        // F5/F6 reach here via the key model, which bypasses menu validation — so re-check that
+        // this isn't an archive pane, whose entries can't be extracted yet (a later M4 pass).
+        guard !isArchive else { return }
         let sources = selectionTargets()
         guard !sources.isEmpty, let destPane = host?.panelCounterpart(of: self) else { return }
         let destination = destPane.panel.path

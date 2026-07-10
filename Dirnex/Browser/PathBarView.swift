@@ -122,11 +122,7 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         guard self.path != path else { return }
         self.path = path
         if isEditing { endEditing(restoreFocus: false) }
-        if path.backend == .local {
-            rebuildCrumbs(for: path)
-        } else {
-            rebuildVirtualLabel(for: path)
-        }
+        rebuildContents(for: path)
     }
 
     private func rebuildCrumbs(for path: VFSPath) {
@@ -203,7 +199,10 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         // than the leading crumbs (which truncate their tails instead), so every visible
         // crumb stays flanked by its separators — but still below 250 so the separators,
         // like the crumbs, never widen the pane past the user's divider.
-        label.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(200), for: .horizontal)
+        label.setContentCompressionResistancePriority(
+            NSLayoutConstraint.Priority(200),
+            for: .horizontal
+        )
         label.setContentHuggingPriority(.required, for: .horizontal)
         return label
     }
@@ -362,21 +361,52 @@ final class PathBarView: NSView, NSTextFieldDelegate {
 // MARK: - Virtual location (search results)
 
 extension PathBarView {
+    /// Dispatch the location render by backend: real breadcrumbs for a local directory, a
+    /// non-clickable label for a browsed archive or a search-results snapshot. In the
+    /// extension so the class body stays under SwiftLint's `type_body_length`.
+    func rebuildContents(for path: VFSPath) {
+        if path.backend == .local {
+            rebuildCrumbs(for: path)
+        } else if path.backend.isArchive {
+            rebuildArchiveLabel(for: path)
+        } else {
+            rebuildVirtualLabel(for: path)
+        }
+    }
+
     /// Render a virtual location (Spotlight results) as a single, non-clickable label — there is
-    /// no ancestor chain to walk into, so the breadcrumb affordance would only mislead. In its
-    /// own extension so the class body stays under SwiftLint's `type_body_length`.
+    /// no ancestor chain to walk into, so the breadcrumb affordance would only mislead.
     func rebuildVirtualLabel(for path: VFSPath) {
+        installVirtualLabel("🔍  Results for \(path.lastComponent)")
+    }
+
+    /// Render a browsed archive as a non-clickable "📦  pkg.zip ▸ folder ▸ nested" trail — the
+    /// archive's own name (from its backend id) plus the inner path. Non-clickable like the
+    /// search label; the `..` row and Backspace walk back up (and out).
+    func rebuildArchiveLabel(for path: VFSPath) {
+        let archiveName = (path.backend.archivePath as NSString?)?.lastPathComponent ?? "Archive"
+        let inner = path.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        let trail = ([archiveName] + inner).joined(separator: "  ▸  ")
+        installVirtualLabel("📦  \(trail)")
+    }
+
+    /// Shared shell for a single non-clickable path-bar label (search results or an archive):
+    /// swap the crumb row for one bold, truncating label plus a trailing spacer.
+    private func installVirtualLabel(_ text: String) {
         for view in crumbStack.arrangedSubviews {
             crumbStack.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        let label = NSTextField(labelWithString: "🔍  Results for \(path.lastComponent)")
+        let label = NSTextField(labelWithString: text)
         label.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
         label.textColor = isActive ? .labelColor : .secondaryLabelColor
         label.lineBreakMode = .byTruncatingTail
         // Like the crumb row, the label truncates within the pane rather than widening it
         // past the user's divider — resist below the split items' 250 holding priority.
-        label.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(240), for: .horizontal)
+        label.setContentCompressionResistancePriority(
+            NSLayoutConstraint.Priority(240),
+            for: .horizontal
+        )
         crumbStack.addArrangedSubview(label)
 
         let spacer = NSView()

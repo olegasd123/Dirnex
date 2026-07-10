@@ -61,11 +61,14 @@ extension PanelViewController: @preconcurrency QLPreviewPanelDataSource, @precon
     }
 
     /// What Quick Look previews: the marked set if there is one (with the cursor as the
-    /// starting item), otherwise just the file under the cursor.
+    /// starting item), otherwise just the file under the cursor. Non-local entries are dropped
+    /// — an archive member has no on-disk URL to preview until extraction lands (a later M4 pass).
     private func quickLookItems() -> [FileEntry] {
-        let marked = panel.selectedEntries
+        let marked = panel.selectedEntries.filter { $0.path.backend == .local }
         if !marked.isEmpty { return marked }
-        if !cursorOnParentRow, let current = panel.currentEntry { return [current] }
+        if !cursorOnParentRow, let current = panel.currentEntry, current.path.backend == .local {
+            return [current]
+        }
         return []
     }
 }

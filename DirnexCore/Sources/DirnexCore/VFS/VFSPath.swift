@@ -27,6 +27,27 @@ public struct VFSBackendID: RawRepresentable, Sendable, Hashable, CustomStringCo
     /// re-listing, the `..` row, in-place mutations).
     public static let search = VFSBackendID("search")
 
+    /// A virtual, read-only browse of a specific on-disk archive as a folder tree
+    /// (PLAN.md §M4 "browse zip/tar/tgz as folders"). The archive's real path is encoded
+    /// in the id (`archive:/Users/me/pkg.zip`), so a `VFSPath` identifies both *which*
+    /// archive and *which* inner entry — the app's composite backend routes on it to the
+    /// right mounted `ArchiveBackend`, and every inner location stays a distinct identity.
+    public static func archive(forArchiveAt onDiskPath: String) -> VFSBackendID {
+        VFSBackendID(archivePrefix + onDiskPath)
+    }
+
+    /// The on-disk archive path this id refers to, or `nil` when it is not an archive id.
+    public var archivePath: String? {
+        rawValue.hasPrefix(Self.archivePrefix)
+            ? String(rawValue.dropFirst(Self.archivePrefix.count))
+            : nil
+    }
+
+    /// Whether this id addresses an archive's virtual contents (vs. `.local`/`.search`).
+    public var isArchive: Bool { rawValue.hasPrefix(Self.archivePrefix) }
+
+    private static let archivePrefix = "archive:"
+
     public var description: String { rawValue }
 }
 

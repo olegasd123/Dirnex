@@ -1202,8 +1202,9 @@ and two presets.
 
 Goal: cash in the VFS abstraction from M0.
 
-- [ ] `ArchiveBackend` via libarchive: browse zip/tar/tgz/7z as folders; copy out with F5;
-      pack via F5-with-archive-target; nested archives read-only
+- [~] `ArchiveBackend`: **browse zip/tar/tgz/7z as folders ✅** (via `bsdtar`, not libarchive —
+      the C-module gate stays deferred); copy out with F5, pack via F5-with-archive-target, and
+      nested archives still to come (extraction is the next pass — `CopyEngine` is one-backend)
 - [ ] Archive writes: add/delete inside zip (rewrite strategy, journal-safe temp file)
 - [x] Multi-rename tool: pattern tokens ([N] name, [C] counter, [E] ext, date tokens),
       regex find/replace, case transforms, live preview table, applies as one undoable batch
@@ -1343,6 +1344,69 @@ bar re-hidden). Left the app on Home. GOTCHA (design): a virtual panel is the cl
 `backend`) would have been a much larger refactor. NEXT M4: ArchiveBackend (libarchive — the
 C-module/vendored-headers gate), saved searches in the places strip, the deferred search niceties
 (tag chip, content-grep fallback for non-indexed volumes).
+
+Progress (2026-07-10, M4 pass 4): the **ArchiveBackend — read-only archive browsing** landed —
+TC's "open a zip and browse it like a folder", the headline "cash in the VFS abstraction" M4 item
+and the first backend beyond `.local` that serves a *navigable* virtual tree (the `.search` pane
+was a static snapshot). Taken **via `bsdtar`, not the libarchive C-API** (user's call): the macOS
+SDK ships `libarchive.tbd` but no `archive.h`, so the C-module/vendored-headers gate stays deferred
+— shelling out to `/usr/bin/bsdtar` (which *is* libarchive) needs zero infra and matches the app's
+`Process`-spawning rhythm (`SpotlightSearchRunner`, `DirectoryLoader`). This pass is **browse-only**;
+extraction (Quick Look inside, F5 copy-out) and packing are the next pass, because `CopyEngine.run`
+takes one backend for source *and* dest — a cross-backend archive→local copy is its own chunk.
+
+- **Core (pure, tested).** `DirnexCore/…/VFS/ArchiveTOC.swift` + `ArchiveTOCParser.swift` = a hermetic
+  parser turning the `ls -l`-style table `bsdtar -tvf` prints into a navigable tree: `children(inDirectory:)`
+  / `isDirectory(atInnerPath:)` / `entry(atInnerPath:)`. It handles every real-output quirk (validated
+  against `/usr/bin/bsdtar` before wiring, like the mdfind predicates): the 8 fixed leading columns
+  then a **verbatim** name (so "a file with spaces.txt" survives a would-be whitespace split), `d`/`l`/`-`
+  mode → kind, `link -> target` symlink split, tar's leading `./` stripped (and the bare `./` root line
+  dropped), and **intermediate directories synthesized** when the archive lists only `docs/api/readme.md`.
+  Dates parse best-effort in `en_US_POSIX` (`MMM d HH:mm` / `MMM d yyyy`) — deterministic, not
+  system-locale-dependent. `ArchiveBackend.swift` = a read-only `VFSBackend` answering `list`/`stat`
+  purely from an in-memory TOC (`capabilities == .read`; writes stay at their `.unsupported` defaults);
+  its `id` encodes the archive's on-disk path (`VFSBackendID.archive(forArchiveAt:)` → `archive:/…/pkg.zip`)
+  so a `VFSPath` identifies both *which* archive and *which* inner entry. `ArchiveType.isBrowsable`
+  (pure suffix match: zip/jar/cbz/7z/tar/tgz/tar.gz/tbz/tar.bz2/txz/tar.xz/tar.zst) decides Enter = browse
+  vs. launch. +25 tests (`ArchiveTOCTests` 12, `ArchiveBackendTests` 9, `ArchiveTypeTests` 2, +2 in
+  those covering the id round-trip) → **294 core tests**, all green, swiftformat/swiftlint-strict clean.
+- **App (I/O boundary + wiring).** `Dirnex/Browser/CompositeBackend.swift` — a `VFSBackend` that routes
+  each `VFSPath` by `path.backend`: `.local` → the real `LocalBackend`, an `archive:…` id → a lazily
+  mounted `ArchiveBackend` (spawns `bsdtar -tvf` off-main via the co-located `ArchiveMounter`, parses,
+  caches under an `NSLock`). **Composing** rather than swapping the pane's backend keeps *every* existing
+  `self.backend` call site — listing, stat, sizing, copy/move, the shared queue and undo — working
+  unchanged; only the routing is new. `BrowserWindowController` now builds `CompositeBackend(local:
+  LocalBackend())` and hands it to both panes + the queue + undo. `volumeIdentifier` never mounts (the
+  queue calls it per-source and it must stay cheap). Navigation: `openCurrentEntry` enters a browsable
+  local archive file (→ `archive:…` root) instead of launching it; a new `PanelViewController+Archive.swift`
+  adds `isArchive` / `isVirtualDirectory` and `goUpWithinArchive` (walk the inner tree, and at the archive
+  root **exit to the containing folder landing the cursor on the archive file**); the `..` row now shows at
+  every archive level; the path bar renders a non-clickable **"📦  pkg.zip  ▸  docs  ▸  api"** trail
+  (`rebuildArchiveLabel`, factored beside the search label). **Capability degradation** reuses the
+  search-pane pattern, generalized: `!isSearchResults` mutation guards became `!isVirtualDirectory`
+  (covers search *and* archive) at both `validateMenuItem` *and* every action entry point (New Folder /
+  rename / multi-rename / trash / delete / paste), while F5/F6 copy-out and ⌘C are gated on `!isArchive`
+  (search still allows them; an archive member has no local URL yet); Quick Look, the ⌃Q Quick View, drag-out,
+  and drop-target all guard on `entry.path.backend == .local`. One SwiftLint `type_body_length` on
+  `PathBarView` (the recurring gotcha) fixed by moving the location-dispatch into the existing extension.
+  Whole repo swiftformat/swiftlint-strict clean; app `xcodebuild build` + `swift test` green.
+- **Verified live via computer-use** (mouse-driven, no overlay; fresh build confirmed in the debug
+  **dylib** — `bsdtar`/`CompositeBackend`/"read the archive" strings present — since a stale `open`
+  wouldn't carry it): double-clicking `pkg.zip` turned the pane into **📦 pkg.zip** listing `docs`/`images`
+  (folders, dash size) + `alpha.txt` 14 B + `release notes.txt` 13 B (**space preserved**), a `..` row, and
+  "4 items" (`..` excluded); into `docs` → `api` + `readme.md` 16 B; into `docs/api` → `reference.md` 17 B,
+  path bar **📦 pkg.zip ▸ docs ▸ api**; the File menu there showed **Copy/Move to Other Panel, Rename,
+  Multi-Rename, New Folder, Move to Trash, Delete Immediately ALL greyed** (only New Tab/Close Tab live);
+  `..` walked `api → docs → root` each landing the cursor on the branch we came from, and one more `..` at
+  the root **exited to `~/DirnexArchiveTest` with clickable local breadcrumbs restored and the cursor on
+  `pkg.zip`**; `bundle.tgz` browsed identically (tar's `./` prefix stripped, no phantom root entry). GOTCHA
+  (cosmetic, expected): `bsdtar`'s recent-file column has no year (`Jul 10 16:39`), so the `MMM d HH:mm`
+  parse yields year **2000** — the time is right, the year is a placeholder; a real fix would infer the
+  year, deferred. GOTCHA (architecture): a `CompositeBackend` that dispatches on `path.backend` is the
+  clean way to browse a second backend without touching every `self.backend` site — the alternative
+  (a per-tab backend) is a much larger refactor. NEXT M4: archive **extraction** (Quick Look inside + F5
+  copy-out via a temp-extract-then-normal-copy path, since `CopyEngine` is single-backend) and **packing**;
+  then archive **writes** (add/delete), saved searches in the places strip, deferred search niceties.
 
 ### M5 — Network and sync (M)
 
