@@ -1202,9 +1202,9 @@ and two presets.
 
 Goal: cash in the VFS abstraction from M0.
 
-- [~] `ArchiveBackend`: **browse zip/tar/tgz/7z as folders ✅** (via `bsdtar`, not libarchive —
-      the C-module gate stays deferred); copy out with F5, pack via F5-with-archive-target, and
-      nested archives still to come (extraction is the next pass — `CopyEngine` is one-backend)
+- [~] `ArchiveBackend`: **browse zip/tar/tgz/7z as folders ✅**, **F5 copy-out ✅** (via `bsdtar`,
+      not libarchive — the C-module gate stays deferred); pack via F5-with-archive-target, Quick
+      Look inside, and nested archives still to come
 - [ ] Archive writes: add/delete inside zip (rewrite strategy, journal-safe temp file)
 - [x] Multi-rename tool: pattern tokens ([N] name, [C] counter, [E] ext, date tokens),
       regex find/replace, case transforms, live preview table, applies as one undoable batch
@@ -1407,6 +1407,54 @@ takes one backend for source *and* dest — a cross-backend archive→local copy
   (a per-tab backend) is a much larger refactor. NEXT M4: archive **extraction** (Quick Look inside + F5
   copy-out via a temp-extract-then-normal-copy path, since `CopyEngine` is single-backend) and **packing**;
   then archive **writes** (add/delete), saved searches in the places strip, deferred search niceties.
+
+Progress (2026-07-10, M4 pass 5): **archive F5 copy-out** landed — TC's "open a zip and fish two files
+out" (the M4 exit criterion), the first half of the extraction pass. The archive backend stays read-only;
+this cashes the browse-only pass in for real *extraction*. The clean insight: `CopyEngine` takes one
+backend for source *and* dest, so an archive→local copy can't go straight through it — instead the marked
+members are **extracted to a temp directory with `bsdtar`, then handed to the normal copy queue** as real
+local files, reusing every bit of its conflict / progress / undo machinery for free.
+
+- **Core (pure, tested).** `DirnexCore/…/VFS/ArchiveExtraction.swift` = the pure argv half, mirroring
+  `SpotlightQuery`/`ArchiveExtraction` split: `extractionArguments(archiveOnDiskPath:innerPaths:destinationDirectory:)`
+  builds `bsdtar -x -f <archive> -C <dest> <member>…` where each member is the VFS inner path with its
+  leading slash dropped, and `extractedLocation(ofInnerPath:inDirectory:)` reports where each member lands
+  (`bsdtar` rebuilds the *full* inner path, so `/docs/api/x.md` → `<dest>/docs/api/x.md`). Members are
+  **glob-escaped** (`\ * ? [`) because `bsdtar` treats each member as a shell-glob pattern — a name like
+  `weird[1].txt` would otherwise read as a char-class and go unmatched (escaping the opening `[` alone is
+  enough — validated live against bsdtar 3.5.3 / libarchive 3.7.4, along with: nested-file / dir-recursive /
+  space-in-name / `./`-prefixed-tar / multi-member / missing-member extraction). +7 `ArchiveExtractionTests`
+  → **301 core tests**, swiftformat/swiftlint-strict clean.
+- **App (I/O boundary + wiring).** `Dirnex/Browser/ArchiveExtractor.swift` (mirrors `ArchiveMounter`) spawns
+  `bsdtar` off-main into a fresh UUID temp dir under `NSTemporaryDirectory()/DirnexExtract/`, best-effort
+  (a missing member exits non-zero but the rest still land; throws only when *nothing* landed).
+  `PanelViewController+ArchiveExtract.swift`'s `beginArchiveExtraction()` extracts the marked/cursor members,
+  `stat`s each extracted file back into a **local** `FileEntry` (dropping any that didn't land), then calls
+  the existing `submitTransfer(kind:.copy…)` to the other pane. `CopyEngine` names the dest by `entry.name`
+  (its own last component), so a deep temp source `<tmp>/docs/api/x.md` lands **flat** as `x.md` — no
+  strip-components needed. F5 routes here (`copyToOtherPane` → `if isArchive { beginArchiveExtraction() }`);
+  `validateMenuItem` splits the old joint Copy/Move case so **Copy is enabled from an archive but Move stays
+  gated** (`!isArchive`) — a read-only archive has no source to remove, so there's no move-out. Temp dirs are
+  purged at launch (`ArchiveExtractor.purgeTemporaries()` in `AppDelegate` — race-free, nothing's extracting
+  yet; the copy queue *copies* the temps so they're dead weight once queued, and the current session's are
+  reclaimed next launch or by the OS). ⌘C-to-clipboard and drag-out from an archive stay gated this pass.
+- **Verified live via computer-use** (fresh build, `DirnexExtract`/`beginArchiveExtraction` strings confirmed
+  in the debug **dylib**; fully quit the stale instance first): inside `pkg.zip`, marked `docs` (a dir) +
+  `a file with spaces.txt`, F5 → both landed in the other pane; on disk the tree was byte-exact and recursive
+  (`docs/readme.md`=readme, `docs/api/reference.md`=reference, the space preserved, `images` correctly NOT
+  extracted). Re-F5 of `a file with spaces.txt` raised the **rich per-file conflict dialog** (Replace / Keep
+  Both / Skip / Replace-If-Newer, "apply to all", queue bar) — proving it flows through the normal queue —
+  and Keep Both produced `a file with spaces copy.txt`. A nested `docs/api/reference.md` F5'd from inside the
+  subfolder landed **flat** as `reference.md` (the `entry.name` behavior). The File menu inside the archive
+  showed **Copy to Other Panel enabled, Move + all mutations greyed**. Launch-purge confirmed: 3 temp dirs
+  accumulated, survived quit, and were gone after relaunch. GOTCHA (bsdtar): members are glob *patterns*, not
+  literals — must escape `\ * ? [`, and `extractedLocation` uses the *raw* (unescaped) name since the on-disk
+  file keeps its real name. GOTCHA (architecture): temp-extract-then-normal-copy is the clean cross-backend
+  path — the source `FileEntry`s just point at the extracted temp files, and `CopyEngine`'s name-by-last-
+  component does the rest, so no `CopyEngine` refactor was needed. NEXT M4: archive **Quick Look inside** (the
+  extraction pass's other half — extract-on-demand + cache the single cursor member, then relax the
+  `.local`-only guards in `+QuickLook`/`+QuickView`) and **packing** (F5-with-archive-target via `ditto`/
+  `bsdtar`); then archive **writes**, saved searches in the places strip, deferred search niceties.
 
 ### M5 — Network and sync (M)
 

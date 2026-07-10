@@ -278,10 +278,14 @@ extension PanelViewController: NSMenuItemValidation {
         if let toggle = validateToggleItem(menuItem) { return toggle }
         if let mutating = validateMutatingItem(menuItem) { return mutating }
         switch menuItem.action {
-        case #selector(copyToOtherPane(_:)), #selector(moveToOtherPane(_:)):
-            // Copy/Move to the other pane is the point of a results panel (TC's F5 on results):
-            // each target carries its real on-disk path, so it works from there. An archive's
-            // entries have no local path yet — extracting them (F5 copy-out) is a later M4 pass.
+        case #selector(copyToOtherPane(_:)):
+            // Copy to the other pane works from a results panel (real paths) and from an archive,
+            // where F5 becomes copy-*out* — extract the marked members to the other pane. Both
+            // just need a counterpart to land in; the extraction path re-checks it's local.
+            return !selectionTargets().isEmpty && host?.panelCounterpart(of: self) != nil
+        case #selector(moveToOtherPane(_:)):
+            // Move can't come out of a read-only archive (there's nothing to remove); a results
+            // panel still allows it (each target carries its real on-disk path).
             return !isArchive && !selectionTargets().isEmpty && host?.panelCounterpart(of: self) != nil
         case #selector(copy(_:)):
             // `copy:` only reaches the pane when the file table is first responder — a name/

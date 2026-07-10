@@ -15,6 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.mainMenu = MainMenuBuilder.build()
 
+        // Clear any archive copy-out temp files left by a previous session (PLAN.md §M4 F5
+        // copy-out). Safe here — nothing is extracting yet, so there's no in-flight transfer.
+        ArchiveExtractor.purgeTemporaries()
+
         // Rebuild the registry-driven menu whenever the user rebinds a shortcut, so the new
         // key equivalents take effect immediately (PLAN.md §M3 "rebindable shortcuts").
         NotificationCenter.default.addObserver(

@@ -15,7 +15,14 @@ extension PanelViewController {
     // MARK: - Menu actions (dispatched to the focused pane via the responder chain)
 
     @objc func copyToOtherPane(_ sender: Any?) {
-        beginTransfer(kind: .copy)
+        // F5 inside an archive is copy-*out*: extract the marked members to disk and copy them
+        // into the other pane (PLAN.md §M4). A move-out doesn't exist — the archive is read-only,
+        // so there's nothing to remove — hence only Copy routes here; `moveToOtherPane` stays gated.
+        if isArchive {
+            beginArchiveExtraction()
+        } else {
+            beginTransfer(kind: .copy)
+        }
     }
 
     @objc func moveToOtherPane(_ sender: Any?) {
