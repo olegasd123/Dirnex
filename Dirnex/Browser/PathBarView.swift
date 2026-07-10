@@ -143,11 +143,12 @@ final class PathBarView: NSView, NSTextFieldDelegate {
             let isLast = index == ancestors.count - 1
             let button = makeCrumb(for: ancestor, isCurrent: isLast)
             // Leading crumbs yield first when the path is too wide to fit; the current
-            // directory (trailing) keeps its full width.
-            let resistance = Float(250 + index)
-            button.setContentCompressionResistancePriority(
-                NSLayoutConstraint.Priority(resistance), for: .horizontal
-            )
+            // directory (trailing) keeps its full width — pin it above the separators so
+            // it survives even after every divider would otherwise have to give way.
+            let resistance = isLast
+                ? NSLayoutConstraint.Priority.required
+                : NSLayoutConstraint.Priority(Float(250 + index))
+            button.setContentCompressionResistancePriority(resistance, for: .horizontal)
             crumbStack.addArrangedSubview(button)
         }
 
@@ -194,7 +195,12 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         let label = NSTextField(labelWithString: "›")
         label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         label.textColor = .tertiaryLabelColor
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // A divider must never be the thing that collapses when the path overflows — a
+        // crumb row without its `›`s reads as one run-on name. Resist compression harder
+        // than the leading crumbs (which truncate their tails instead), so every visible
+        // crumb stays flanked by its separators.
+        label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        label.setContentHuggingPriority(.required, for: .horizontal)
         return label
     }
 
