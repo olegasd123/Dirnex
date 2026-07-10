@@ -48,6 +48,7 @@ extension PanelViewController {
     // MARK: - New Folder (F7)
 
     private func promptForNewFolder() {
+        guard !isSearchResults else { return } // no directory to create into on a results pane
         let alert = NSAlert()
         alert.messageText = "New Folder"
         alert.informativeText = "Create a folder in “\(panel.path.lastComponent)”."
@@ -118,6 +119,7 @@ extension PanelViewController {
     }
 
     private func deleteSelection(permanent: Bool) {
+        guard !isSearchResults else { return } // results are a read-only view
         let targets = selectionTargets()
         guard !targets.isEmpty else { return }
         if permanent {
@@ -233,6 +235,9 @@ extension PanelViewController {
     /// the cursor/marks by identity, so this survives the new entry appearing mid-list.
     /// Internal so `PanelViewController+Copy` can refresh both panes after a transfer.
     func refreshCurrentDirectory(selecting target: VFSPath? = nil) {
+        // A virtual results pane has no directory to re-list — skip so a both-panes refresh
+        // after a file operation leaves the search results snapshot untouched.
+        guard panel.path.backend == .local else { return }
         loadToken += 1
         let token = loadToken
         let path = panel.path
@@ -268,39 +273,24 @@ extension PanelViewController {
 
 extension PanelViewController: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        // Boolean view toggles set a checkmark and are always enabled — handled apart from the
-        // enable/disable switch below so it stays under the complexity limit.
+        // Boolean view toggles (checkmark items) and the directory-mutating ops are validated in
+        // their own helpers so this switch stays under the cyclomatic-complexity limit.
         if let toggle = validateToggleItem(menuItem) { return toggle }
+        if let mutating = validateMutatingItem(menuItem) { return mutating }
         switch menuItem.action {
-        case #selector(moveSelectionToTrash(_:)), #selector(deleteSelectionPermanently(_:)):
-            return !selectionTargets().isEmpty
         case #selector(copyToOtherPane(_:)), #selector(moveToOtherPane(_:)):
+            // Copy/Move to the other pane is the point of a results panel (TC's F5 on results):
+            // each target carries its real on-disk path, so it works from a virtual pane too.
             return !selectionTargets().isEmpty && host?.panelCounterpart(of: self) != nil
         case #selector(copy(_:)):
             // `copy:` only reaches the pane when the file table is first responder — a name/
             // path field editor intercepts ⌘C for text copy — so this validates the file case.
             return !selectionTargets().isEmpty
-        case #selector(paste(_:)):
-            // Likewise `paste:` reaches the pane only outside a text field; enable it when the
-            // pasteboard holds files and this pane can be written to.
-            return backend.capabilities.contains(.write) && clipboardHasFiles()
-        case #selector(pasteAndMoveFromClipboard(_:)):
-            // ⌥⌘V has no standard selector, so it would reach the pane even while a field is
-            // being edited — step it aside for a text field, else gate it like Paste.
-            return !(view.window?.firstResponder is NSText)
-                && backend.capabilities.contains(.write) && clipboardHasFiles()
-        case #selector(renameSelection(_:)):
-            // Rename is single-item on the cursor (not the marked set) and never `..`.
-            return !cursorOnParentRow && panel.currentEntry != nil
-                && backend.capabilities.contains(.rename)
-        case #selector(multiRenameSelection(_:)):
-            // The batch tool operates on the marked set (else the cursor entry), never `..`.
-            return !selectionTargets().isEmpty && backend.capabilities.contains(.rename)
         case #selector(undoLastOperation(_:)):
             return validateUndoItem(menuItem)
         case #selector(goToParentDirectory(_:)):
-            // "Go Up" is meaningless at the root of a backend.
-            return panel.parentPath != nil
+            // "Go Up" is meaningless at the root of a backend or on a virtual results pane.
+            return panel.path.backend == .local && panel.parentPath != nil
         case #selector(goBack(_:)):
             return tabs[activeTabIndex].history.canGoBack
         case #selector(goForward(_:)):
@@ -316,6 +306,45 @@ extension PanelViewController: NSMenuItemValidation {
         default:
             return true
         }
+    }
+
+    /// Validate the directory-mutating operations — the ones that need a real, writable
+    /// directory and so are all disabled on a virtual search-results pane (`isSearchResults`).
+    /// Returns `nil` for any other selector so the main switch handles it. Split out to keep
+    /// `validateMenuItem` under SwiftLint's cyclomatic-complexity limit (a recurring gotcha).
+    private func validateMutatingItem(_ menuItem: NSMenuItem) -> Bool? {
+        switch menuItem.action {
+        case #selector(newFolder(_:)):
+            return canWriteHere
+        case #selector(moveSelectionToTrash(_:)), #selector(deleteSelectionPermanently(_:)):
+            // Results are a read-only view; deleting from it would leave stale rows behind.
+            return !isSearchResults && !selectionTargets().isEmpty
+        case #selector(paste(_:)):
+            return canWriteHere && clipboardHasFiles()
+        case #selector(pasteAndMoveFromClipboard(_:)):
+            // ⌥⌘V has no standard selector, so it reaches the pane even mid text-edit — step it
+            // aside for a field editor, else gate it like Paste.
+            return canWriteHere && clipboardHasFiles() && !(view.window?.firstResponder is NSText)
+        case #selector(renameSelection(_:)):
+            // Rename is single-item on the cursor (not the marked set) and never `..`.
+            return canRenameHere && !cursorOnParentRow && panel.currentEntry != nil
+        case #selector(multiRenameSelection(_:)):
+            // The batch tool operates on the marked set (else the cursor entry).
+            return canRenameHere && !selectionTargets().isEmpty
+        default:
+            return nil
+        }
+    }
+
+    /// This pane can create/paste into its directory — a real, writable location (never a
+    /// virtual results pane).
+    private var canWriteHere: Bool {
+        !isSearchResults && backend.capabilities.contains(.write)
+    }
+
+    /// This pane can rename an item in place — a real, rename-capable location.
+    private var canRenameHere: Bool {
+        !isSearchResults && backend.capabilities.contains(.rename)
     }
 
     /// Boolean view toggles that carry a checkmark tracking their state and are always

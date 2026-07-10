@@ -196,6 +196,13 @@ public enum CommandCatalog {
             shortcut: CommandShortcut(key: "l", modifiers: .command)
         ),
         Command(
+            id: "go.search",
+            title: "Find Files…",
+            category: .navigation,
+            keywords: ["search", "spotlight", "mdfind", "find", "locate", "filter", "alt f7"],
+            shortcut: CommandShortcut(key: "F7", modifiers: [.function, .option])
+        ),
+        Command(
             id: "go.parent",
             title: "Go Up",
             category: .navigation,
@@ -254,7 +261,11 @@ public enum CommandCatalog {
             keywords: ["session", "snapshot", "store", "layout", "panes"]
         )
     ]
+}
 
+// The Window and Application categories live in an extension so the main enum body stays under
+// SwiftLint's `type_body_length` limit; `all` above still composes them in with the rest.
+extension CommandCatalog {
     // MARK: - Window
 
     private static let window: [Command] = [
@@ -285,11 +296,7 @@ public enum CommandCatalog {
             shortcut: CommandShortcut(key: "]", modifiers: [.command, .shift])
         )
     ]
-}
 
-// The last category lives in an extension so the main enum body stays under SwiftLint's
-// `type_body_length` limit; `all` above still composes it in with the rest.
-extension CommandCatalog {
     // MARK: - Application
 
     private static let application: [Command] = [

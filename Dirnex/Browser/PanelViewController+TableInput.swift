@@ -99,7 +99,10 @@ extension PanelViewController: FileTableViewInput {
     }
 
     func fileTableEditPath(_ tableView: FileTableView) {
-        pathBar.beginEditing(base: panel.path)
+        // Editing a virtual results path as text makes no sense — base the field at Home so a
+        // typed path navigates out of the results into a real directory.
+        let base = panel.path.backend == .local ? panel.path : VFSPath.local(NSHomeDirectory())
+        pathBar.beginEditing(base: base)
     }
 
     func fileTableDidBecomeFirstResponder(_ tableView: FileTableView) {

@@ -25,8 +25,10 @@ extension PanelViewController {
     }
 
     /// Re-list the active tab's directory without moving the cursor or scroll position —
-    /// the tab may have gone stale while inactive (nothing watches an inactive tab).
+    /// the tab may have gone stale while inactive (nothing watches an inactive tab). A virtual
+    /// results tab has no directory to re-list; its snapshot stands until the tab is closed.
     private func refreshActiveDirectory() {
+        guard panel.path.backend == .local else { return }
         loadToken += 1
         let token = loadToken
         let path = panel.path

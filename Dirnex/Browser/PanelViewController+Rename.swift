@@ -23,6 +23,9 @@ extension PanelViewController {
     /// the cursor is on `..`/empty, or when the backend can't rename.
     func beginRename() {
         guard renamingEntryID == nil else { return }
+        // Rename computes the new path from the pane's directory — a virtual results pane
+        // hasn't got one; renaming a result is left to opening its real folder first.
+        guard !isSearchResults else { return }
         guard backend.capabilities.contains(.rename) else { return }
         guard !cursorOnParentRow, let entry = panel.currentEntry else { return }
         guard let columnIndex = nameColumnDisplayIndex else { return }

@@ -20,6 +20,8 @@ extension PanelViewController {
     /// Open the tool on the operation targets (the marked set, else the cursor entry — never
     /// `..`). No-op when there's nothing to rename or the backend can't rename.
     private func beginMultiRename() {
+        // The batch tool renames within the pane's directory, which a results pane lacks.
+        guard !isSearchResults else { return }
         guard backend.capabilities.contains(.rename) else { return }
         let targets = selectionTargets()
         guard !targets.isEmpty else { return }

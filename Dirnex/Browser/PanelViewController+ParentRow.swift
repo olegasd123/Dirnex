@@ -10,9 +10,10 @@ import DirnexCore
 /// helpers here. All of this is read-only with respect to `Panel`.
 extension PanelViewController {
     /// 1 when a `..` row is shown (any non-root directory), else 0 — also the offset
-    /// between a table row and its entry index.
+    /// between a table row and its entry index. A virtual results pane never shows one: its
+    /// synthetic parent isn't a browsable directory to walk up into.
     var parentRowCount: Int {
-        panel.parentPath != nil ? 1 : 0
+        panel.path.backend == .local && panel.parentPath != nil ? 1 : 0
     }
 
     func isParentRow(_ row: Int) -> Bool {

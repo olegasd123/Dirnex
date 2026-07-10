@@ -71,7 +71,9 @@ final class PathBarView: NSView, NSTextFieldDelegate {
     /// the button (single-click navigates), so only the gap propagates here; single clicks
     /// still fall through so nothing changes for an ordinary tap.
     override func mouseDown(with event: NSEvent) {
-        guard !isEditing, event.clickCount == 2, let path else {
+        // A double-click enters text-edit mode, but only for a real (local) location — a virtual
+        // results path isn't a directory the user can retype.
+        guard !isEditing, event.clickCount == 2, let path, path.backend == .local else {
             super.mouseDown(with: event)
             return
         }
@@ -120,7 +122,11 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         guard self.path != path else { return }
         self.path = path
         if isEditing { endEditing(restoreFocus: false) }
-        rebuildCrumbs(for: path)
+        if path.backend == .local {
+            rebuildCrumbs(for: path)
+        } else {
+            rebuildVirtualLabel(for: path)
+        }
     }
 
     private func rebuildCrumbs(for path: VFSPath) {
@@ -340,5 +346,30 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         default:
             return false
         }
+    }
+}
+
+// MARK: - Virtual location (search results)
+
+extension PathBarView {
+    /// Render a virtual location (Spotlight results) as a single, non-clickable label — there is
+    /// no ancestor chain to walk into, so the breadcrumb affordance would only mislead. In its
+    /// own extension so the class body stays under SwiftLint's `type_body_length`.
+    func rebuildVirtualLabel(for path: VFSPath) {
+        for view in crumbStack.arrangedSubviews {
+            crumbStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        let label = NSTextField(labelWithString: "🔍  Results for \(path.lastComponent)")
+        label.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
+        label.textColor = isActive ? .labelColor : .secondaryLabelColor
+        label.lineBreakMode = .byTruncatingTail
+        crumbStack.addArrangedSubview(label)
+
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        crumbStack.addArrangedSubview(spacer)
     }
 }

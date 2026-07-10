@@ -16,8 +16,10 @@ extension PanelViewController {
         }
     }
 
-    /// Walk up one level, landing the cursor on the directory we came from.
+    /// Walk up one level, landing the cursor on the directory we came from. A no-op on a
+    /// virtual results pane — its synthetic parent isn't a browsable directory.
     func goToParent() {
+        guard panel.path.backend == .local else { return }
         let current = panel.path
         guard let parent = panel.parentPath else { return }
         navigate(to: parent, focus: current)

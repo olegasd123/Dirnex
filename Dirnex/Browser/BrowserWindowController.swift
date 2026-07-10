@@ -181,13 +181,13 @@ final class BrowserWindowController: NSWindowController, PanelHost {
             guard let self,
                   event.keyCode == 53, // Esc
                   event.modifierFlags.isDisjoint(with: [.command, .control, .option, .shift]),
-                  self.window?.isKeyWindow == true,
-                  self.isQuickViewOn
+                  window?.isKeyWindow == true,
+                  isQuickViewOn
             else { return event }
-            let responder = self.window?.firstResponder
+            let responder = window?.firstResponder
             // A file table or a text edit owns Esc for its own purpose — let the event through.
             if responder is FileTableView || responder is NSText { return event }
-            self.toggleQuickView()
+            toggleQuickView()
             return nil
         }
     }

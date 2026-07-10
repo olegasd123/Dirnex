@@ -19,6 +19,14 @@ public struct VFSBackendID: RawRepresentable, Sendable, Hashable, CustomStringCo
     /// The local, on-disk filesystem.
     public static let local = VFSBackendID("local")
 
+    /// A virtual, read-only listing of Spotlight search results (PLAN.md §M4 "Search results →
+    /// virtual panel listing"). Its entries carry their real `.local` paths — the results are
+    /// scattered across on-disk directories — so operating on a result (Quick Look, Copy to the
+    /// other pane) reaches the real file; only the *container* path is synthetic, which the app
+    /// uses to recognize a results pane and suppress directory-bound behavior (watching,
+    /// re-listing, the `..` row, in-place mutations).
+    public static let search = VFSBackendID("search")
+
     public var description: String { rawValue }
 }
 

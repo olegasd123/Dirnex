@@ -57,6 +57,7 @@ extension PanelViewController {
     /// Either kind drops a source that would recurse into its own subtree (pasting a folder
     /// inside itself), mirroring the drop guard.
     private func performPaste(kind: FileOperation.Kind) {
+        guard !isSearchResults else { return } // no destination directory on a results pane
         guard backend.capabilities.contains(.write) else { return }
         let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
         guard let urls = NSPasteboard.general.readObjects(

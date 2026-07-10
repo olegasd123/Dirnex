@@ -296,6 +296,8 @@ final class PanelViewController: NSViewController {
         loadToken += 1
         let token = loadToken
         let tabIndex = activeTabIndex
+        // Captured before the async load: was this tab showing virtual results when we left?
+        let wasVirtual = panel.path.backend != .local
         Task {
             do {
                 let listing = try await DirectoryLoader.list(backend, at: path)
@@ -313,7 +315,15 @@ final class PanelViewController: NSViewController {
                 // Land on a real entry; only an empty directory parks the cursor on `..`.
                 cursorOnParentRow = panel.isEmpty && panel.parentPath != nil
                 tabs[tabIndex].hasLoaded = true
-                recordVisit(path, tab: tabIndex, recordHistory: recordHistory)
+                if wasVirtual {
+                    // Leaving a virtual results pane for a real directory starts a fresh trail —
+                    // the synthetic `.search` path can't be re-listed, so it must never enter the
+                    // back/forward history. Frecency still records the real destination.
+                    tabs[tabIndex].history = NavigationHistory(initialPath: path)
+                    FrecencyStore.shared.recordVisit(path)
+                } else {
+                    recordVisit(path, tab: tabIndex, recordHistory: recordHistory)
+                }
                 reloadEverything()
                 refreshTabBar()
                 startWatching(path)
@@ -331,7 +341,9 @@ final class PanelViewController: NSViewController {
     /// runs on a background queue, so it hops to the main actor before touching the pane.
     /// Internal so a tab switch can re-establish the watcher for the newly active tab.
     func startWatching(_ path: VFSPath) {
-        guard backend.capabilities.contains(.watch) else {
+        // A virtual results listing has no directory on disk to watch — its `.search` path isn't
+        // a real location, and the results are a static snapshot.
+        guard path.backend == .local, backend.capabilities.contains(.watch) else {
             watcher = nil
             return
         }

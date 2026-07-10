@@ -1207,9 +1207,9 @@ Goal: cash in the VFS abstraction from M0.
 - [ ] Archive writes: add/delete inside zip (rewrite strategy, journal-safe temp file)
 - [x] Multi-rename tool: pattern tokens ([N] name, [C] counter, [E] ext, date tokens),
       regex find/replace, case transforms, live preview table, applies as one undoable batch
-- [ ] Search (Alt+F7 / palette): mdfind-backed name+content search with filter chips
-      (kind, size, date, tag); streamed results; content grep fallback for non-indexed volumes
-- [ ] Search results → virtual panel listing: normal cursor/selection/F5 on results
+- [x] Search (Alt+F7 / palette): mdfind-backed name+content search with filter chips
+      (kind, size, date ✅ — tag chip + content-grep fallback for non-indexed volumes deferred)
+- [x] Search results → virtual panel listing: normal cursor/selection/F5 on results
 - [x] Quick view panel (⌃Q toggle — Cmd+Q quits, Cmd+Shift+Q was free but ⌃Q is the TC key):
       inactive panel becomes live Quick Look/text preview of the file under cursor
 - [ ] Saved searches as virtual folders in the places strip
@@ -1293,6 +1293,56 @@ twice in rapid succession (a fast synthetic key batch) races Quick Look's async 
 leave the *first* item showing — stepping the cursor one key at a time previews correctly, so
 this is a synthetic-input artifact, not a user-facing bug. NEXT M4: ArchiveBackend (libarchive),
 mdfind search (Alt+F7) → virtual panel.
+
+Progress (2026-07-10, M4 pass 3): **Spotlight search → virtual results panel** landed — TC's
+Alt+F7 file search, cashing in the VFS abstraction for the first time as a *virtual* listing
+(**both M4 search lines now `[x]`**; picked over ArchiveBackend because it's pure Swift + app
+AppKit with no C-module infra — libarchive is still gated on the vendored-headers pass). Core
+`DirnexCore/Services/SpotlightQuery.swift` = a pure query builder mirroring `MultiRename`'s
+planner: a `SpotlightQuery` value (name substring, content substring, `SearchKind` chips
+folder/image/audio/movie/document/archive, min-size, `SearchAge` today/week/month/year) →
+`metadataPredicate()` renders the raw `kMDItem…` query mdfind speaks (name/content as
+`== "*term*"cd`, kinds as a parenthesized `kMDItemContentTypeTree` OR in CaseIterable order,
+size as `kMDItemFSSize >=`, date as a **relative** `kMDItemFSContentChangeDate >= $time.now(-N)`
+so the string stays deterministic/testable), and `mdfindArguments(scopePath:)` prepends `-onlyin`.
+Quotes/backslashes in a term are escaped so they can't break the literal. +15 `SpotlightQueryTests`
++1 catalog test → **271 core tests**; every predicate form was also validated against the real
+`/usr/bin/mdfind` from the shell before wiring the UI. `CommandCatalog` gains `go.search` (⌥F7,
+conflict-free — distinct from plain-F7 New Folder by its modifier set); NEW `VFSBackendID.search`
+tags a virtual listing. App: `SpotlightSearchRunner` (the non-hermetic I/O boundary, like
+`DirectoryLoader` — spawns `mdfind` off-main via `Process`, reads-to-EOF then stats each hit into
+`FileEntry`, caps at 5 000 with a truncation flag) + `SearchController` (the ⌥F7 sheet — name/
+content fields, kind/size/date popups, a This-Folder/Everywhere scope, Find disabled until the
+query asks for something) + `PanelViewController+Search` (runs the search, then installs the hits
+as a **new virtual tab**: a `DirectoryListing` on the `.search` backend whose entries carry their
+real `.local` paths, `hasLoaded=true`, `showHidden=true` so no dotfile hit is silently filtered).
+`CommandBinding`/`MainMenuBuilder` wire `findFiles` into the Go menu after Go Up. The virtual pane
+is recognized by a one-line `isSearchResults` (`panel.path.backend == .search`) and every
+directory-bound behavior guards on it: no FSEvents watch, no re-list on tab-activate/both-panes-
+refresh, no `..` row (`parentRowCount` requires `.local`), and New Folder/rename/multi-rename/
+trash/delete/paste/Go-Up all disabled (in `validateMenuItem` *and* their action entry points, since
+the keyboard paths bypass menu validation) — while **Copy/Move to the other pane stay enabled** (TC's
+F5 on results: each target's real path copies fine). The path bar renders a non-clickable
+"🔍 Results for …" for a `.search` path; Cmd+L bases at Home; and opening a *real* folder from a
+result resets the tab's back/forward trail (`navigate` captures `wasVirtual` up front) so the
+un-listable synthetic path never lands in history. Two SwiftLint limits tripped and were fixed the
+usual way (extract a helper): `validateMenuItem` cyclomatic-complexity split a `validateMutatingItem`
+helper out, `CommandCatalog` enum body moved Window+Application to an extension, `PathBarView` body
+moved the virtual-label builder to an extension. Repo swiftformat/swiftlint-strict clean (one
+pre-existing `redundantSelf` nit in the untouched `BrowserWindowController`); app `xcodebuild build`
++ `swift test` + app smoke test green. VERIFIED LIVE (mouse+menu-driven, no overlay; fully quit the
+stale instance first per the recurring gotcha, and confirmed the fresh debug dylib carried the new
+strings): Go ▸ **Find Files… ⌥F7** opened the sheet (Find greyed until "network-usage-2026-05" was
+typed, then blue); Find opened a new left-pane tab **"network-usage-2026-05"** with path bar
+**🔍 Results for "network-usage-2026-05"**, the **3** matching JSONs (byte-exact against the 3 in
+the right Downloads pane), **3 items** status, and **no `..` row**; the File menu showed **Copy/Move
+to Other Panel enabled** while **Rename/Multi-Rename/New Folder/Trash/Delete were all greyed**; and
+closing the results tab (its ✕) restored the browsing `oleg` tab (breadcrumbs + `..` + 18 items, tab
+bar re-hidden). Left the app on Home. GOTCHA (design): a virtual panel is the cleanest place the VFS
+`.search` backend id + a per-site `isSearchResults` guard pays off — the alternative (a per-tab
+`backend`) would have been a much larger refactor. NEXT M4: ArchiveBackend (libarchive — the
+C-module/vendored-headers gate), saved searches in the places strip, the deferred search niceties
+(tag chip, content-grep fallback for non-indexed volumes).
 
 ### M5 — Network and sync (M)
 

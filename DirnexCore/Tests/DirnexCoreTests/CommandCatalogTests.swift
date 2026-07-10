@@ -92,6 +92,16 @@ struct CommandCatalogTests {
         #expect(quickView?.shortcut == CommandShortcut(key: "q", modifiers: .control))
         #expect(KeyBindings().conflicts(for: "view.quickView").isEmpty)
     }
+
+    @Test("the M4 file search is a conflict-free Go command on ⌥F7")
+    func coversFindFiles() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        let search = byID["go.search"]
+        #expect(search?.category == .navigation)
+        #expect(search?.shortcut == CommandShortcut(key: "F7", modifiers: [.function, .option]))
+        // ⌥F7 must not collide with plain F7 (New Folder) — the modifier set differs.
+        #expect(KeyBindings().conflicts(for: "go.search").isEmpty)
+    }
 }
 
 @Suite("CommandShortcut display")
