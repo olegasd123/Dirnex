@@ -142,12 +142,15 @@ final class PathBarView: NSView, NSTextFieldDelegate {
             }
             let isLast = index == ancestors.count - 1
             let button = makeCrumb(for: ancestor, isCurrent: isLast)
-            // Leading crumbs yield first when the path is too wide to fit; the current
-            // directory (trailing) keeps its full width — pin it above the separators so
-            // it survives even after every divider would otherwise have to give way.
+            // The path bar must never widen the pane — only the user's divider sets pane
+            // width (the panes' split items hold at priority 250). So every crumb resists
+            // compression *below* 250: a long path truncates within the pane instead of
+            // pushing the divider out. Leading crumbs yield first (lowest, graduated so the
+            // leftmost/oldest goes first); the current directory (trailing) yields last so
+            // it stays legible longest, but it still yields rather than force the pane wider.
             let resistance = isLast
-                ? NSLayoutConstraint.Priority.required
-                : NSLayoutConstraint.Priority(Float(250 + index))
+                ? NSLayoutConstraint.Priority(240)
+                : NSLayoutConstraint.Priority(Float(100 + min(index, 90)))
             button.setContentCompressionResistancePriority(resistance, for: .horizontal)
             crumbStack.addArrangedSubview(button)
         }
@@ -198,8 +201,9 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         // A divider must never be the thing that collapses when the path overflows — a
         // crumb row without its `›`s reads as one run-on name. Resist compression harder
         // than the leading crumbs (which truncate their tails instead), so every visible
-        // crumb stays flanked by its separators.
-        label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        // crumb stays flanked by its separators — but still below 250 so the separators,
+        // like the crumbs, never widen the pane past the user's divider.
+        label.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(200), for: .horizontal)
         label.setContentHuggingPriority(.required, for: .horizontal)
         return label
     }
@@ -370,6 +374,9 @@ extension PathBarView {
         label.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
         label.textColor = isActive ? .labelColor : .secondaryLabelColor
         label.lineBreakMode = .byTruncatingTail
+        // Like the crumb row, the label truncates within the pane rather than widening it
+        // past the user's divider — resist below the split items' 250 holding priority.
+        label.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(240), for: .horizontal)
         crumbStack.addArrangedSubview(label)
 
         let spacer = NSView()
