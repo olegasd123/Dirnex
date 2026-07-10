@@ -95,6 +95,9 @@ extension PanelViewController: FileTableViewInput {
             previewPanel.orderOut(nil)
         } else {
             previewPanel.makeKeyAndOrderFront(nil)
+            // Opening on an archive member: it has no on-disk file yet, so extract it on demand
+            // and reload the panel once it lands. A no-op for a local file or empty selection.
+            prepareArchivePreview { [weak self] in self?.refreshQuickLookIfVisible() }
         }
     }
 

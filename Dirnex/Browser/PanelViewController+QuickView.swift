@@ -49,12 +49,14 @@ extension PanelViewController {
     }
 
     /// The file under this pane's cursor as a URL, for the *other* pane to preview — `nil` on
-    /// the `..` row, in an empty directory, or for a non-local entry (an archive member has no
-    /// on-disk URL until extraction lands in a later M4 pass).
+    /// the `..` row or in an empty directory. A local entry resolves at once; an archive member
+    /// resolves to its extracted temp file once cached (nil until `prepareArchivePreview` lands
+    /// it), so the window re-drives the preview when the extraction finishes.
     var quickViewSourceURL: URL? {
-        guard !cursorOnParentRow, let entry = panel.currentEntry,
-              entry.path.backend == .local else { return nil }
-        return entry.path.localURL
+        guard !cursorOnParentRow, let entry = panel.currentEntry else { return nil }
+        if entry.path.backend == .local { return entry.path.localURL }
+        guard let member = previewableArchiveMember else { return nil }
+        return host?.archivePreviewCache.cachedURL(for: member)
     }
 
     // MARK: - Backends

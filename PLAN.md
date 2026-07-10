@@ -1202,9 +1202,9 @@ and two presets.
 
 Goal: cash in the VFS abstraction from M0.
 
-- [~] `ArchiveBackend`: **browse zip/tar/tgz/7z as folders ✅**, **F5 copy-out ✅** (via `bsdtar`,
-      not libarchive — the C-module gate stays deferred); pack via F5-with-archive-target, Quick
-      Look inside, and nested archives still to come
+- [~] `ArchiveBackend`: **browse zip/tar/tgz/7z as folders ✅**, **F5 copy-out ✅**, **Quick Look /
+      Quick View inside ✅** (via `bsdtar`, not libarchive — the C-module gate stays deferred); pack
+      via F5-with-archive-target and nested archives still to come
 - [ ] Archive writes: add/delete inside zip (rewrite strategy, journal-safe temp file)
 - [x] Multi-rename tool: pattern tokens ([N] name, [C] counter, [E] ext, date tokens),
       regex find/replace, case transforms, live preview table, applies as one undoable batch
@@ -1455,6 +1455,51 @@ local files, reusing every bit of its conflict / progress / undo machinery for f
   extraction pass's other half — extract-on-demand + cache the single cursor member, then relax the
   `.local`-only guards in `+QuickLook`/`+QuickView`) and **packing** (F5-with-archive-target via `ditto`/
   `bsdtar`); then archive **writes**, saved searches in the places strip, deferred search niceties.
+
+Progress (2026-07-10, M4 pass 6): **archive Quick Look / Quick View inside** landed — the extraction
+pass's other half. Both preview surfaces (⌘Y floating Quick Look and ⌃Q embedded Quick View) now show
+the file under the cursor when it's an archive *member*, by extracting that single member on demand and
+pointing the preview at the extracted temp file. Pure app-layer wiring on top of pass 5's plumbing — no
+new core logic (the `bsdtar` argv is already `ArchiveExtraction`, already tested), so **core stays at 301
+tests** and this pass adds none.
+- **The cache.** NEW `Dirnex/Browser/ArchivePreviewCache.swift` (`@MainActor final class`, one per window,
+  owned by `BrowserWindowController`, reached through the `PanelHost.archivePreviewCache` protocol getter):
+  a `[ArchiveMember: URL]` dict keyed by `(archiveOnDiskPath, innerPath)`. `cachedURL(for:)` is the
+  synchronous lookup the preview surfaces read; `extractedURL(for:)` extracts off-main via the *existing*
+  `ArchiveExtractor.extract(innerPaths:[one])` (single member → one landed file) and memoizes. Chose a dict
+  over a literal single slot (the plan sketch said "single cursor member") because it kills the
+  async-completion race — a slow extraction that finishes *after* the cursor has moved on writes its own
+  key instead of evicting the member now under the cursor, so no preview ever blanks from a stale result;
+  arrowing back is also instant. The cache never deletes: extracted files pile up under `ArchiveExtractor`'s
+  `DirnexExtract/<uuid>/` root (nested members keep their full inner path, e.g. `<uuid>/docs/api.md`) and
+  are purged at launch exactly like F5's, so nothing races an in-flight preview.
+- **On-demand trigger.** NEW `Dirnex/Browser/PanelViewController+ArchivePreview.swift`: `previewableArchiveMember`
+  (nil unless browsing an archive AND the cursor is on a *file* member — not `..`, not a directory) and
+  `prepareArchivePreview(onReady:)` — a no-op that never calls back when the member is absent OR already
+  cached (so a caller can invoke it after every refresh without looping), else it extracts and calls
+  `onReady` on the main actor *only if the cursor is still on that same member*. That "still-current" guard
+  is what makes the single async path safe under rapid arrowing.
+- **Relaxed guards.** `+QuickView.quickViewSourceURL` and `+QuickLook`'s new `quickLookURL(for:)` now resolve
+  a `.local` entry to its real URL AND an archive member to `cachedURL(for:)` (nil until extraction lands).
+  `quickLookItems()` gained an `isArchive` branch: inside an archive it previews just the cursor member once
+  cached (the marked-set preview stays a local-files feature). Drivers: `refreshQuickLookIfVisible()` and the
+  ⌘Y-open path (`fileTableToggleQuickLook`) both call `prepareArchivePreview { refreshQuickLookIfVisible() }`;
+  `BrowserWindowController` folds `panelCursorDidChange`/`updateQuickView` into one `showActivePreview(from:)`
+  that shows the (possibly-nil) cached URL at once then `prepareArchivePreview { … showQuickViewPreview … }`
+  re-drives the inactive pane when the member lands (guarded on Quick View still on + same active pane). QL/QV
+  menu items were already always-enabled (`default: return true`), so nothing to ungate.
+- **Verified live via computer-use** (fresh Debug build after a full quit; `ArchivePreviewCache` confirmed in
+  the dylib): entered `bundle.zip`, ⌘Y on `readme.txt` → floating Quick Look showed its text; ⌘Y on the
+  6.6 MB `photo.heic` → showed the full image ("Open with Preview"); ⌃Q → inactive pane live-previewed the
+  cursor member and *tracked the cursor* (arrow onto `photo.heic` swapped the preview to the image); cursor on
+  the `docs` directory → blank preview (correctly unpreviewable); entered `docs`, `api.md` previewed its
+  markdown (nested inner path). The three `DirnexExtract/<uuid>/` temps on disk afterwards were exactly
+  `readme.txt`, `photo.heic`, and `docs/api.md` — proving per-member on-demand extraction + the full-inner-path
+  rebuild. GOTCHA (minor): with the shared Quick Look panel key, arrow keys navigate *preview items* (only 1
+  for an archive), not the underlying table — so changing the previewed member with ⌘Y open means closing +
+  reselecting; ⌃Q (table stays first responder) tracks the cursor live as expected. NEXT M4: archive **packing**
+  (F5-with-archive-target via `ditto`/`bsdtar`), then archive **writes**, saved searches in the places strip,
+  deferred search niceties.
 
 ### M5 — Network and sync (M)
 

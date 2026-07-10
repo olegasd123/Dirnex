@@ -23,6 +23,10 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     /// because the mode spans both panes and follows whichever is active.
     private var isQuickViewOn = false
 
+    /// Archive members extracted for preview (Quick Look ⌘Y / Quick View ⌃Q inside a browsed
+    /// archive), shared across both panes and both surfaces (PLAN.md §M4 "Quick Look inside").
+    let archivePreviewCache = ArchivePreviewCache()
+
     /// Local key monitor that lets Esc close Quick View no matter where focus sits in this
     /// window (e.g. after the user clicked into the preview). A raw-event monitor rather than a
     /// `cancelOperation:` override because a focused `PDFView` may never translate the Esc key
@@ -330,7 +334,7 @@ final class BrowserWindowController: NSWindowController, PanelHost {
 
     func panelCursorDidChange(_ panel: PanelViewController) {
         guard isQuickViewOn, panel === (activePanel ?? leftPanel) else { return }
-        counterpart(of: panel).showQuickViewPreview(of: panel.quickViewSourceURL)
+        showActivePreview(from: panel)
     }
 
     /// Reconcile both panes with the current Quick View state: the active pane shows its file
@@ -338,15 +342,27 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     /// both panes drop any preview. Run on every toggle and whenever the active pane changes,
     /// so the preview always sits opposite the focused pane.
     private func updateQuickView() {
-        let active = activePanel ?? leftPanel
-        let inactive = counterpart(of: active)
         guard isQuickViewOn else {
             leftPanel.hideQuickViewPreview()
             rightPanel.hideQuickViewPreview()
             return
         }
+        let active = activePanel ?? leftPanel
         active.hideQuickViewPreview()
-        inactive.showQuickViewPreview(of: active.quickViewSourceURL)
+        showActivePreview(from: active)
+    }
+
+    /// Point the inactive pane's preview at the file under `active`'s cursor. A local file (or an
+    /// already-extracted archive member) shows at once; an archive member not yet on disk is
+    /// extracted on demand and shown when it lands — provided Quick View is still on and the
+    /// cursor hasn't moved on in the meantime.
+    private func showActivePreview(from active: PanelViewController) {
+        counterpart(of: active).showQuickViewPreview(of: active.quickViewSourceURL)
+        active.prepareArchivePreview { [weak self, weak active] in
+            guard let self, let active, isQuickViewOn,
+                  active === (activePanel ?? leftPanel) else { return }
+            counterpart(of: active).showQuickViewPreview(of: active.quickViewSourceURL)
+        }
     }
 
     private func counterpart(of panel: PanelViewController) -> PanelViewController {

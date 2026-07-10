@@ -57,6 +57,11 @@ protocol PanelHost: AnyObject {
     /// the inactive pane's Quick View preview. A no-op unless Quick View is on and `panel`
     /// is the active pane.
     func panelCursorDidChange(_ panel: PanelViewController)
+
+    /// The window's shared cache of archive members extracted for preview (Quick Look / Quick
+    /// View inside a browsed archive). Owned by the window so both panes and both preview
+    /// surfaces resolve the same extracted temp file.
+    var archivePreviewCache: ArchivePreviewCache { get }
 }
 
 /// One file pane: a path bar, an `NSTableView` of the current directory, and a status
