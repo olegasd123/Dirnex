@@ -141,6 +141,11 @@ final class PanelViewController: NSViewController {
     /// Set when the inline rename ends via Esc, so the shared end-editing handler reverts
     /// the field instead of committing the typed name. Internal for `+Rename`.
     var renameWasCancelled = false
+    /// Set when a live background refresh (FSEvents, a directory-size total) arrived while an
+    /// inline rename field was open and was therefore deferred — see `deferRefreshIfRenaming`.
+    /// The end-editing handler replays it so the pane catches up on the change it skipped.
+    /// Internal for `+Rename`.
+    var renamePendingRefresh = false
     /// Bumped on every navigation so a slow listing that resolves after the user has
     /// already moved on is discarded instead of clobbering the current directory.
     /// Internal so `PanelViewController+Tabs` can discard a stale load on tab switch.
@@ -361,6 +366,7 @@ final class PanelViewController: NSViewController {
         Task {
             guard let listing = try? await DirectoryLoader.list(backend, at: watchedPath) else { return }
             guard token == loadToken, panel.path == watchedPath else { return }
+            if deferRefreshIfRenaming() { return }
             reconcileCursorFromTable()
             panel.setListing(listing)
             renderRefresh()
@@ -384,6 +390,18 @@ final class PanelViewController: NSViewController {
         syncCursorToTable(scroll: false)
         updateChrome()
         refreshQuickLookIfVisible()
+    }
+
+    /// Guard a *live background* refresh (FSEvents, a directory-size total) against running
+    /// while an inline rename field is open: a `reloadData` there tears the shared field
+    /// editor out of its cell and — because `NSTableView` recycles cell views — leaves it
+    /// stranded on the `..` row, silently dropping the rename. When editing is in progress
+    /// the caller must skip its refresh (this returns `true`) and note that one is owed, so
+    /// the end-editing handler can replay it and the pane still catches up on the change.
+    func deferRefreshIfRenaming() -> Bool {
+        guard renamingEntryID != nil else { return false }
+        renamePendingRefresh = true
+        return true
     }
 
     /// Mirror the table's live selection into the model cursor (the view→model half of

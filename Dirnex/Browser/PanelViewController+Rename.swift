@@ -146,8 +146,14 @@ extension PanelViewController: NSTextFieldDelegate {
               let field = notification.object as? NSTextField else { return }
         let newName = field.stringValue
         let cancelled = renameWasCancelled
+        // A live refresh (FSEvents / directory-size total) that arrived mid-edit was deferred
+        // rather than allowed to tear the field editor apart; replay it now so the pane catches
+        // up on the change it skipped. The commit path re-lists anyway, but the cancel/no-op
+        // paths would otherwise leave the pane stale.
+        let owedRefresh = renamePendingRefresh
         renamingEntryID = nil
         renameWasCancelled = false
+        renamePendingRefresh = false
 
         // Revert the edited row back to a plain label (the commit path re-lists anyway,
         // but the cancel/no-op paths rely on this).
@@ -159,8 +165,10 @@ extension PanelViewController: NSTextFieldDelegate {
 
         guard !cancelled else {
             focusTable()
+            if owedRefresh { refreshCurrentDirectory() }
             return
         }
         performRename(source: entryID, oldName: entryID.lastComponent, to: newName)
+        if owedRefresh { refreshCurrentDirectory() }
     }
 }
