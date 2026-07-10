@@ -277,6 +277,7 @@ extension PanelViewController: NSMenuItemValidation {
         // their own helpers so this switch stays under the cyclomatic-complexity limit.
         if let toggle = validateToggleItem(menuItem) { return toggle }
         if let mutating = validateMutatingItem(menuItem) { return mutating }
+        if let archive = validateArchiveItem(menuItem) { return archive }
         switch menuItem.action {
         case #selector(copyToOtherPane(_:)):
             // Copy to the other pane works from a results panel (real paths) and from an archive,
@@ -338,6 +339,21 @@ extension PanelViewController: NSMenuItemValidation {
         case #selector(multiRenameSelection(_:)):
             // The batch tool operates on the marked set (else the cursor entry).
             return canRenameHere && !selectionTargets().isEmpty
+        default:
+            return nil
+        }
+    }
+
+    /// Validate the archive operations (Pack). Kept out of the main switch so it stays under
+    /// SwiftLint's cyclomatic-complexity limit (a recurring gotcha). Returns `nil` for any other
+    /// selector so the main switch handles it.
+    private func validateArchiveItem(_ menuItem: NSMenuItem) -> Bool? {
+        switch menuItem.action {
+        case #selector(packSelection(_:)):
+            // Pack a real local selection into a new archive in the other pane; the source must be
+            // a real folder (not an archive or search-results view) and there must be a pane to
+            // land the archive in. The pack flow re-checks the destination is local + writable.
+            return canPackFromHere && !selectionTargets().isEmpty && host?.panelCounterpart(of: self) != nil
         default:
             return nil
         }

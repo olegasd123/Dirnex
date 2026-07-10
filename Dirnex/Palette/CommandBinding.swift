@@ -20,6 +20,7 @@ enum CommandBinding {
         "file.closeTab": #selector(PanelViewController.closeCurrentTab(_:)),
         "file.copy": #selector(PanelViewController.copyToOtherPane(_:)),
         "file.move": #selector(PanelViewController.moveToOtherPane(_:)),
+        "file.pack": #selector(PanelViewController.packSelection(_:)),
         "file.rename": #selector(PanelViewController.renameSelection(_:)),
         "file.multiRename": #selector(PanelViewController.multiRenameSelection(_:)),
         "file.newFolder": #selector(PanelViewController.newFolder(_:)),

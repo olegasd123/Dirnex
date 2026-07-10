@@ -53,6 +53,13 @@ public enum CommandCatalog {
             shortcut: CommandShortcut(key: "F6", modifiers: .function)
         ),
         Command(
+            id: "file.pack",
+            title: "Pack…",
+            category: .file,
+            keywords: ["compress", "archive", "zip", "tar", "alt+f5", "pack"],
+            shortcut: CommandShortcut(key: "F5", modifiers: [.function, .option])
+        ),
+        Command(
             id: "file.rename",
             title: "Rename…",
             category: .file,

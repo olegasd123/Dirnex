@@ -44,7 +44,7 @@ enum MainMenuBuilder {
     private static let layout: [MenuSpec] = [
         MenuSpec(title: "File", items: [
             .command("file.newTab"), .command("file.closeTab"), .separator,
-            .command("file.copy"), .command("file.move"), .separator,
+            .command("file.copy"), .command("file.move"), .command("file.pack"), .separator,
             .command("file.rename"), .command("file.multiRename"), .separator,
             .command("file.newFolder"), .separator,
             .command("file.trash"), .command("file.deletePermanently")

@@ -75,6 +75,15 @@ struct CommandCatalogTests {
         #expect(KeyBindings().conflicts(for: "file.multiRename").isEmpty)
     }
 
+    @Test("the M4 pack tool is a conflict-free File command on ⌥F5")
+    func coversPack() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        let pack = byID["file.pack"]
+        #expect(pack?.category == .file)
+        #expect(pack?.shortcut == CommandShortcut(key: "F5", modifiers: [.function, .option]))
+        #expect(KeyBindings().conflicts(for: "file.pack").isEmpty)
+    }
+
     @Test("the show-hidden toggle is a conflict-free View command on ⇧⌘.")
     func coversShowHiddenToggle() {
         let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })

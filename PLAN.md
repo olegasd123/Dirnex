@@ -1203,8 +1203,8 @@ and two presets.
 Goal: cash in the VFS abstraction from M0.
 
 - [~] `ArchiveBackend`: **browse zip/tar/tgz/7z as folders ✅**, **F5 copy-out ✅**, **Quick Look /
-      Quick View inside ✅** (via `bsdtar`, not libarchive — the C-module gate stays deferred); pack
-      via F5-with-archive-target and nested archives still to come
+      Quick View inside ✅**, **pack via ⌥F5 ✅** (via `bsdtar`, not libarchive — the C-module gate
+      stays deferred); nested archives still to come
 - [ ] Archive writes: add/delete inside zip (rewrite strategy, journal-safe temp file)
 - [x] Multi-rename tool: pattern tokens ([N] name, [C] counter, [E] ext, date tokens),
       regex find/replace, case transforms, live preview table, applies as one undoable batch
@@ -1500,6 +1500,58 @@ tests** and this pass adds none.
   reselecting; ⌃Q (table stays first responder) tracks the cursor live as expected. NEXT M4: archive **packing**
   (F5-with-archive-target via `ditto`/`bsdtar`), then archive **writes**, saved searches in the places strip,
   deferred search niceties.
+
+Progress (2026-07-10, M4 pass 7): **archive packing** landed — TC's Pack (⌥F5), the inverse of F5 copy-out
+and the last half of the "open a zip, fish two files out, repack" exit criterion. Select real local files in
+one pane, ⌥F5, pick a name + container format, and a new archive is created in the *other* pane — the same
+default destination as F5. Taken via `bsdtar -a -c` (not `ditto`), which handles zip/tar.gz/tar.bz2/7z/tar
+**uniformly** with the format inferred from the archive's own suffix, matching the browse/extract passes'
+`bsdtar` rhythm.
+- **Core (pure, tested).** `DirnexCore/…/VFS/ArchivePacking.swift` = the pure argv half, mirroring
+  `ArchiveExtraction`: `packingArguments(archiveOnDiskPath:sourceDirectory:sourceNames:)` builds
+  `bsdtar -a -c -f <archive> -C <sourceDir> <name>…` — `-a` infers the format from the suffix, `-c` creates
+  (overwriting; the app resolves that collision first), and `-C` + bare names make the entries archive-relative
+  (so the archive holds `docs/…`, not an absolute path). Every selected item shares one parent — the pane's
+  current directory — so a single `-C` covers them all. Unlike extraction, create-side arguments are **literal
+  file paths, not glob patterns** (validated live against bsdtar 3.5.3), so **no member escaping** is needed —
+  a name like `weird[1].txt` is passed verbatim. A `Format` enum (`.zip/.tarGz/.tarBz2/.sevenZip/.tar`, each
+  with `suffix` + `displayName`, `.zip` first) drives the dialog's popup and guarantees every packable format
+  round-trips back into a browsable one (`ArchiveType.isBrowsable`). `defaultBaseName(forSourceNames:
+  sourceDirectoryName:)` = a single source's name minus its extension (`report.pdf`→`report`, the folder
+  `docs`→`docs`), else the source directory's own name (multi-item→`<folder>`), falling back to `Archive` at a
+  volume root; `archiveFileName(baseName:format:)` appends the suffix without doubling an already-present one
+  (`docs.zip`+Zip→`docs.zip`, not `docs.zip.zip`). +11 `ArchivePackingTests` + 1 `CommandCatalogTests` →
+  **313 core tests**, swiftformat/swiftlint-strict clean.
+- **App (I/O boundary + wiring).** `Dirnex/Browser/ArchivePacker.swift` (mirrors `ArchiveExtractor`/
+  `ArchiveMounter`) spawns `bsdtar` off-main; unlike extraction it writes **directly to the destination** (the
+  result *is* a user file, nothing to temp/purge) and cleans up a partial archive on a non-zero exit or missing
+  output. `PanelViewController+ArchivePack.swift`'s `beginArchivePacking()` guards `canPackFromHere`
+  (`.local && !isVirtualDirectory` — can't pack *from* an archive or a search-results pane, and every item must
+  share one parent), requires the other pane be a real writable folder, then raises a small sheet (NSAlert
+  accessory: a name field over a format popup) pre-filled from the core default. `confirmAndPack` `stat`s the
+  target first — `bsdtar -c` would silently overwrite — and raises a Replace/Cancel confirmation on a collision;
+  `runPack` spawns off-main then `refreshCurrentDirectory(selecting:)` re-lists the destination pane with the
+  new archive landed under the cursor. Registry wiring: `file.pack` command (title "Pack…", ⌥F5, keywords
+  compress/archive/zip/tar) in `CommandCatalog`, selector in `CommandBinding`, `.command("file.pack")` in
+  `MainMenuBuilder`'s File layout (grouped with Copy/Move), and a `validateArchiveItem` helper split out of
+  `validateMenuItem` (the recurring cyclomatic-complexity gotcha) enabling it only from a real local selection
+  with a counterpart pane. App `xcodebuild build` + full `swift test` green.
+- **Verified live via computer-use** (fresh Debug build after a full quit; `ArchivePacker`/`beginArchivePacking`/
+  `file.pack` confirmed in the debug **dylib**): File menu showed **Pack… ⌥F5** enabled, grouped after Copy/Move.
+  Marked 4 items (a dir + a spaced name + `weird[1].txt` + a plain file) → Pack sheet titled "Pack 4 items",
+  name pre-filled **"left"** (source dir name), format popup listing all five with Zip first. Zip → `left.zip`
+  landed **selected** in the other pane; on disk byte-exact and recursive (`photos/` + both jpgs, `alpha.txt`,
+  `release notes.txt` space preserved, `weird[1].txt` glob-metachar preserved literally). Double-clicking it
+  browsed straight back in (**📦 left.zip** breadcrumb, 4 items) — the full pack↔browse round-trip. Re-packing
+  "left" raised the **"left.zip" already exists** Replace/Cancel confirmation; Replace re-created a valid
+  archive. A single-file pack of `alpha.txt` titled "Pack "alpha.txt"", defaulted the name to **"alpha"**
+  (extension stripped), and Tarball (gzip) produced a real gzip `alpha.tar.gz` containing `alpha.txt` — proving
+  `bsdtar -a`'s suffix-driven format inference through the app path. GOTCHA (bsdtar): create-side arguments are
+  **literal paths, not globs** (the opposite of extract/list members), so packing needs no escaping while
+  extraction does. GOTCHA (architecture): packing is *not* a `CopyEngine` job (that's one backend for src+dest);
+  it writes the archive directly, so it's its own `ArchivePacker` path with its own overwrite guard, mirroring
+  how extraction went temp-extract-then-copy. NEXT M4: archive **writes** (add/delete inside a zip via
+  rewrite-to-temp), nested archives, saved searches in the places strip, deferred search niceties.
 
 ### M5 — Network and sync (M)
 
