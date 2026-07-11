@@ -1,42 +1,67 @@
 import AppKit
 import DirnexCore
 
-/// The leading titlebar Back/Forward buttons, sitting just right of the sidebar toggle: the
-/// ⌘[ / ⌘] history commands (View ▸ Go) in reach of the mouse. Like the menu items they carry
-/// no target — the action rides the responder chain to whichever pane is focused, so each steps
-/// *that* pane's per-tab trail (`PanelViewController.goBack`/`goForward`). Their enabled state
-/// mirrors the active pane's `canGoBack`/`canGoForward`, refreshed on every navigation, tab
-/// switch, and focus change (`updateNavigationButtons`).
+/// The leading titlebar Back/Forward control, sitting just right of the sidebar toggle: the
+/// ⌘[ / ⌘] history commands (View ▸ Go) as a two-segment pill, the same control Finder and
+/// Safari put in their toolbars. A momentary segmented control so each half presses like a
+/// button rather than latching. The click routes through the responder chain (like the Go menu
+/// items) so it steps *the focused* pane's per-tab trail; each segment's enabled state mirrors
+/// that pane's `canGoBack`/`canGoForward`, refreshed on every navigation, tab switch, and focus
+/// change (`updateNavigationButtons`).
 extension BrowserWindowController {
-    /// Mirror of `installSidebarToggle`, added as a second `.leading` accessory so the pair lands
+    /// The two segment indices, named so the click handler and the enable/tooltip setup read
+    /// clearly rather than juggling bare 0/1.
+    private enum NavSegment {
+        static let back = 0
+        static let forward = 1
+    }
+
+    /// Mirror of `installSidebarToggle`, added as a second `.leading` accessory so the pill lands
     /// immediately to the right of the sidebar button.
     func installNavigationButtons() {
-        configureNavButton(
-            backButton,
-            symbol: "chevron.backward",
-            action: #selector(PanelViewController.goBack(_:)),
-            title: "Back",
-            commandID: "go.back"
+        navigationControl.segmentCount = 2
+        navigationControl.segmentStyle = .rounded
+        navigationControl.trackingMode = .momentary
+        navigationControl.setImage(navImage("chevron.backward", "Back"), forSegment: NavSegment.back)
+        navigationControl.setImage(
+            navImage("chevron.forward", "Forward"),
+            forSegment: NavSegment.forward
         )
-        configureNavButton(
-            forwardButton,
-            symbol: "chevron.forward",
-            action: #selector(PanelViewController.goForward(_:)),
-            title: "Forward",
-            commandID: "go.forward"
+        navigationControl.setToolTip(navTooltip("Back", "go.back"), forSegment: NavSegment.back)
+        navigationControl.setToolTip(
+            navTooltip("Forward", "go.forward"),
+            forSegment: NavSegment.forward
         )
+        navigationControl.target = self
+        navigationControl.action = #selector(navigationSegmentPressed(_:))
+        navigationControl.translatesAutoresizingMaskIntoConstraints = false
 
-        let stack = NSStackView(views: [backButton, forwardButton])
-        stack.orientation = .horizontal
-        stack.spacing = 2
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 82, height: 28))
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 62, height: 28))
-        container.addSubview(stack)
+        // The window runs edge-to-edge under the transparent titlebar (`fullSizeContentView`), so
+        // the sidebar↕panes split divider is drawn up through this strip and shows through the
+        // control's translucent pill bezel. An opaque rounded backing pinned under the pill hides
+        // it — `windowBackgroundColor` is a dynamic color, so `NSBox` re-resolves it light/dark.
+        let backing = NSBox()
+        backing.boxType = .custom
+        backing.borderWidth = 0
+        backing.cornerRadius = 6
+        backing.fillColor = .windowBackgroundColor
+        backing.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(backing)
+        container.addSubview(navigationControl)
         NSLayoutConstraint.activate([
-            stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
-            stack.heightAnchor.constraint(equalToConstant: 22)
+            navigationControl.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            navigationControl.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
+            navigationControl.trailingAnchor.constraint(
+                equalTo: container.trailingAnchor,
+                constant: -8
+            ),
+            backing.leadingAnchor.constraint(equalTo: navigationControl.leadingAnchor),
+            backing.trailingAnchor.constraint(equalTo: navigationControl.trailingAnchor),
+            backing.topAnchor.constraint(equalTo: navigationControl.topAnchor),
+            backing.bottomAnchor.constraint(equalTo: navigationControl.bottomAnchor)
         ])
 
         let accessory = NSTitlebarAccessoryViewController()
@@ -47,34 +72,32 @@ extension BrowserWindowController {
         updateNavigationButtons()
     }
 
-    /// Point the buttons at the active pane's trail so they grey out at its ends, exactly as
-    /// ⌘[ / ⌘] disable in the Go menu (`validateMenuItem`).
+    /// Enable each half only when the active pane's trail can move that way, so the segments grey
+    /// out at its ends exactly as ⌘[ / ⌘] disable in the Go menu (`validateMenuItem`).
     func updateNavigationButtons() {
-        backButton.isEnabled = focusedPanel.canGoBack
-        forwardButton.isEnabled = focusedPanel.canGoForward
+        navigationControl.setEnabled(focusedPanel.canGoBack, forSegment: NavSegment.back)
+        navigationControl.setEnabled(focusedPanel.canGoForward, forSegment: NavSegment.forward)
     }
 
-    private func configureNavButton(
-        _ button: NSButton,
-        symbol: String,
-        action: Selector,
-        title: String,
-        commandID: String
-    ) {
-        button.bezelStyle = .toolbar
-        button.isBordered = false
-        button.imagePosition = .imageOnly
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
-        button.image?.isTemplate = true
-        button.target = nil // ride the responder chain to the focused pane, like the Go menu items
-        button.action = action
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.widthAnchor.constraint(equalToConstant: 24).isActive = true
+    /// Dispatch the pressed half through the responder chain to the focused pane — the same path
+    /// the ⌘[ / ⌘] menu items take, so archive/results panes and history bounds behave identically.
+    @objc private func navigationSegmentPressed(_ sender: NSSegmentedControl) {
+        let selector = sender.selectedSegment == NavSegment.forward
+            ? #selector(PanelViewController.goForward(_:))
+            : #selector(PanelViewController.goBack(_:))
+        NSApp.sendAction(selector, to: nil, from: sender)
+    }
 
+    private func navImage(_ symbol: String, _ label: String) -> NSImage? {
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        image?.isTemplate = true
+        return image
+    }
+
+    private func navTooltip(_ label: String, _ commandID: String) -> String {
         if let hint = KeyBindingStore.shared.shortcut(for: commandID)?.display {
-            button.toolTip = "\(title) (\(hint))"
-        } else {
-            button.toolTip = title
+            return "\(label) (\(hint))"
         }
+        return label
     }
 }

@@ -70,11 +70,11 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     /// button form). Held so `showHiddenDidChange` can restyle it to track the current state.
     let hiddenToggleButton = NSButton()
 
-    /// Leading titlebar back/forward buttons beside the sidebar toggle — the ⌘[ / ⌘] history
-    /// commands (View ▸ Go) in button form. Held so a navigation, tab switch, or focus change can
-    /// re-validate their enabled state against the active pane's trail (`updateNavigationButtons`).
-    let backButton = NSButton()
-    let forwardButton = NSButton()
+    /// The leading titlebar back/forward control beside the sidebar toggle — the ⌘[ / ⌘] history
+    /// commands (View ▸ Go) as a two-segment pill, the same control Finder/Safari use. Held so a
+    /// navigation, tab switch, or focus change can re-validate each segment's enabled state
+    /// against the active pane's trail (`updateNavigationButtons`).
+    let navigationControl = NSSegmentedControl()
 
     init() {
         // A composite backend so a pane can browse into an archive (`archive:…` paths route
