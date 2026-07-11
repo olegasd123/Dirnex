@@ -40,11 +40,11 @@ extension PanelViewController {
 
     /// The other pane when it's an archive ready to receive an add — the F5/F6 add-into target.
     /// `nil` (the normal transfer path) unless this pane holds real local files and the counterpart
-    /// is browsing an archive.
+    /// is a *writable* archive; a nested archive is read-only (`isWritableArchive`), so it isn't a
+    /// target and F5/F6 fall through to `beginTransfer`, which reports it can't copy there.
     private func archiveDestinationPane() -> PanelViewController? {
-        guard !isArchive, let destPane = host?.panelCounterpart(of: self), destPane.isArchive else {
-            return nil
-        }
+        guard !isArchive, let destPane = host?.panelCounterpart(of: self),
+              destPane.isWritableArchive else { return nil }
         return destPane
     }
 
@@ -71,6 +71,16 @@ extension PanelViewController {
         let sources = selectionTargets()
         guard !sources.isEmpty, let destPane = host?.panelCounterpart(of: self) else { return }
         let destination = destPane.panel.path
+        // The queue writes to real on-disk folders; a non-local counterpart (a read-only nested
+        // archive, or a search-results pane) has no directory to receive files. A *writable*
+        // archive was already routed to add-into before reaching here.
+        guard destination.backend == .local else {
+            presentOperationFailure(
+                message: kind == .copy ? "Can’t copy here" : "Can’t move here",
+                detail: "The other panel isn’t a folder you can copy into."
+            )
+            return
+        }
         // Copying/moving a selection onto the folder it already lives in would collide
         // with every item; point the user at a real destination instead.
         guard destination != panel.path else {

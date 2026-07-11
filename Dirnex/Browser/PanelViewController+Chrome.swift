@@ -6,7 +6,7 @@ import DirnexCore
 /// controller proper focused on navigation and the cursor/selection plumbing.
 extension PanelViewController {
     func updateChrome() {
-        pathBar.setPath(panel.path)
+        pathBar.setPath(panel.path, archiveAncestry: archiveBreadcrumbAncestry())
         statusLabel.stringValue = statusText()
         // If this is the active pane and Quick View is on, the file under the cursor just
         // changed — re-drive the preview showing in the inactive pane. A no-op otherwise.

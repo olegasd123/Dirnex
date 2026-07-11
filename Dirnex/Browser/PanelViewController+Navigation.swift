@@ -15,11 +15,14 @@ extension PanelViewController {
         } else if entry.path.backend == .local, ArchiveType.isBrowsable(entry.name) {
             // A local archive file — browse into its virtual folder tree instead of launching.
             navigate(to: archiveRoot(for: entry))
+        } else if entry.path.backend.isArchive, ArchiveType.isBrowsable(entry.name) {
+            // A nested archive — extract this member to disk and browse into it (PLAN.md §M4).
+            beginNestedArchiveEntry(for: entry)
         } else if entry.path.backend == .local {
             NSWorkspace.shared.open(entry.path.localURL)
         }
-        // A non-directory entry inside an archive can't be launched or extracted yet (a later
-        // M4 pass), so it's a no-op rather than opening a meaningless local URL.
+        // Any other non-directory entry inside an archive (a plain file member) can't be launched
+        // in place, so it's a no-op rather than opening a meaningless local URL.
     }
 
     /// Walk up one level, landing the cursor on the directory we came from. Inside an archive

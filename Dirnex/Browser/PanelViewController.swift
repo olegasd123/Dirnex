@@ -66,6 +66,11 @@ protocol PanelHost: AnyObject {
     /// View inside a browsed archive). Owned by the window so both panes and both preview
     /// surfaces resolve the same extracted temp file.
     var archivePreviewCache: ArchivePreviewCache { get }
+
+    /// The window's shared record of nested-archive mounts — where each archive-inside-an-archive
+    /// was extracted from (PLAN.md §M4 "nested archives"). Owned by the window so a mount entered
+    /// in one pane still resolves its outer chain (walk-out, breadcrumb) if browsed from either.
+    var nestedArchiveRegistry: NestedArchiveRegistry { get }
 }
 
 /// One file pane: a path bar, an `NSTableView` of the current directory, and a status

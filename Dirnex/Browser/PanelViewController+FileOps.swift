@@ -119,9 +119,10 @@ extension PanelViewController {
     }
 
     private func deleteSelection(permanent: Bool) {
-        // Inside an archive, F8/Shift+F8 rewrite the archive to drop the members (there's no Trash
-        // to move them to) — a distinct, non-undoable path handled by `PanelViewController+ArchiveWrite`.
-        if isArchive {
+        // Inside a top-level archive, F8/Shift+F8 rewrite the archive to drop the members (there's
+        // no Trash to move them to) — a distinct, non-undoable path handled by `+ArchiveWrite`. A
+        // nested archive is read-only (`isWritableArchive`), so it falls through to the no-op below.
+        if isWritableArchive {
             beginArchiveDelete()
             return
         }
@@ -331,14 +332,15 @@ extension PanelViewController: NSMenuItemValidation {
         case #selector(newFolder(_:)):
             return canWriteHere
         case #selector(moveSelectionToTrash(_:)), #selector(deleteSelectionPermanently(_:)):
-            // Inside an archive, delete rewrites it to drop the members (no Trash, not undoable) —
-            // enabled on a non-empty selection. A search-results pane stays read-only (deleting from
-            // it would leave stale rows behind).
-            if isArchive { return !selectionTargets().isEmpty }
+            // Inside a top-level archive, delete rewrites it to drop the members (no Trash, not
+            // undoable) — enabled on a non-empty selection. A search-results pane and a read-only
+            // nested archive stay read-only (both fail the `!isVirtualDirectory` fallthrough).
+            if isWritableArchive { return !selectionTargets().isEmpty }
             return !isVirtualDirectory && !selectionTargets().isEmpty
         case #selector(paste(_:)):
-            // ⌘V pastes into a real writable folder, or *adds into* a browsed archive (PLAN.md §M4).
-            return (canWriteHere || isArchive) && clipboardHasFiles()
+            // ⌘V pastes into a real writable folder, or *adds into* a writable browsed archive
+            // (PLAN.md §M4 — a nested archive is read-only, so it's excluded).
+            return (canWriteHere || isWritableArchive) && clipboardHasFiles()
         case #selector(pasteAndMoveFromClipboard(_:)):
             // ⌥⌘V has no standard selector, so it reaches the pane even mid text-edit — step it
             // aside for a field editor, else gate it like Paste.

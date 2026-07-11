@@ -59,7 +59,8 @@ extension PanelViewController {
     private func performPaste(kind: FileOperation.Kind) {
         // ⌘V into a browsed archive adds the pasteboard files into it (PLAN.md §M4). Copy only:
         // ⌥⌘V move-paste into an archive isn't supported this pass (gated in `validateMenuItem`).
-        if isArchive {
+        // A nested archive is read-only (`isWritableArchive`), so it falls through to the no-op.
+        if isWritableArchive {
             if kind == .copy { pasteIntoArchive() }
             return
         }

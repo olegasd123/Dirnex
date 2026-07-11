@@ -1202,9 +1202,9 @@ and two presets.
 
 Goal: cash in the VFS abstraction from M0.
 
-- [~] `ArchiveBackend`: **browse zip/tar/tgz/7z as folders ✅**, **F5 copy-out ✅**, **Quick Look /
-      Quick View inside ✅**, **pack via ⌥F5 ✅** (via `bsdtar`, not libarchive — the C-module gate
-      stays deferred); nested archives still to come
+- [x] `ArchiveBackend`: **browse zip/tar/tgz/7z as folders ✅**, **F5 copy-out ✅**, **Quick Look /
+      Quick View inside ✅**, **pack via ⌥F5 ✅**, **nested archives (browse/extract a zip inside a
+      zip) ✅** (via `bsdtar`, not libarchive — the C-module gate stays deferred)
 - [x] Archive writes: **delete inside zip via F8 ✅ + add-into via paste ⌘V / F5 / F6 ✅**
       (extract → edit the tree → repack → atomic swap; rewrite strategy, journal-safe temp file)
 - [x] Multi-rename tool: pattern tokens ([N] name, [C] counter, [E] ext, date tokens),
@@ -1658,6 +1658,53 @@ libarchive C-module).
   dir empty after each op. Fixtures deleted. NEXT M4: nested archives (browse/extract a zip inside a
   zip), saved searches as places-strip virtual folders, deferred search niceties (tag chip,
   content-grep fallback); archive drag-drop-in and ⌥⌘V move-paste-in are small follow-ons on this engine.
+
+Progress (2026-07-12, M4 pass 10): **nested archives — browse/extract a zip inside a zip** landed —
+the last open ArchiveBackend gesture (**that M4 line is now `[x]`**, so `ArchiveBackend` is complete).
+Entering a browsable archive *member* while already inside an archive extracts that member to a temp
+file (with `bsdtar`, via `ArchiveExtractor` — the same path as Quick Look inside and F5 copy-out) and
+browses *that* file's virtual contents; "go up" walks back out to the enclosing archive's inner
+directory (landing on the member), the breadcrumb spans the whole chain, and F5 copy-out works from
+any depth. A nested mount is the extracted temp copy, so it's **read-only** this pass (writing back
+through nesting is a later item), matching the app's capability-degradation pattern.
+- **The crux — provenance, not a new backend id.** An inner archive has no on-disk path of its own,
+  and the `archive:…` backend id encodes an *on-disk* path, so entering one first extracts the member
+  to a temp file and mounts *that* path (the existing `CompositeBackend` lazily mounts it like any
+  archive — no routing change). What's new is remembering where each temp mount came from, so "go up"
+  returns to the *outer* archive's inner directory (onto the member) instead of dumping the user into
+  the temp extraction dir, and the breadcrumb reads `outer.zip ▸ sub ▸ inner.zip ▸ …` rather than a
+  bare temp name. A temp→origin(`VFSPath`) map chains for arbitrary depth (each step moves to a
+  strictly-outer archive).
+- **Core (pure, tested).** NEW `DirnexCore/…/VFS/NestedArchiveMap.swift` = a `Sendable` value type:
+  `record(mount,origin)`, `origin(ofMountOnDiskPath:)` (the up-nav anchor + the nested-vs-top-level
+  test), `mountOnDiskPath(forOrigin:)` (reuse a prior extraction instead of re-spawning `bsdtar`), and
+  `ancestry(ofMountOnDiskPath:)` (the enclosing members outermost-first for the breadcrumb — walks the
+  temp→origin→enclosing-archive chain and reverses). +5 `NestedArchiveMapTests` → **325 core tests**,
+  swiftformat/swiftlint-strict clean.
+- **App (I/O + wiring).** NEW `NestedArchiveRegistry.swift` (`@MainActor` wrapper: the pure map + the
+  FileManager side — recording, and confirming a reused temp still exists), owned by
+  `BrowserWindowController` and shared across both panes via `PanelHost` (mirroring `ArchivePreviewCache`).
+  NEW `PanelViewController+NestedArchive.swift`: `beginNestedArchiveEntry(for:)` extracts the member
+  off-main and navigates in (reusing an extant extraction); `isNestedArchive`/`isWritableArchive` (the
+  read-only gate); `archiveBreadcrumbAncestry()`. Wiring: `openCurrentEntry` routes a browsable-archive
+  member *inside* an archive into the nested entry; `goUpWithinArchive` returns to the origin's parent
+  focused on the origin when the mount has one; `PathBarView.rebuildArchiveLabel` takes the ancestry and
+  renders the full chain; the write gates (F8 delete, F5/F6 add-into, ⌘V paste-into) switch from
+  `isArchive` to `isWritableArchive`, and `beginTransfer` now guards a *local* destination so an F5
+  toward a read-only nested archive (or a search pane) reports "can't copy here" instead of erroring
+  deep in the queue. App `xcodebuild build` green.
+- **Verified live via computer-use** (fresh Debug build after a full quit): browsed `outer.zip` →
+  entered its `inner.zip` (breadcrumb `📦 outer.zip ▸ inner.zip`, inner `docs`/`hello.txt` shown); `..`
+  returned to `outer.zip` root with the cursor **on `inner.zip`**. The **doubly-nested**
+  `outer2.zip ▸ sub ▸ mid.zip ▸ inner.zip` browsed all four levels (full breadcrumb) and `..` from
+  `inner.zip` landed at `mid.zip` root onto `inner.zip`. The File menu inside a nested archive showed
+  **Copy to Other Panel enabled** but **Move to Trash / Delete Immediately / Pack / Rename / New Folder
+  greyed** (read-only). **F5 copy-out** of `mid-note.txt` from the doubly-nested `mid.zip` landed
+  byte-exact ("MID level") on real disk. Zero `.dirnex-rewrite-*` litter (reads never rewrite); the
+  only temp is `DirnexExtract/` (purged at launch, like previews and F5). Fixtures deleted; app left on
+  Home. NEXT M4: saved searches as places-strip virtual folders, deferred search niceties (tag chip,
+  content-grep fallback); archive drag-drop-in and ⌥⌘V move-paste-in remain small follow-ons, and
+  writing back through nesting (edit an inner archive, re-embed it) is the natural next archive-write item.
 
 ### M5 — Network and sync (M)
 

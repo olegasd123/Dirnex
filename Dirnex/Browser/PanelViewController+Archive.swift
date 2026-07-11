@@ -28,14 +28,20 @@ extension PanelViewController {
     }
 
     /// Walk up one level from inside an archive: to the parent inner directory, or — at the
-    /// archive root — out to the on-disk folder containing the archive, landing the cursor on
-    /// the archive file we came from. Returns `false` if this isn't an archive path.
+    /// archive root — out to wherever this archive came from, landing the cursor on the entry we
+    /// came from. For a nested archive that's the outer archive's inner directory (§M4 "nested
+    /// archives"); for a top-level archive it's the on-disk folder containing the archive file.
+    /// Returns `false` if this isn't an archive path.
     func goUpWithinArchive() -> Bool {
         guard let archivePath = panel.path.backend.archivePath else { return false }
         if let parent = panel.parentPath, !panel.path.isRoot {
             navigate(to: parent, focus: panel.path)
+        } else if let origin = host?.nestedArchiveRegistry.origin(ofMountAt: archivePath),
+                  let container = origin.parent {
+            // A nested mount — go back to the outer archive's inner directory, onto the member.
+            navigate(to: container, focus: origin)
         } else {
-            // At the archive root — exit to the containing local directory.
+            // A top-level archive — exit to the containing local directory.
             let archiveFile = VFSPath.local(archivePath)
             guard let container = archiveFile.parent else { return true }
             navigate(to: container, focus: archiveFile)

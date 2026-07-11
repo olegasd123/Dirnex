@@ -118,11 +118,11 @@ final class PathBarView: NSView, NSTextFieldDelegate {
     /// background refresh that re-reports the same location never disturbs an open Cmd+L
     /// edit field. A genuine change rebuilds, dropping out of edit mode first if it was
     /// active (the location moved underneath the editor).
-    func setPath(_ path: VFSPath) {
+    func setPath(_ path: VFSPath, archiveAncestry: [VFSPath] = []) {
         guard self.path != path else { return }
         self.path = path
         if isEditing { endEditing(restoreFocus: false) }
-        rebuildContents(for: path)
+        rebuildContents(for: path, archiveAncestry: archiveAncestry)
     }
 
     private func rebuildCrumbs(for path: VFSPath) {
@@ -364,11 +364,11 @@ extension PathBarView {
     /// Dispatch the location render by backend: real breadcrumbs for a local directory, a
     /// non-clickable label for a browsed archive or a search-results snapshot. In the
     /// extension so the class body stays under SwiftLint's `type_body_length`.
-    func rebuildContents(for path: VFSPath) {
+    func rebuildContents(for path: VFSPath, archiveAncestry: [VFSPath] = []) {
         if path.backend == .local {
             rebuildCrumbs(for: path)
         } else if path.backend.isArchive {
-            rebuildArchiveLabel(for: path)
+            rebuildArchiveLabel(for: path, ancestry: archiveAncestry)
         } else {
             rebuildVirtualLabel(for: path)
         }
@@ -383,11 +383,26 @@ extension PathBarView {
     /// Render a browsed archive as a non-clickable "📦  pkg.zip ▸ folder ▸ nested" trail — the
     /// archive's own name (from its backend id) plus the inner path. Non-clickable like the
     /// search label; the `..` row and Backspace walk back up (and out).
-    func rebuildArchiveLabel(for path: VFSPath) {
-        let archiveName = (path.backend.archivePath as NSString?)?.lastPathComponent ?? "Archive"
-        let inner = path.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
-        let trail = ([archiveName] + inner).joined(separator: "  ▸  ")
-        installVirtualLabel("📦  \(trail)")
+    ///
+    /// For a nested archive (§M4), `ancestry` carries the enclosing members outermost-first, so
+    /// the trail spans the whole chain — "outer.zip ▸ sub ▸ inner.zip ▸ …" — instead of showing
+    /// only the innermost archive's (temp) name. Empty for a top-level archive.
+    func rebuildArchiveLabel(for path: VFSPath, ancestry: [VFSPath] = []) {
+        func components(_ innerPath: String) -> [String] {
+            innerPath.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        }
+        var segments: [String] = []
+        if let outermost = ancestry.first,
+           let outerName = (outermost.backend.archivePath as NSString?)?.lastPathComponent {
+            // The outermost archive's own name, then each ancestor member's inner path — every
+            // ancestor's last component is the next inner archive, so the chain reads naturally.
+            segments.append(outerName)
+            segments += ancestry.flatMap { components($0.path) }
+        } else {
+            segments.append((path.backend.archivePath as NSString?)?.lastPathComponent ?? "Archive")
+        }
+        segments += components(path.path)
+        installVirtualLabel("📦  \(segments.joined(separator: "  ▸  "))")
     }
 
     /// Shared shell for a single non-clickable path-bar label (search results or an archive):

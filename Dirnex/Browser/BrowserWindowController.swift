@@ -30,6 +30,11 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     /// archive), shared across both panes and both surfaces (PLAN.md §M4 "Quick Look inside").
     let archivePreviewCache = ArchivePreviewCache()
 
+    /// Where each nested-archive mount was extracted from, shared across both panes so walking out
+    /// of and breadcrumbing an archive-inside-an-archive resolves its outer chain (PLAN.md §M4
+    /// "nested archives").
+    let nestedArchiveRegistry = NestedArchiveRegistry()
+
     /// Local key monitor that lets Esc close Quick View no matter where focus sits in this
     /// window (e.g. after the user clicked into the preview). A raw-event monitor rather than a
     /// `cancelOperation:` override because a focused `PDFView` may never translate the Esc key
