@@ -1205,7 +1205,8 @@ Goal: cash in the VFS abstraction from M0.
 - [~] `ArchiveBackend`: **browse zip/tar/tgz/7z as folders ✅**, **F5 copy-out ✅**, **Quick Look /
       Quick View inside ✅**, **pack via ⌥F5 ✅** (via `bsdtar`, not libarchive — the C-module gate
       stays deferred); nested archives still to come
-- [ ] Archive writes: add/delete inside zip (rewrite strategy, journal-safe temp file)
+- [~] Archive writes: **delete inside zip via F8 ✅** (extract → drop members → repack → atomic
+      swap; rewrite strategy, journal-safe temp file); add-into-archive still to come
 - [x] Multi-rename tool: pattern tokens ([N] name, [C] counter, [E] ext, date tokens),
       regex find/replace, case transforms, live preview table, applies as one undoable batch
 - [x] Search (Alt+F7 / palette): mdfind-backed name+content search with filter chips
@@ -1552,6 +1553,60 @@ default destination as F5. Taken via `bsdtar -a -c` (not `ditto`), which handles
   it writes the archive directly, so it's its own `ArchivePacker` path with its own overwrite guard, mirroring
   how extraction went temp-extract-then-copy. NEXT M4: archive **writes** (add/delete inside a zip via
   rewrite-to-temp), nested archives, saved searches in the places strip, deferred search niceties.
+
+Progress (2026-07-11, M4 pass 8): **archive delete inside (F8)** landed — the first half of "Archive
+writes: add/delete inside zip", the last big ArchiveBackend gesture. Mark members inside a browsed
+archive, F8 (or Shift+F8, or ⌘⌦), confirm, and they're removed from the archive on disk — a whole
+directory drops its subtree, a glob-metachar name (`weird[1].txt`) or a spaced name (`release
+notes.txt`) deletes exactly, and the pane re-lists the rewritten archive in place. The archive stays
+`bsdtar`-driven (no libarchive C-module).
+- **Why extract-and-repack, not `bsdtar --exclude @archive` (the design crux, validated live against
+  bsdtar 3.5.3 / libarchive 3.7.4).** The obvious "re-stream the archive minus some members" trick
+  can't delete an *exact* path: libarchive matches an exclude pattern against any **trailing subpath**
+  and offers no anchoring — deleting `docs/api/x.md` *also* silently drops `outer/docs/api/x.md`, and a
+  bare root `readme.txt` hits `readme.txt` at every depth (a leading `./` or `/` doesn't anchor; a
+  leading `/` matches nothing). So the archive is instead **extracted whole** into a scratch dir, the
+  targets removed there by their **real filesystem paths** (exact — a plain `removeItem`, zero glob
+  ambiguity), and the surviving tree **repacked** into a fresh archive that **atomically replaces** the
+  original. Costs a disk round-trip, but it's correct for every format uniformly and — the plan's
+  "journal-safe temp file" — never touches the original until the repack fully succeeds.
+- **Core (pure, tested).** `DirnexCore/…/VFS/ArchiveMutation.swift` = the pure argv half, mirroring
+  `ArchiveExtraction`/`ArchivePacking`: `extractAllArguments` (`-x -f <arc> -C <work>`, no member list →
+  everything out), `repackAllArguments` (`-a -c … -f <new> -C <work> .` — packs `.` so a delete-all
+  still repacks a valid *empty* archive rather than failing on an empty arg list), `workingLocation`
+  (the exact extracted on-disk path of an inner member — unescaped, since deletion is by literal path),
+  and `temporaryArchiveName(forArchiveNamed:token:)` (a hidden `.dirnex-rewrite-<uuid>-<name>` sibling
+  that keeps the original's **full** suffix so `bsdtar -a` re-infers the same container). GOTCHA
+  (bsdtar `-a` format inference): `-a` reads `.zip`/`.7z`/`.tar`/`.tgz`/`.tar.*`/`.tbz*`/`.txz`/
+  `.tar.zst` right but treats the zip-family aliases **`.jar`/`.cbz` as tar** — which would corrupt
+  them on repack — so `formatOverrideArguments` adds an explicit `--format zip` for those (verified
+  live). +5 `ArchiveMutationTests` → **318 core tests**, swiftformat/swiftlint-strict clean.
+- **App (I/O boundary + wiring).** `Dirnex/Browser/ArchiveWriter.swift` (mirrors `ArchivePacker`/
+  `ArchiveExtractor`) spawns the two `bsdtar` runs off-main into a `DirnexArchiveWrite/<uuid>/` scratch
+  dir (`defer`-cleaned), repacks into the hidden sibling **in the archive's own directory** (same volume
+  → the swap is atomic), then `FileManager.replaceItemAt` swaps it over the original and cleans a partial
+  on any failure — the original is untouched unless the whole rewrite succeeds. `PanelViewController+
+  ArchiveWrite.swift`'s `beginArchiveDelete()` gathers the marked/cursor members, raises a **critical**
+  confirm ("Delete N items from “pkg.zip”? This rewrites the archive and can’t be undone."), runs the
+  rewrite, then `(backend as? CompositeBackend)?.invalidateMountedArchive(at:)` drops the stale TOC and
+  `refreshArchiveDirectory()` re-lists the current inner dir in place (its own archive-aware re-list,
+  since the local-only `refreshCurrentDirectory` skips virtual panes; retreats to the archive root if the
+  inner dir itself was deleted). Wiring: `CompositeBackend.invalidateMountedArchive(at:)` (new); F8/⇧F8/
+  ⌘⌦ route via `deleteSelection` → `if isArchive { beginArchiveDelete() }` (before the `!isVirtualDirectory`
+  guard); `validateMutatingItem` enables both delete items inside an archive (`isArchive` → non-empty
+  selection); `AppDelegate` adds `ArchiveWriter.purgeTemporaries()` beside the extractor's. Archive delete
+  is **not undoable** (a rewrite, like a permanent delete) — the confirm says so; nothing is journaled.
+  App `xcodebuild build` green, new methods confirmed in the debug **dylib**.
+- **Verified live via computer-use** (fresh Debug build after a full quit): File menu inside an archive
+  showed **Move to Trash / Delete Immediately… enabled** with Move/Pack/Rename/Multi-Rename/New Folder
+  still greyed. In `pkg.zip` marked a dir (`docs`) + a spaced name + `weird[1].txt` → "Delete 3 items
+  from “pkg.zip”?" → on-disk the three gone, `images`/`alpha.txt`/`readme.txt` byte-exact, archive VALID,
+  **zero `.dirnex-rewrite-*` litter**, scratch dir cleaned. The **over-match safety case** (`dup.zip` with
+  `a/notes.txt` AND `b/notes.txt`): deleting `a/notes.txt` (⌘⌦, single-item confirm) left `b/notes.txt`
+  intact with content "B" — the exact case `--exclude` would have corrupted. Delete-all (mark `a`+`b` at
+  root) → a valid **empty** archive that still browses (0 items + `..`). NEXT M4: archive **add-into**
+  (paste / F5 / F6 *into* an archive pane — the extract-repack engine is symmetric), nested archives,
+  saved searches in the places strip, deferred search niceties.
 
 ### M5 — Network and sync (M)
 

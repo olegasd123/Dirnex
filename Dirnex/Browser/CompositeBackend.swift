@@ -9,8 +9,8 @@ import Foundation
 /// call site — listing, stat, sizing, copy/move, the shared queue — working unchanged; only
 /// the routing is new. An archive is mounted on its first list/stat by spawning `bsdtar`
 /// off-main (`ArchiveMounter`, the non-hermetic I/O boundary like `SpotlightSearchRunner`)
-/// and cached, so navigating within one never re-reads it. Archives are a static snapshot
-/// this pass, so the cache is never invalidated.
+/// and cached, so navigating within one never re-reads it. A rewrite that mutates an archive
+/// (F8 delete) drops its mount via `invalidateMountedArchive(at:)`, so the next list re-reads it.
 final class CompositeBackend: VFSBackend, @unchecked Sendable {
     let local: LocalBackend
     /// Mounted archives keyed by their on-disk path. Guarded by `lock` because listing runs
@@ -20,6 +20,16 @@ final class CompositeBackend: VFSBackend, @unchecked Sendable {
 
     init(local: LocalBackend) {
         self.local = local
+    }
+
+    /// Drop the cached mount for the archive at `archivePath`, so its next list/stat re-reads it
+    /// from disk with a fresh `bsdtar -tvf`. Called after a rewrite (F8 delete inside an archive)
+    /// changes the archive's contents, so the pane's re-list reflects the new table of contents
+    /// instead of the stale snapshot mounted before the write.
+    func invalidateMountedArchive(at archivePath: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        mounted[archivePath] = nil
     }
 
     /// The composite presents the local backend's identity and capabilities as its primary —

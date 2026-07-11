@@ -119,6 +119,12 @@ extension PanelViewController {
     }
 
     private func deleteSelection(permanent: Bool) {
+        // Inside an archive, F8/Shift+F8 rewrite the archive to drop the members (there's no Trash
+        // to move them to) — a distinct, non-undoable path handled by `PanelViewController+ArchiveWrite`.
+        if isArchive {
+            beginArchiveDelete()
+            return
+        }
         guard !isVirtualDirectory else { return } // a virtual listing is a read-only view
         let targets = selectionTargets()
         guard !targets.isEmpty else { return }
@@ -325,7 +331,10 @@ extension PanelViewController: NSMenuItemValidation {
         case #selector(newFolder(_:)):
             return canWriteHere
         case #selector(moveSelectionToTrash(_:)), #selector(deleteSelectionPermanently(_:)):
-            // A virtual listing is read-only; deleting from it would leave stale rows behind.
+            // Inside an archive, delete rewrites it to drop the members (no Trash, not undoable) —
+            // enabled on a non-empty selection. A search-results pane stays read-only (deleting from
+            // it would leave stale rows behind).
+            if isArchive { return !selectionTargets().isEmpty }
             return !isVirtualDirectory && !selectionTargets().isEmpty
         case #selector(paste(_:)):
             return canWriteHere && clipboardHasFiles()
