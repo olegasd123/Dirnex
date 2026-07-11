@@ -8,6 +8,13 @@ import DirnexCore
 /// visited directories. Walking the trail navigates without recording, so back/forward move
 /// through history rather than rewriting it (the browser model in `NavigationHistory`).
 extension PanelViewController {
+    // MARK: - Trail state (drives the titlebar Back/Forward buttons' enabled state)
+
+    /// Whether ⌘[ / the Back button can step this tab's trail back.
+    var canGoBack: Bool { tabs[activeTabIndex].history.canGoBack }
+    /// Whether ⌘] / the Forward button can step this tab's trail forward.
+    var canGoForward: Bool { tabs[activeTabIndex].history.canGoForward }
+
     // MARK: - Commands (dispatched to the focused pane via the responder chain)
 
     /// ⌘[ — step back to the previously visited directory in this tab's trail.

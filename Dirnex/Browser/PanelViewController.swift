@@ -58,6 +58,10 @@ protocol PanelHost: AnyObject {
     /// is the active pane.
     func panelCursorDidChange(_ panel: PanelViewController)
 
+    /// A pane's directory (or active tab) changed, so its back/forward trail may have. Lets the
+    /// window re-validate the titlebar Back/Forward buttons against the active pane's history.
+    func panelDidNavigate(_ panel: PanelViewController)
+
     /// The window's shared cache of archive members extracted for preview (Quick Look / Quick
     /// View inside a browsed archive). Owned by the window so both panes and both preview
     /// surfaces resolve the same extracted temp file.
@@ -338,6 +342,7 @@ final class PanelViewController: NSViewController {
                 refreshTabBar()
                 startWatching(path)
                 persistState()
+                host?.panelDidNavigate(self)
             } catch {
                 guard token == loadToken else { return }
                 presentLoadFailure(error, path: path)

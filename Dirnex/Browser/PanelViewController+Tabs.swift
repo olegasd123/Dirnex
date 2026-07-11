@@ -22,6 +22,8 @@ extension PanelViewController {
         } else {
             navigate(to: panel.path)
         }
+        // The switched-to tab owns its own back/forward trail — re-validate the titlebar buttons.
+        host?.panelDidNavigate(self)
     }
 
     /// Re-list the active tab's directory without moving the cursor or scroll position —

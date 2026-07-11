@@ -17,6 +17,9 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     /// both directions here, holding their ratio across any number of sidebar toggles.
     private let panesSplitViewController = NSSplitViewController()
     private weak var activePanel: PanelViewController?
+    /// The pane commands and the titlebar Back/Forward buttons act on: the focused one, falling
+    /// back to the left pane before either has taken focus.
+    var focusedPanel: PanelViewController { activePanel ?? leftPanel }
 
     /// Quick View (⌃Q) on/off for this window. When on, the inactive pane shows a live Quick
     /// Look preview of the file under the active pane's cursor (PLAN.md §M4). Owned here
@@ -66,6 +69,12 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     /// The trailing titlebar button that toggles hidden files app-wide (the ⇧⌘. command in
     /// button form). Held so `showHiddenDidChange` can restyle it to track the current state.
     let hiddenToggleButton = NSButton()
+
+    /// Leading titlebar back/forward buttons beside the sidebar toggle — the ⌘[ / ⌘] history
+    /// commands (View ▸ Go) in button form. Held so a navigation, tab switch, or focus change can
+    /// re-validate their enabled state against the active pane's trail (`updateNavigationButtons`).
+    let backButton = NSButton()
+    let forwardButton = NSButton()
 
     init() {
         // A composite backend so a pane can browse into an archive (`archive:…` paths route
@@ -166,6 +175,7 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         window.setFrameAutosaveName("MainWindow")
 
         installSidebarToggle()
+        installNavigationButtons()
         installHiddenToggle()
 
         queueBar.onPauseToggle = { [weak self] in self?.togglePause() }
@@ -337,6 +347,10 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         showActivePreview(from: panel)
     }
 
+    func panelDidNavigate(_ panel: PanelViewController) {
+        updateNavigationButtons()
+    }
+
     /// Reconcile both panes with the current Quick View state: the active pane shows its file
     /// list, the inactive pane previews the file under the active cursor. With the mode off,
     /// both panes drop any preview. Run on every toggle and whenever the active pane changes,
@@ -374,6 +388,8 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         activePanel?.isActivePanel = false
         panel.isActivePanel = true
         activePanel = panel
+        // The titlebar Back/Forward buttons follow whichever pane is focused (⌘[ / ⌘] do too).
+        updateNavigationButtons()
         // The preview always sits opposite the active pane, so a focus switch swaps which pane
         // shows its list and which shows the preview.
         if isQuickViewOn { updateQuickView() }
