@@ -20,13 +20,46 @@ extension PanelViewController {
         // so there's nothing to remove — hence only Copy routes here; `moveToOtherPane` stays gated.
         if isArchive {
             beginArchiveExtraction()
+        } else if let destPane = archiveDestinationPane() {
+            // F5 into an archive is add-into: copy the marked local items into the archive pane.
+            addSelectionToArchive(destPane, kind: .copy)
         } else {
             beginTransfer(kind: .copy)
         }
     }
 
     @objc func moveToOtherPane(_ sender: Any?) {
-        beginTransfer(kind: .move)
+        // F6 into an archive is add-into with move semantics: copy the items in, then trash the
+        // originals. Move-*out* of an archive stays gated (`moveToOtherPane` requires `!isArchive`).
+        if let destPane = archiveDestinationPane() {
+            addSelectionToArchive(destPane, kind: .move)
+        } else {
+            beginTransfer(kind: .move)
+        }
+    }
+
+    /// The other pane when it's an archive ready to receive an add — the F5/F6 add-into target.
+    /// `nil` (the normal transfer path) unless this pane holds real local files and the counterpart
+    /// is browsing an archive.
+    private func archiveDestinationPane() -> PanelViewController? {
+        guard !isArchive, let destPane = host?.panelCounterpart(of: self), destPane.isArchive else {
+            return nil
+        }
+        return destPane
+    }
+
+    /// Hand this pane's marked/cursor items to the archive pane as an add, consuming the marks the
+    /// moment the operation is queued (matching the local F5/F6 flow). For a copy the marks are
+    /// cleared here; for a move the source rows stay until `removeArchiveMoveOriginals` trashes them.
+    private func addSelectionToArchive(_ destPane: PanelViewController, kind: FileOperation.Kind) {
+        let sources = selectionTargets()
+        guard !sources.isEmpty else { return }
+        destPane.beginArchiveAdd(localSources: sources, kind: kind, from: self)
+        if kind == .copy {
+            panel.clearSelection()
+            reloadEverything()
+            focusTable()
+        }
     }
 
     // MARK: - Flow

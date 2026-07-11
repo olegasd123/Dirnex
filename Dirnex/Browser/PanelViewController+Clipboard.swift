@@ -57,6 +57,12 @@ extension PanelViewController {
     /// Either kind drops a source that would recurse into its own subtree (pasting a folder
     /// inside itself), mirroring the drop guard.
     private func performPaste(kind: FileOperation.Kind) {
+        // ⌘V into a browsed archive adds the pasteboard files into it (PLAN.md §M4). Copy only:
+        // ⌥⌘V move-paste into an archive isn't supported this pass (gated in `validateMenuItem`).
+        if isArchive {
+            if kind == .copy { pasteIntoArchive() }
+            return
+        }
         guard !isVirtualDirectory else { return } // no real destination directory here
         guard backend.capabilities.contains(.write) else { return }
         let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]

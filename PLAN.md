@@ -1205,8 +1205,8 @@ Goal: cash in the VFS abstraction from M0.
 - [~] `ArchiveBackend`: **browse zip/tar/tgz/7z as folders ✅**, **F5 copy-out ✅**, **Quick Look /
       Quick View inside ✅**, **pack via ⌥F5 ✅** (via `bsdtar`, not libarchive — the C-module gate
       stays deferred); nested archives still to come
-- [~] Archive writes: **delete inside zip via F8 ✅** (extract → drop members → repack → atomic
-      swap; rewrite strategy, journal-safe temp file); add-into-archive still to come
+- [x] Archive writes: **delete inside zip via F8 ✅ + add-into via paste ⌘V / F5 / F6 ✅**
+      (extract → edit the tree → repack → atomic swap; rewrite strategy, journal-safe temp file)
 - [x] Multi-rename tool: pattern tokens ([N] name, [C] counter, [E] ext, date tokens),
       regex find/replace, case transforms, live preview table, applies as one undoable batch
 - [x] Search (Alt+F7 / palette): mdfind-backed name+content search with filter chips
@@ -1607,6 +1607,57 @@ notes.txt`) deletes exactly, and the pane re-lists the rewritten archive in plac
   root) → a valid **empty** archive that still browses (0 items + `..`). NEXT M4: archive **add-into**
   (paste / F5 / F6 *into* an archive pane — the extract-repack engine is symmetric), nested archives,
   saved searches in the places strip, deferred search niceties.
+
+Progress (2026-07-11, M4 pass 9): **archive add-into (paste ⌘V / F5 / F6)** landed — the *second*
+half of "Archive writes: add/delete inside zip" (**that M4 line now `[x]`**), the symmetric inverse
+of pass 8's delete. Drop local files/folders onto a browsed archive pane and they're written into the
+archive on disk, at whatever inner directory the pane is showing; a same-named member is a *replace*
+(confirmed first); F6 additionally trashes the local originals. The archive stays `bsdtar`-driven (no
+libarchive C-module).
+- **Symmetric with delete — one rewrite, two edits.** Add and delete are the *same* extract-whole →
+  edit-the-scratch-tree → repack → atomic-swap flow (see pass 8 for why an in-place `bsdtar`
+  streaming edit can't target an exact path); only the edit differs. `ArchiveWriter` was refactored so
+  both go through one private `rewrite(archiveOnDiskPath:edit:)` that owns the scratch dir, the
+  extract-all, the repack into a hidden `.dirnex-rewrite-<uuid>-<name>` sibling, and the
+  `FileManager.replaceItemAt` swap (journal-safe: the original is untouched until the repack fully
+  succeeds). `delete`'s edit `removeItem`s members by `workingLocation`; the new `add`'s edit
+  `copyItem`s each source into `additionDirectory` (the inner dir mapped into the scratch tree),
+  replacing a same-named member first (so `copyItem` never fails on an existing dest).
+- **Core (pure, tested).** Two helpers added to `DirnexCore/…/VFS/ArchiveMutation.swift` (whose doc now
+  covers add *and* delete): `additionDirectory(forInnerDirectory:inWorkingDirectory:)` (`/docs` →
+  `<workDir>/docs`, archive root `/` → `<workDir>` itself — leading slash stripped like
+  `workingLocation`, but the root case handled explicitly so it never appends an empty component) and
+  `collidingNames(addingNames:existingNames:)` (the added names that already exist, matched
+  **case-insensitively** — the archive extracts onto case-insensitive APFS, so `README`/`readme`
+  collide on disk regardless of the archive's own case sensitivity — preserving the added spelling +
+  order so the confirm can list them). The extract/repack argv is reused verbatim from delete. +2
+  `ArchiveMutationTests` → **320 core tests**, swiftformat/swiftlint-strict clean.
+- **App (I/O + wiring).** `ArchiveWriter.add(localPaths:toInnerDirectory:ofArchiveAt:)` runs the shared
+  rewrite off-main. NEW `PanelViewController+ArchiveAdd.swift`: `beginArchiveAdd(localSources:kind:
+  from:)` (on the *destination* archive pane) lists the dest inner dir off-main for its real member
+  names, computes collisions, raises a **Replace/Cancel** warning only if any exist (a clean add needs
+  no confirm — matching how a local paste "just works"; the pack flow's precedent), then `runArchiveAdd`
+  invalidates the stale mount (`CompositeBackend.invalidateMountedArchive`) + `refreshArchiveDirectory`
+  re-lists in place. `pasteIntoArchive()` stats the pasteboard URLs into local sources and funnels in;
+  `removeArchiveMoveOriginals(_:)` (on the *source* pane) trashes the F6 originals afterward + journals
+  `UndoRecord.trash` — so the move's local half is undoable even though the archive rewrite isn't.
+  Entry points route in `PanelViewController+Copy` (F5/F6 → `archiveDestinationPane()` when the
+  counterpart `isArchive`, `.copy`/`.move`), `PanelViewController+Clipboard` (⌘V → `pasteIntoArchive`
+  when `isArchive`; ⌥⌘V move-paste into an archive is left out this pass), and `validateMenuItem`
+  (Paste enabled via `canWriteHere || isArchive`; Copy/Move-to-other-pane already allowed a local
+  source + any counterpart). App `xcodebuild build` green, new methods confirmed in the debug **dylib**.
+- **Verified live via computer-use** (fresh Debug build after a full quit; left pane = local `incoming/`,
+  right pane browsing `box.zip`). **F5 clean multi-add** (`pics/`+`alpha.txt`+`beta.dat`, no collision,
+  no confirm) → all three written byte-exact incl. the recursive `pics/one.png`, original `docs/guide.md`
+  + `readme.txt` intact, re-listed in place, **zero `.dirnex-rewrite-*` litter**. **F5 collision**
+  (`readme.txt`) → "Replace “readme.txt” in “box.zip”?" → Replace → archive `readme.txt` flipped to the
+  new content, still one copy (no dup), `docs` intact. **⌘V paste** (`gamma.txt`) → added byte-exact.
+  **F6 move** (`delta.txt`) → written into the archive AND the local original gone from `incoming/`
+  (Trash), Edit menu showed **"Undo Move to Trash ⌘Z"**, and the undo restored `incoming/delta.txt`
+  ("DELTA moved") while the archive kept its copy (rewrite not undoable, local trash half is). Scratch
+  dir empty after each op. Fixtures deleted. NEXT M4: nested archives (browse/extract a zip inside a
+  zip), saved searches as places-strip virtual folders, deferred search niceties (tag chip,
+  content-grep fallback); archive drag-drop-in and ⌥⌘V move-paste-in are small follow-ons on this engine.
 
 ### M5 — Network and sync (M)
 

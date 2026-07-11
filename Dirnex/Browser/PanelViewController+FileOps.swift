@@ -337,7 +337,8 @@ extension PanelViewController: NSMenuItemValidation {
             if isArchive { return !selectionTargets().isEmpty }
             return !isVirtualDirectory && !selectionTargets().isEmpty
         case #selector(paste(_:)):
-            return canWriteHere && clipboardHasFiles()
+            // ⌘V pastes into a real writable folder, or *adds into* a browsed archive (PLAN.md §M4).
+            return (canWriteHere || isArchive) && clipboardHasFiles()
         case #selector(pasteAndMoveFromClipboard(_:)):
             // ⌥⌘V has no standard selector, so it reaches the pane even mid text-edit — step it
             // aside for a field editor, else gate it like Paste.

@@ -1,21 +1,24 @@
 import Foundation
 
-/// Builds the `bsdtar` commands that rewrite an archive in place — the pure, tested half of
-/// TC's delete-inside-an-archive (F8, PLAN.md §M4 "Archive writes: add/delete inside zip —
-/// rewrite strategy, journal-safe temp file"). The app's `ArchiveWriter` runs the processes and
-/// does the atomic swap; this touches no disk and spawns nothing, so it stays unit-testable,
-/// mirroring how `ArchiveExtraction`/`ArchivePacking` pair with their app-side runners.
+/// Builds the `bsdtar` commands that rewrite an archive in place — the pure, tested half of TC's
+/// write-inside-an-archive gestures (PLAN.md §M4 "Archive writes: add/delete inside zip — rewrite
+/// strategy, journal-safe temp file"): both the F8 *delete* and the paste/F5/F6 *add-into*. The
+/// app's `ArchiveWriter` runs the processes and does the atomic swap; this touches no disk and
+/// spawns nothing, so it stays unit-testable, mirroring how `ArchiveExtraction`/`ArchivePacking`
+/// pair with their app-side runners.
 ///
-/// **Why a full extract-and-repack, not `bsdtar --exclude @archive`.** The obvious "re-stream the
-/// archive minus some members" trick (`bsdtar -c --exclude … @old`) can't delete an *exact* path:
-/// libarchive matches an exclude pattern against any trailing subpath, so deleting `docs/api/x.md`
-/// would *also* silently drop `outer/docs/api/x.md`, and a bare root name like `readme.txt` would
-/// hit `readme.txt` at every depth — there is no anchoring option (verified against bsdtar 3.5.3 /
-/// libarchive 3.7.4). Instead the archive is extracted whole into a scratch directory, the target
-/// members are removed there by their *real* filesystem paths (exact — no glob ambiguity), and the
-/// surviving tree is repacked into a fresh archive that atomically replaces the original. It costs a
-/// round-trip through disk, but it is correct for every format uniformly and never touches the
-/// original until the rewrite has fully succeeded.
+/// **Why a full extract-and-repack, not an in-place `bsdtar` streaming edit.** The obvious
+/// "re-stream the archive minus/plus some members" trick can't target an *exact* path: for delete,
+/// `bsdtar -c --exclude … @old` matches the exclude pattern against any trailing subpath, so
+/// removing `docs/api/x.md` would *also* silently drop `outer/docs/api/x.md`, and a bare root name
+/// like `readme.txt` would hit `readme.txt` at every depth — there is no anchoring option (verified
+/// against bsdtar 3.5.3 / libarchive 3.7.4). So the archive is instead extracted whole into a
+/// scratch directory, the tree is edited there by *real* filesystem paths (a member removed, or new
+/// items copied in — exact, no glob ambiguity), and the result is repacked into a fresh archive that
+/// atomically replaces the original. It costs a round-trip through disk, but it is correct for every
+/// format uniformly and never touches the original until the rewrite has fully succeeded. Add and
+/// delete are symmetric: both extract-all → edit the scratch tree → `repackAll` → swap; only the
+/// edit differs (`workingLocation` names what to remove, `additionDirectory` names where to copy in).
 public enum ArchiveMutation {
     /// The `bsdtar` argv that extracts the *entire* archive at `archiveOnDiskPath` into
     /// `workingDirectory` — no member list, so everything comes out and can be repacked minus the
@@ -56,6 +59,34 @@ public enum ArchiveMutation {
     ) -> String {
         let relative = String(innerPath.drop { $0 == "/" })
         return (workingDirectory as NSString).appendingPathComponent(relative)
+    }
+
+    /// The on-disk directory *within* the extracted working tree that newly added items are copied
+    /// into — the add-side mirror of `workingLocation`. An inner directory `/docs` maps to
+    /// `<workDir>/docs`; the archive root `/` maps to `<workDir>` itself (so a paste at the archive
+    /// root lands its items at top level). The leading slash is stripped the same way as
+    /// `workingLocation`, but the root case is handled explicitly so it never appends an empty
+    /// component. The app creates this directory if the add lands somewhere the archive didn't have.
+    public static func additionDirectory(
+        forInnerDirectory innerDirectory: String,
+        inWorkingDirectory workingDirectory: String
+    ) -> String {
+        let relative = String(innerDirectory.drop { $0 == "/" })
+        if relative.isEmpty { return workingDirectory }
+        return (workingDirectory as NSString).appendingPathComponent(relative)
+    }
+
+    /// The subset of `addingNames` that already exist among `existingNames`, compared
+    /// case-insensitively (APFS is case-insensitive by default, and the archive is extracted onto
+    /// APFS, so `README` and `readme` collide on disk regardless of the archive's own case
+    /// sensitivity). The original order and case of `addingNames` are preserved, so the app can list
+    /// the exact would-be-overwritten names in its Replace confirmation before rewriting anything.
+    public static func collidingNames(
+        addingNames: [String],
+        existingNames: [String]
+    ) -> [String] {
+        let existingLower = Set(existingNames.map { $0.lowercased() })
+        return addingNames.filter { existingLower.contains($0.lowercased()) }
     }
 
     /// A hidden sibling filename for the rewritten archive, meant to live in the *same* directory as

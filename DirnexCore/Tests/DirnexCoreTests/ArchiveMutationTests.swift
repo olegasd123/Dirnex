@@ -67,6 +67,43 @@ struct ArchiveMutationTests {
         )
     }
 
+    @Test("additionDirectory maps an inner directory into the extracted working tree")
+    func additionDirectory() {
+        #expect(
+            ArchiveMutation.additionDirectory(
+                forInnerDirectory: "/docs",
+                inWorkingDirectory: "/tmp/w"
+            ) == "/tmp/w/docs"
+        )
+        // A nested inner directory keeps its full path under the working dir.
+        #expect(
+            ArchiveMutation.additionDirectory(
+                forInnerDirectory: "/a/b",
+                inWorkingDirectory: "/tmp/w"
+            ) == "/tmp/w/a/b"
+        )
+        // The archive root adds straight into the working directory itself — never an empty
+        // trailing component.
+        #expect(
+            ArchiveMutation.additionDirectory(forInnerDirectory: "/", inWorkingDirectory: "/tmp/w")
+                == "/tmp/w"
+        )
+    }
+
+    @Test("collidingNames finds same-name members case-insensitively, preserving added order/case")
+    func collidingNames() {
+        let collisions = ArchiveMutation.collidingNames(
+            addingNames: ["Readme.txt", "new.dat", "IMG.PNG"],
+            existingNames: ["readme.txt", "img.png", "other"]
+        )
+        // Case-insensitive match, but the *added* spelling and order are what's reported.
+        #expect(collisions == ["Readme.txt", "IMG.PNG"])
+        // No overlap → nothing to replace, so a clean add needs no confirmation.
+        #expect(
+            ArchiveMutation.collidingNames(addingNames: ["a", "b"], existingNames: ["c"]).isEmpty
+        )
+    }
+
     @Test("temporary archive name is a hidden sibling that keeps the full suffix")
     func temporaryArchiveName() {
         #expect(
