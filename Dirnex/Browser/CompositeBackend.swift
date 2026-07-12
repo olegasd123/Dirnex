@@ -32,11 +32,22 @@ final class CompositeBackend: VFSBackend, @unchecked Sendable {
         mounted[archivePath] = nil
     }
 
-    /// The composite presents the local backend's identity and capabilities as its primary —
-    /// per-path capability degradation for a virtual location is enforced at the panel (an
-    /// archive pane greys its mutations), matching the search-results pane.
+    /// The composite presents the local backend's identity and capabilities as its primary,
+    /// but `capabilities(for:)` degrades per path so the panel greys operations off the
+    /// *current* location's backend (PLAN.md §M5 "capability degradation").
     var id: VFSBackendID { local.id }
     var capabilities: VFSCapabilities { local.capabilities }
+
+    /// The capabilities of the backend that owns `path`: the full local set on disk, `.read`
+    /// for a virtual location (an `archive:…` browse or a search-results listing). A browsed
+    /// archive is read-only *through the VFS primitives* — its writes (F8 delete, add-into) go
+    /// through the app's separate rewrite path, gated by `isWritableArchive`, not these caps —
+    /// so reporting `.read` here correctly greys the VFS-driven mutations (New Folder, rename,
+    /// VFS delete) on any virtual pane. Cheap by design (no archive mount), like
+    /// `volumeIdentifier(for:)`.
+    func capabilities(for path: VFSPath) -> VFSCapabilities {
+        path.backend == .local ? local.capabilities : .read
+    }
 
     func listDirectory(at path: VFSPath) throws -> [FileEntry] {
         try backend(for: path).listDirectory(at: path)

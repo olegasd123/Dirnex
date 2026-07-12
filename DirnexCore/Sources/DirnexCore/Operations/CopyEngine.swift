@@ -228,8 +228,13 @@ private final class CopyRun {
             return
         }
 
-        // Copy: try a copy-on-write clone of the whole item first (instant same-volume).
-        if entry.kind != .symlink, try backend.cloneItem(at: entry.path, to: target) {
+        // Copy: try a copy-on-write clone of the whole item first (instant same-volume) — but
+        // only where the source's backend advertises cloning; a backend without `.clone` (SFTP)
+        // goes straight to the chunked path instead of a doomed clone attempt (PLAN.md §M5
+        // "no clone → always chunked").
+        if entry.kind != .symlink,
+           backend.capabilities(for: entry.path).contains(.clone),
+           try backend.cloneItem(at: entry.path, to: target) {
             completedBytes += bytes
             return
         }

@@ -19,6 +19,28 @@ public struct VFSCapabilities: OptionSet, Sendable, Hashable {
     public static let rename = VFSCapabilities(rawValue: 1 << 4)
     /// Live change notifications (FSEvents and friends).
     public static let watch = VFSCapabilities(rawValue: 1 << 5)
+
+    /// The delete path a panel should take on a backend with these capabilities — the
+    /// concrete "capability degradation" decision (PLAN.md §M5: "no Trash on SFTP →
+    /// explicit delete confirm"). A backend with a Trash gets the reversible move; a
+    /// writable but Trash-less backend (SFTP) falls back to a permanent delete the UI
+    /// gates behind a confirmation; a read-only location can't delete at all.
+    public var deleteStrategy: DeleteStrategy {
+        guard contains(.write) else { return .unsupported }
+        return contains(.trash) ? .trash : .permanent
+    }
+}
+
+/// How a delete request (F8) resolves against a backend's capabilities, so the panel can
+/// degrade gracefully instead of hard-coding "everything has a Trash" (PLAN.md §M5).
+public enum DeleteStrategy: Sendable, Equatable {
+    /// Move to the Trash — reversible, so it proceeds without a scary prompt (Finder-like).
+    case trash
+    /// No Trash here, but the backend can delete: a permanent delete the UI confirms first,
+    /// because it can't be undone.
+    case permanent
+    /// The backend can't delete at all — the operation is greyed out.
+    case unsupported
 }
 
 /// Errors a backend raises, normalized across backends so the UI can react without
@@ -60,6 +82,14 @@ public enum VFSError: Error, Sendable, Equatable {
 public protocol VFSBackend: Sendable {
     var id: VFSBackendID { get }
     var capabilities: VFSCapabilities { get }
+
+    /// The capabilities that apply to `path` specifically. Single-backend implementations
+    /// return their backend-wide `capabilities` (the default), but a *routing* backend that
+    /// composes several concrete backends (the app's `CompositeBackend`) overrides this to
+    /// report the capabilities of whichever backend owns `path` — so a panel greys out
+    /// operations per the *current* location's backend, not the composite's primary
+    /// (PLAN.md §M5 "panels grey out unsupported ops per backend").
+    func capabilities(for path: VFSPath) -> VFSCapabilities
 
     /// List the immediate children of `path` (excluding `.` and `..`), unsorted.
     /// Throws `VFSError.notADirectory` if `path` is a file.
@@ -141,6 +171,10 @@ public protocol VFSBackend: Sendable {
 }
 
 public extension VFSBackend {
+    func capabilities(for path: VFSPath) -> VFSCapabilities {
+        capabilities // a single-backend implementation is uniform across all its paths
+    }
+
     func createDirectory(at path: VFSPath) throws {
         throw VFSError.unsupported("This location doesn’t support creating folders.")
     }

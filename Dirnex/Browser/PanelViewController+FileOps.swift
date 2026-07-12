@@ -121,15 +121,21 @@ extension PanelViewController {
     private func deleteSelection(permanent: Bool) {
         // Inside a top-level archive, F8/Shift+F8 rewrite the archive to drop the members (there's
         // no Trash to move them to) — a distinct, non-undoable path handled by `+ArchiveWrite`. A
-        // nested archive is read-only (`isWritableArchive`), so it falls through to the no-op below.
+        // nested archive is read-only (`isWritableArchive`), so it falls through to the capability
+        // gate below.
         if isWritableArchive {
             beginArchiveDelete()
             return
         }
-        guard !isVirtualDirectory else { return } // a virtual listing is a read-only view
+        // Degrade off the owning backend's capabilities (PLAN.md §M5): a read-only location has
+        // nothing to delete; a backend without a Trash (SFTP) turns even F8 into a confirmed
+        // permanent delete rather than silently failing on a missing Trash.
+        let strategy = backend.capabilities(for: panel.path).deleteStrategy
+        guard strategy != .unsupported else { return }
         let targets = selectionTargets()
         guard !targets.isEmpty else { return }
-        if permanent {
+        let goesToTrash = !permanent && strategy == .trash
+        if !goesToTrash {
             confirmPermanentDelete(of: targets) { [weak self] in
                 self?.runDelete(targets, permanent: true)
             }
@@ -336,10 +342,12 @@ extension PanelViewController: NSMenuItemValidation {
             return canWriteHere
         case #selector(moveSelectionToTrash(_:)), #selector(deleteSelectionPermanently(_:)):
             // Inside a top-level archive, delete rewrites it to drop the members (no Trash, not
-            // undoable) — enabled on a non-empty selection. A search-results pane and a read-only
-            // nested archive stay read-only (both fail the `!isVirtualDirectory` fallthrough).
+            // undoable) — enabled on a non-empty selection. Elsewhere the owning backend must be
+            // able to delete at all: a search-results pane and a read-only nested archive report
+            // `.read`, whose `deleteStrategy` is `.unsupported`, so both stay disabled.
             if isWritableArchive { return !selectionTargets().isEmpty }
-            return !isVirtualDirectory && !selectionTargets().isEmpty
+            return backend.capabilities(for: panel.path).deleteStrategy != .unsupported
+                && !selectionTargets().isEmpty
         case #selector(paste(_:)):
             // ⌘V pastes into a real writable folder, or *adds into* a writable browsed archive
             // (PLAN.md §M4 — a nested archive is read-only, so it's excluded).
@@ -380,15 +388,17 @@ extension PanelViewController: NSMenuItemValidation {
         }
     }
 
-    /// This pane can create/paste into its directory — a real, writable location (never a
-    /// virtual pane: search results or a read-only archive).
+    /// This pane can create/paste into its directory — driven off the *owning* backend's
+    /// capabilities (PLAN.md §M5): a virtual pane (search results or a browsed archive) reports
+    /// `.read`, so `.write` is absent and the op greys out; a real disk (and a future writable
+    /// SFTP mount) reports `.write`.
     private var canWriteHere: Bool {
-        !isVirtualDirectory && backend.capabilities.contains(.write)
+        backend.capabilities(for: panel.path).contains(.write)
     }
 
-    /// This pane can rename an item in place — a real, rename-capable location.
+    /// This pane can rename an item in place — the owning backend advertises `.rename`.
     private var canRenameHere: Bool {
-        !isVirtualDirectory && backend.capabilities.contains(.rename)
+        backend.capabilities(for: panel.path).contains(.rename)
     }
 
     /// Boolean view toggles that carry a checkmark tracking their state and are always

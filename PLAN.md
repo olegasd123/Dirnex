@@ -238,8 +238,9 @@ _Shipped over 11 passes (2026-07-09 → 07-12); 341 core tests. Per-pass detail 
 
 - [ ] `SFTPBackend` (swift-nio-ssh or libssh2): connection manager, keychain-stored
       credentials, key auth; browse/copy through the standard queue with resume
-- [ ] Capability degradation: panels grey out unsupported ops per backend (no Trash on
-      SFTP → explicit delete confirm; no clone → always chunked)
+- [x] Capability degradation: panels grey out unsupported ops per backend ✅ (per-path
+      `capabilities(for:)`; no Trash → explicit permanent-delete confirm ✅; no clone →
+      always chunked ✅) — driven off the owning backend's caps, ready for SFTP to plug into
 - [x] Synchronize directories: two-panel diff view (left-only / right-only / differs /
       same ✅), by size+date or content ✅; selective sync actions through the queue ✅;
       per-row *direction override* ✅ (right-click a row → flip a copy the other way, or turn a
@@ -422,6 +423,51 @@ side-by-side in a real diff tool to show *how*. Core→app as always:
   quit it. **NEXT M5:** the `SFTPBackend` infra gate (swift-nio-ssh/libssh2 + live server);
   capability degradation. A Settings picker for the preferred diff tool (the `preferred(identifier:)`
   hook already exists) is optional polish.
+
+Progress (2026-07-12, M5 pass 5): **capability degradation** — the second remaining M5 item,
+**now `[x]`**. Panels now decide what they offer off the *owning backend's* capabilities rather
+than ad-hoc `path.backend == .local` / `isVirtualDirectory` checks, and the delete key degrades to
+a confirmed permanent delete on a Trash-less backend — the exact mechanism `SFTPBackend` plugs into
+(SFTP has no Trash, no APFS clone). Core→app as always; no SFTP needed to prove it (a partial-
+capability test double stands in). Pieces:
+- **Core** (pure, tested): `VFSBackend.capabilities(for path:) -> VFSCapabilities` added to the
+  protocol with a **default returning the backend-wide `capabilities`** — a single-backend
+  implementation is uniform, but a *routing* backend (the app's `CompositeBackend`) overrides it to
+  report the caps of whichever concrete backend owns `path`. New `DeleteStrategy` enum (`trash /
+  permanent / unsupported`) + `VFSCapabilities.deleteStrategy` computed property encode the
+  degradation decision: `.write` absent → `.unsupported`; writable but no `.trash` → `.permanent`
+  (SFTP); has `.trash` → `.trash`. `CopyEngine` now guards its clone attempt on
+  `backend.capabilities(for: entry.path).contains(.clone)` so a no-clone backend goes **straight to
+  chunked** instead of a doomed clone (`.clone` present on Local → unchanged). +7 tests → **390 core
+  tests** (was 383): `deleteStrategy` mapping, the `capabilities(for:)` default, a `RoutingStub`
+  proving per-path degradation, and a `PartialCapabilityBackend` (a `LocalBackend` decorator with a
+  configurable capability set + a clone-call counter) proving CopyEngine skips the clone when
+  `.clone` is absent and still attempts it when present. GOTCHA: swiftlint `empty_count` fired on the
+  counter's `.count == 0` — renamed the property to `calls`.
+- **App**: `CompositeBackend.capabilities(for:)` routes per path — `local.capabilities` for `.local`,
+  `.read` for any virtual location (archive/search), cheap by design (no archive mount, like
+  `volumeIdentifier(for:)`). `canWriteHere`/`canRenameHere` now read `backend.capabilities(for:
+  panel.path).contains(.write/.rename)` (drops the `!isVirtualDirectory` prefix — a virtual pane
+  already reports `.read`, and this is correct for a future writable-non-local SFTP where
+  `isVirtualDirectory` would wrongly fire). `deleteSelection`/`validateMutatingItem` now branch on
+  `capabilities(for:).deleteStrategy`: `.unsupported` → no-op/greyed, `.trash` on F8 → Trash (with the
+  existing optional confirm), else (Shift+F8, or F8 on a Trash-less backend) → the confirmed
+  permanent-delete path. The **top-level-archive rewrite delete** (`isWritableArchive` →
+  `beginArchiveDelete`) still short-circuits *first* — archive writes are the app's separate
+  rewrite path, not VFS caps. Left the watch / archive-extract·pack·drop guards on their intentional
+  `path.backend == .local` gates (local-only machinery; SFTP-destination is a later SFTP pass — not
+  refactored speculatively). New app test `DirnexTests/CompositeBackendTests.swift` (+3 → **7 app
+  tests**) asserts the crux: local path = full caps (`deleteStrategy == .trash`), archive + search
+  paths = `.read` (`deleteStrategy == .unsupported`). Behavior on today's backends is **identical by
+  construction** (traced each branch: local delete = Trash, archive/search delete greyed, New
+  Folder/rename greyed on virtual) — the change is degradation *infrastructure* + a behavior-
+  preserving refactor, so the visible payoff arrives with SFTP. `swift test` (390) + app
+  `xcodebuild test` (7) green, swiftformat/swiftlint-strict clean, app launches + quits cleanly.
+  **NEXT M5 (last item):** the `SFTPBackend` infra gate (swift-nio-ssh/libssh2 dependency + a live/
+  dockerized SSH server to test against) — with per-path capabilities + `DeleteStrategy` now in
+  place, an SFTP pane's grey-out and Trash-less delete-confirm work the moment the backend reports
+  `[.read, .write, .rename]` (no `.trash`/`.clone`). Optional polish: Settings picker for the
+  preferred diff tool.
 
 ### M6 — Mac-native power features (M)
 
