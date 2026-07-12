@@ -71,9 +71,12 @@ public struct MountedVolume: Sendable, Hashable, Identifiable {
 
     public var id: VFSPath { path }
 
-    /// Whether the sidebar offers an eject button — removable or ejectable media, but
-    /// never the root filesystem (you can't eject the disk you booted from).
-    public var canEject: Bool { !isRoot && (isEjectable || isRemovable) }
+    /// Whether the sidebar offers an eject button. Finder shows one for anything that isn't
+    /// built-in storage: removable media (USB stick, SD card), ejectable media (optical, disk
+    /// images), and plain external drives — which often report neither `isEjectable` nor
+    /// `isRemovable`, only `isInternal == false`, so that alone must qualify. Never the root
+    /// filesystem (you can't eject the disk you booted from).
+    public var canEject: Bool { !isRoot && (isEjectable || isRemovable || !isInternal) }
 }
 
 /// Enumerates the two kinds of sidebar destinations — standard user folders and

@@ -113,6 +113,12 @@ final class SidebarViewController: NSViewController {
         let selectedPath = selectedRow()?.path
 
         var rows: [Row] = []
+        // Saved searches lead the sidebar, above the standard Favorites/Volumes sections.
+        let savedSearches = SavedSearchStore.load().searches
+        if !savedSearches.isEmpty {
+            rows.append(.header("Searches"))
+            rows.append(contentsOf: savedSearches.map(Row.savedSearch))
+        }
         let favorites = SidebarLocations.favorites()
         if !favorites.isEmpty {
             rows.append(.header("Favorites"))
@@ -122,11 +128,6 @@ final class SidebarViewController: NSViewController {
         if !volumes.isEmpty {
             rows.append(.header("Volumes"))
             rows.append(contentsOf: volumes.map(Row.volume))
-        }
-        let savedSearches = SavedSearchStore.load().searches
-        if !savedSearches.isEmpty {
-            rows.append(.header("Searches"))
-            rows.append(contentsOf: savedSearches.map(Row.savedSearch))
         }
         self.rows = rows
         tableView.reloadData()
@@ -244,6 +245,7 @@ extension SidebarViewController: NSTableViewDelegate {
                 tooltip: savedSearchTooltip(search)
             )
             cell.onEject = nil
+            cell.onDelete = { [weak self] in self?.confirmDeleteSavedSearch(named: search.name) }
             return cell
         }
     }
@@ -288,6 +290,7 @@ extension SidebarViewController: NSTableViewDelegate {
         let canEject = volume?.canEject ?? false
         cell.configure(name: name, image: icon, canEject: canEject, tooltip: capacityTooltip(volume))
         cell.onEject = canEject ? { [weak self] in volume.map { self?.eject($0) } } : nil
+        cell.onDelete = nil // places/volumes aren't deletable (reset in case the cell was reused)
         return cell
     }
 
@@ -377,8 +380,30 @@ extension SidebarViewController: NSMenuDelegate {
 
     @objc private func deleteSavedSearchItem(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String else { return }
-        var store = SavedSearchStore.load()
-        if store.remove(name: name) { SavedSearchStore.save(store) }
+        confirmDeleteSavedSearch(named: name)
+    }
+
+    /// Confirm before removing a saved search — the shared path for both the row's trailing delete
+    /// button and the context-menu Delete. Presented as a window sheet when possible.
+    func confirmDeleteSavedSearch(named name: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete “\(name)”?"
+        alert.informativeText = "This removes the saved search from the sidebar. No files are deleted."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+
+        let commit = { [weak self] (response: NSApplication.ModalResponse) in
+            guard response == .alertFirstButtonReturn else { return }
+            var store = SavedSearchStore.load()
+            if store.remove(name: name) { SavedSearchStore.save(store) }
+            _ = self
+        }
+        if let window = view.window {
+            alert.beginSheetModal(for: window, completionHandler: commit)
+        } else {
+            commit(alert.runModal())
+        }
     }
 
     /// Ask for a new name, prefilled with the current one; `nil` on cancel or an empty name.

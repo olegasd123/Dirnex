@@ -82,7 +82,15 @@ struct PlacesTests {
             isEjectable: false, isInternal: false, isReadOnly: false,
             totalCapacity: nil, availableCapacity: nil
         )
+        // An external drive (e.g. a USB SSD) commonly reports neither removable nor ejectable,
+        // only that it isn't internal — Finder still lets you eject it, and so must we.
+        let externalDrive = MountedVolume(
+            name: "TRANSCEND", path: .local("/Volumes/TRANSCEND"), isRoot: false, isRemovable: false,
+            isEjectable: false, isInternal: false, isReadOnly: false,
+            totalCapacity: nil, availableCapacity: nil
+        )
         #expect(!internalDisk.canEject)
         #expect(usbStick.canEject)
+        #expect(externalDrive.canEject)
     }
 }

@@ -1782,6 +1782,20 @@ a saved search is just that query + a name + a scope, persisted.
   header still reads "🔍 Results for “jmeter”" (it usefully shows the underlying query). Verified
   live: saving "JMeter search" renamed the active chip; clicking the sidebar entry opened a second
   "JMeter search" tab; a fresh unsaved "postman" search still showed the `"postman"` chip.
+- **Enhancement (same day): Searches section on top + a per-row delete button.** (1) The sidebar now
+  leads with the **Searches** section, above Favorites/Volumes (`rebuild()` order; the safe-area top
+  inset that clears the traffic lights applies to whichever section is first, so no layout change).
+  (2) `SidebarCellView` gained an **always-visible trailing trash button** on saved-search rows
+  (`onDelete` closure; a `didSet` runs `updateTrailingLayout`, which shows the button and reserves the
+  label's trailing space against it — the eject and delete buttons share one trailing slot since a row
+  is never both, and exactly one of three label-trailing constraints is active so the name never runs
+  under a button). Clicking it (or the context-menu **Delete**, routed through the same path) raises a
+  **warning sheet** — "Delete “name”? … No files are deleted." — removing the saved search only on
+  confirm. (First cut revealed the button on hover, but it overlapped the name and was easy to miss —
+  switched to always-visible with reserved space per user feedback.) Verified live: Searches renders
+  first; both saved-search rows show the trash icon with the name truncating cleanly before it (no
+  overlap); clicking it sheeted the confirm and Delete removed the row live; the context-menu Delete
+  sheeted the same confirm; Cancel kept the row; both searches persisted across a relaunch.
 
 ### M5 — Network and sync (M)
 
