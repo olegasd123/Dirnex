@@ -1810,6 +1810,53 @@ a saved search is just that query + a name + a scope, persisted.
 Exit: mirror a local folder to a server over SFTP, verify with sync-dirs, all queued
 and pausable.
 
+Progress (2026-07-12, M5 pass 1): the **directory-synchronization comparison core** landed —
+the tested, headless *comparison* half of the "Synchronize directories" item (its two-panel
+diff-view UI + queue wiring is the next pass; boxes stay `[ ]` until that lands). Picked first
+because it's pure Swift and slots straight into the core→app rhythm, whereas `SFTPBackend` needs
+a swift-nio-ssh/libssh2 dependency + a live server to test against — the M5 infra gate, analogous
+to M4's libarchive gate. Two new `DirnexCore/Services/` files, no changes to existing APIs:
+- **`DirectorySync.swift`** — `DirectorySync.compare(left:right:leftBackend:rightBackend:
+  comparison:tolerance:includingIdentical:isCancelled:contentsEqual:)` walks both trees in
+  lock-step (iterative explicit-stack over a private `DirectoryPair{left,right,prefix}`, like
+  `DirectorySizer`, so deep trees can't blow the call stack) and returns one `SyncEntry`
+  (`relativePath`+`name`+`left:FileEntry?`+`right:FileEntry?`+`status`, `Identifiable` by
+  relative path) per differing/one-sided item, **sorted by relativePath** (deterministic
+  regardless of traversal order → stable tests + stable UI). `SyncStatus` = `leftOnly /
+  rightOnly / leftNewer / rightNewer / differ / identical / typeMismatch`. Design decisions:
+  (1) directories present on **both** sides are descended into but emit **no row** (rows =
+  actionable file diffs + one-sided items); a directory on **only one** side is a **single**
+  non-recursed subtree row (the app copies/deletes it wholesale, matching TC's collapsed
+  folder row). (2) `SyncComparison.sizeAndDate` (size equal AND |Δmtime| ≤ `tolerance`,
+  default **2 s** for FAT/exFAT coarseness, TC's value) vs `.content` (exact bytes; short-
+  circuits on size mismatch, falls back to size+date for symlinks/specials). (3) content
+  equality is an **injected** `contentsEqual` closure (default `ByteComparator.localFilesEqual`)
+  so the engine needs no read-primitive on `VFSBackend` and tests drive content mode with a
+  fake. (4) **SAFETY: a listing failure propagates** — an unreadable dir throws rather than
+  reading as empty, because silently doing so could delete the other side's matching files in
+  a mirror (contrast `DirectorySizer`, which *does* swallow — there a partial number is fine;
+  here a partial listing is dangerous). `defaultAction(for:direction:)` derives the pre-checked
+  per-row action for `SyncDirection.leftToRight / rightToLeft / bidirectional` → `SyncAction`
+  (`none / copyToRight / copyToLeft / deleteLeft / deleteRight / conflict`): a mirror is
+  authoritative (overwrites even a newer destination + prunes destination-only items),
+  bidirectional unions + newer-wins + never deletes + flags `differ`/`typeMismatch` as
+  `conflict`; a file-vs-dir `typeMismatch` is **always** `conflict` in every direction (the
+  strict-and-safe stance from MultiRename — never auto-delete a whole dir to drop a file in).
+- **`ByteComparator.swift`** — knocks out the byte-compare half of the "Compare by content"
+  item: `ByteComparator.localFilesEqual(_:_:chunkSize:isCancelled:)` chunk-compares two local
+  regular files (128 KB chunks, never loads whole files), short-circuits `false` on a size
+  mismatch without reading, `true` on same-path/two-empties; throws `.unsupported` for a
+  non-`.local` path (network read arrives with `SFTPBackend`) or a directory, and normalizes
+  read failures to `VFSError` via a POSIX-errno recovery helper. (External-diff-tool handoff —
+  FileMerge/Kaleidoscope/BBEdit — is the remaining slice of that item, an app-layer pass.)
++18 `DirectorySync` +9 `ByteComparator` tests → **368 core tests** (was 341). Whole thing
+`swift test` green, swiftformat/swiftlint-strict clean; app target untouched (new files only,
+no existing-API changes, so no rebuild needed). GOTCHA hit: swiftlint `large_tuple` (>2 members)
+on the work-stack `(left,right,prefix)` triple → extracted the private `DirectoryPair` struct.
+NEXT M5: the sync-dirs UI (two-panel diff view driven by `compare`, per-row action override,
+apply through the M2 `FileOperationQueue`); then the SFTPBackend infra gate; capability
+degradation; external-diff handoff.
+
 ### M6 — Mac-native power features (M)
 
 - [ ] Git awareness: branch in path bar, status column (M/A/?/ignored) via a debounced
