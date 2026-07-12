@@ -1215,8 +1215,9 @@ Goal: cash in the VFS abstraction from M0.
 - [x] Quick view panel (⌃Q toggle — Cmd+Q quits, Cmd+Shift+Q was free but ⌃Q is the TC key):
       inactive panel becomes live Quick Look/text preview of the file under cursor
 - [x] Saved searches as virtual folders in the places strip ✅ — name a results panel via
-      Go ▸ Save Search…, it lands in the sidebar's **Searches** section (magnifier icon);
-      click to re-run into a fresh results tab; right-click → Run / Rename… / Delete
+      Go ▸ Save Search… (⌘S when a results tab is active), it lands in the sidebar's
+      **Searches** section (magnifier icon); click to re-run into a fresh results tab;
+      right-click → Run / Rename… / Delete
 
 Exit: open a zip, fish two files out, repack — no temp-folder dance; rename 500 photos
 by date pattern and undo it; search feeds a panel.
@@ -1752,6 +1753,14 @@ a saved search is just that query + a name + a scope, persisted.
   search niceties (tag chip, content-grep fallback for non-indexed volumes); archive drag-drop-in and
   ⌥⌘V move-paste-in remain small follow-ons, and writing back through nesting (edit an inner archive,
   re-embed it) is the natural next archive-write item. **The M4 checklist is now fully `[x]`.**
+- **Follow-on (same day): ⌘S saves the active search.** `go.saveSearch` gained a **⌘S** shortcut
+  (distinct from ⌃⌘S Show Sidebar — the conflict checker compares key *and* modifiers, so they
+  don't collide). Because `validateMenuItem` already gates it on `canSaveCurrentSearch`, AppKit
+  only fires the key equivalent when a search-results tab carrying a query is active — on any
+  other pane ⌘S is an inert no-op, not a mis-save. Verified live: the Go menu reads **Save
+  Search… ⌘S**; ⌘S on the `*jmeter*` results tab opened the Save sheet; ⌘S on the normal `oleg`
+  tab did nothing. `coversSaveSearch` updated to assert the shortcut + conflict-freedom (still
+  **341 core tests**).
 
 ### M5 — Network and sync (M)
 

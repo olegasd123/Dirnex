@@ -122,13 +122,14 @@ struct CommandCatalogTests {
         #expect(KeyBindings().conflicts(for: "go.search").isEmpty)
     }
 
-    @Test("the M4 saved-search command is a shortcut-free Go command")
+    @Test("the M4 saved-search command is a conflict-free Go command on ⌘S")
     func coversSaveSearch() {
         let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
         let save = byID["go.saveSearch"]
         #expect(save?.category == .navigation)
-        // Sidebar-driven; deliberately no shortcut, so nothing to collide.
-        #expect(save?.shortcut == nil)
+        // ⌘S saves the active search; distinct from ⌃⌘S (Show Sidebar), so no collision.
+        #expect(save?.shortcut == CommandShortcut(key: "s", modifiers: .command))
+        #expect(KeyBindings().conflicts(for: "go.saveSearch").isEmpty)
     }
 }
 

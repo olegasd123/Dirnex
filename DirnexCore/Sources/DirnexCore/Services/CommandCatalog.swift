@@ -220,7 +220,12 @@ public enum CommandCatalog {
             id: "go.saveSearch",
             title: "Save Search…",
             category: .navigation,
-            keywords: ["search", "saved", "smart", "folder", "bookmark", "sidebar"]
+            keywords: ["search", "saved", "smart", "folder", "bookmark", "sidebar"],
+            // ⌘S is the natural "save" gesture; it only fires when the menu item is enabled —
+            // i.e. an active search-results tab carrying a query (`canSaveCurrentSearch`) — so on
+            // any other pane it's an inert no-op rather than a mis-save. (Distinct from ⌃⌘S,
+            // Show Sidebar.)
+            shortcut: CommandShortcut(key: "s", modifiers: .command)
         ),
         Command(
             id: "go.parent",
