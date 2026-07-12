@@ -11,7 +11,13 @@ extension PanelViewController {
     func openCurrentEntry() {
         guard let entry = panel.currentEntry else { return }
         if let target = panel.openTarget(for: entry) {
-            navigate(to: target)
+            // A folder opened from a search-results tab must not replace the results in place —
+            // route it elsewhere so the hits survive (PLAN.md §M4 search).
+            if isSearchResults {
+                openSearchResultDirectory(target)
+            } else {
+                navigate(to: target)
+            }
         } else if entry.path.backend == .local, ArchiveType.isBrowsable(entry.name) {
             // A local archive file — browse into its virtual folder tree instead of launching.
             navigate(to: archiveRoot(for: entry))
@@ -23,6 +29,27 @@ extension PanelViewController {
         }
         // Any other non-directory entry inside an archive (a plain file member) can't be launched
         // in place, so it's a no-op rather than opening a meaningless local URL.
+    }
+
+    /// Open a directory picked from a search-results tab. The results are a snapshot the user is
+    /// browsing, so opening one of the found folders never overwrites this tab: it lands in the
+    /// **other** pane as a new tab (the natural "found it here, go look at it there" flow), or —
+    /// when the window has no counterpart pane — as a new tab beside the results in this one.
+    ///
+    /// The `focusOpenedSearchDirectory` preference (default off) decides whether focus follows the
+    /// opened folder or stays on the results so more hits can be opened in turn.
+    private func openSearchResultDirectory(_ target: VFSPath) {
+        let focusFollows = AppPreferences.shared.focusOpenedSearchDirectory
+        if let destination = host?.panelCounterpart(of: self) {
+            // Always show the folder in the other pane; only move window focus there on request.
+            destination.openInNewTab(target)
+            if focusFollows {
+                host?.panelRequestsFocusSwitch(self)
+            }
+        } else {
+            // Single-pane: open beside the results here, switching to it only if focus should follow.
+            openInNewTab(target, activate: focusFollows)
+        }
     }
 
     /// Walk up one level, landing the cursor on the directory we came from. Inside an archive

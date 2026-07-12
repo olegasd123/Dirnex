@@ -56,6 +56,31 @@ extension PanelViewController {
 
     // MARK: - Operations
 
+    /// Open `path` in a fresh tab beside the active one, inheriting this pane's sort/hidden and
+    /// column layout so it matches the pane it lands in. Used to land a folder opened from a
+    /// search-results tab into a real directory tab (in the other pane, or this one when there's
+    /// no counterpart) without disturbing the results — see `PanelViewController+Navigation`.
+    ///
+    /// `activate` switches to the new tab (loading it) when `true`; when `false` the tab is
+    /// inserted in the background and the currently shown tab (e.g. the search results) stays put.
+    func openInNewTab(_ path: VFSPath, activate: Bool = true) {
+        captureColumnLayout()
+        let tab = PanelTab(
+            path: path,
+            sort: panel.model.sort,
+            showHidden: panel.model.showHidden,
+            columns: tabs[activeTabIndex].columnLayout
+        )
+        tabs.insert(tab, at: activeTabIndex + 1)
+        if activate {
+            activeTabIndex += 1
+            activateTab()
+        } else {
+            refreshTabBar()
+        }
+        persistState()
+    }
+
     /// Open a new tab beside the current one, showing the same directory and inheriting
     /// its sort/hidden settings (Cmd+T / the tab strip's `+`).
     func addTab() {

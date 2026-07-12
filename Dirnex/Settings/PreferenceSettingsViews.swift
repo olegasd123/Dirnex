@@ -35,6 +35,21 @@ struct PanelsSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+
+            Section {
+                Toggle(
+                    "Switch focus to folders opened from search results",
+                    isOn: $preferences.focusOpenedSearchDirectory
+                )
+            } footer: {
+                Text(
+                    "Opening a folder from a search tab leaves the results in place and opens it in "
+                        + "the other pane. When off, focus stays on the results so you can keep "
+                        + "opening more."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

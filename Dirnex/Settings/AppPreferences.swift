@@ -49,16 +49,27 @@ final class AppPreferences: ObservableObject {
         didSet { defaults.set(confirmTrash, forKey: Keys.confirmTrash) }
     }
 
+    /// Panels ▸ move focus to a folder opened from search results (default off — stay on the
+    /// results so you can keep opening hits). Opening a folder from a `.search` results tab never
+    /// replaces the results in place: it lands as a new tab in the other pane (or, when there's no
+    /// other pane, a new tab beside the results here). When off, that new tab opens without
+    /// stealing focus/selection from the results; when on, focus follows into the opened folder.
+    @Published var focusOpenedSearchDirectory: Bool {
+        didSet { defaults.set(focusOpenedSearchDirectory, forKey: Keys.focusOpenedSearchDirectory) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         restoreSession = defaults.object(forKey: Keys.restoreSession) as? Bool ?? true
         showHidden = defaults.bool(forKey: Keys.showHidden)
         confirmTrash = defaults.bool(forKey: Keys.confirmTrash)
+        focusOpenedSearchDirectory = defaults.bool(forKey: Keys.focusOpenedSearchDirectory)
     }
 
     private enum Keys {
         static let restoreSession = "Dirnex.pref.restoreSession"
         static let showHidden = "Dirnex.pref.showHidden"
         static let confirmTrash = "Dirnex.pref.confirmTrash"
+        static let focusOpenedSearchDirectory = "Dirnex.pref.focusOpenedSearchDirectory"
     }
 }
