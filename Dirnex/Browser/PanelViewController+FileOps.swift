@@ -354,6 +354,9 @@ extension PanelViewController: NSMenuItemValidation {
         case #selector(multiRenameSelection(_:)):
             // The batch tool operates on the marked set (else the cursor entry).
             return canRenameHere && !selectionTargets().isEmpty
+        case #selector(synchronizeDirectories(_:)):
+            // Compares the two panes' folders — needs two distinct real local directories.
+            return canSynchronize
         default:
             return nil
         }

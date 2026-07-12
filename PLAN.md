@@ -1803,9 +1803,12 @@ a saved search is just that query + a name + a scope, persisted.
       credentials, key auth; browse/copy through the standard queue with resume
 - [ ] Capability degradation: panels grey out unsupported ops per backend (no Trash on
       SFTP → explicit delete confirm; no clone → always chunked)
-- [ ] Synchronize directories: two-panel diff view (left-only / right-only / differs /
-      same), by size+date or content hash; selective sync actions through the queue
-- [ ] Compare by content: byte compare + FileMerge/Kaleidoscope/BBEdit handoff for diffs
+- [x] Synchronize directories: two-panel diff view (left-only / right-only / differs /
+      same ✅), by size+date or content ✅; selective sync actions through the queue ✅
+      (per-row *direction override* — flip one row against the global direction — is the one
+      deferred niceness; include/exclude per row is done)
+- [~] Compare by content: **byte compare ✅** (`ByteComparator`, drives sync `.content` mode);
+      FileMerge/Kaleidoscope/BBEdit external-diff handoff still TODO
 
 Exit: mirror a local folder to a server over SFTP, verify with sync-dirs, all queued
 and pausable.
@@ -1856,6 +1859,56 @@ on the work-stack `(left,right,prefix)` triple → extracted the private `Direct
 NEXT M5: the sync-dirs UI (two-panel diff view driven by `compare`, per-row action override,
 apply through the M2 `FileOperationQueue`); then the SFTPBackend infra gate; capability
 degradation; external-diff handoff.
+
+Progress (2026-07-12, M5 pass 2): the **Synchronize Directories UI** landed — the diff-view +
+apply half of the sync item (**that box now `[x]`**; byte-compare `[~]`). One new headless
+command + three app files, wiring the pass-1 `DirectorySync` engine into a real sheet that
+reconciles the two panes through the M2 queue. VERIFIED LIVE end-to-end (no overlay this
+session, so fully mouse-driven). Pieces:
+- **Command** (core): `CommandCatalog` gains `file.syncDirectories` ("Synchronize Directories…",
+  `.file`, **no shortcut** → conflict-free; new `coversSyncDirectories` test → **369 core
+  tests**). Wired app-side in `CommandBinding` (→ `synchronizeDirectories(_:)`) and
+  `MainMenuBuilder` (File menu, right after Pack). GOTCHA: adding one command tipped the
+  `CommandCatalog` main-enum body over swiftlint `type_body_length` 250 → moved the `workspace`
+  array into the existing bottom extension (where window/application already live).
+- **`SyncDirectoriesController.swift`** — the sheet (modeled on `MultiRenameController`,
+  `presentAsSheet`-retained). A **Direction** segmented control (Left→Right / Both Directions /
+  Right→Left) and a **Compare by** control (Size & Date / Content) over a diff `NSTableView`:
+  columns *include-checkbox · Item (relativePath, "/"-suffixed for dirs) · leftFolder detail ·
+  action glyph · rightFolder detail*. Action column = green →/← for a copy, red ✕ for a delete
+  (which side is clear from the populated detail column), ⚠ for a conflict, each with a tooltip.
+  A **direction change re-derives actions in memory** (`recomputeActions`, instant); a
+  **comparison change re-runs `DirectorySync.compare` off-main** (content mode reads bytes) with
+  a spinner. Footer reads "N to copy, M to delete · K conflicts skipped"; empty result →
+  "The folders are already in sync." with Synchronize disabled. Conflicts render with a disabled
+  checkbox (no safe action). GOTCHAS (swiftlint, both recurring): `large_tuple` on the columns
+  array / `row(at:)` / `actionDisplay` → replaced with an `addColumn` helper, returning the
+  `fileprivate` `Row` struct, and an `ActionStyle` struct; `type_body_length` on the class →
+  moved the four `make*` view-builders into a same-file `private extension` (extensions don't
+  count toward the type body). NOTE: `Row` had to be `fileprivate` (not `private`) because the
+  `fileprivate row(at:)` accessor returns it.
+- **`PanelViewController+Sync.swift`** — entry point + apply. `synchronizeDirectories(_:)`
+  casts `host as? BrowserWindowController` to always use the **physical** left/right panes (so
+  the direction controls match the on-screen layout regardless of focus), gates on two distinct
+  real local folders (`canSynchronize`, also the `validateMenuItem` case), and presents the
+  sheet. On commit: **copies are batched by destination directory** (multiple sources → one
+  `FileOperation`) and enqueued under `.overwrite` (the user already decided in the diff — no
+  per-file prompt; atomic temp-swap keeps the original safe), so the window's queue drives
+  progress/undo exactly like F5; **deletes go to the Trash** off-main as one pass, journaled via
+  `UndoRecord.trash`. A **delete count triggers a confirm sheet** first ("… will move N items to
+  the Trash"). The relative path's parent always exists on the destination side (the engine only
+  descends into both-sides dirs), so a nested copy's target directory is guaranteed present.
+LIVE TEST (seeded both panes onto fixture trees via the `Dirnex.tabs.<side>` UserDefaults JSON):
+the sheet listed exactly the 6 differences (identical `same.txt` correctly omitted) with
+"5 to copy, 1 to delete"; Right→Left flipped every row (3 copy ←, 3 delete ✕, "3 to copy, 3 to
+delete"); Content mode rescanned to the same 6; Synchronize (Left→Right) raised the delete
+confirm, then on disk overwrote `changed.txt` with the newer left copy, copied `only_left.txt` +
+the nested `sub/leftonly_nested.txt`, overwrote the nested `sub/nested.txt`, **recursively copied
+the one-sided `leftdir/deep/x.txt` subtree**, and trashed `only_right.txt`; a re-scan then
+reported "already in sync" (metadata preserved → idempotent). App `xcodebuild` + `swift test`
+green, swiftformat/swiftlint-strict clean. NEXT M5: per-row direction override (flip one row);
+the `SFTPBackend` infra gate (swift-nio-ssh/libssh2 + live server); capability degradation;
+external-diff-tool handoff.
 
 ### M6 — Mac-native power features (M)
 

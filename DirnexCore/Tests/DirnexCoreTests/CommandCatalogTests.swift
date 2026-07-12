@@ -75,6 +75,16 @@ struct CommandCatalogTests {
         #expect(KeyBindings().conflicts(for: "file.multiRename").isEmpty)
     }
 
+    @Test("the M5 synchronize-directories tool is a shortcut-free File command")
+    func coversSyncDirectories() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        let sync = byID["file.syncDirectories"]
+        #expect(sync?.category == .file)
+        // No default shortcut (reached via menu/palette), so it can never collide.
+        #expect(sync?.shortcut == nil)
+        #expect(KeyBindings().conflicts(for: "file.syncDirectories").isEmpty)
+    }
+
     @Test("the M4 pack tool is a conflict-free File command on ⌥F5")
     func coversPack() {
         let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })

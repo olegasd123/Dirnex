@@ -60,6 +60,12 @@ public enum CommandCatalog {
             shortcut: CommandShortcut(key: "F5", modifiers: [.function, .option])
         ),
         Command(
+            id: "file.syncDirectories",
+            title: "Synchronize Directories…",
+            category: .file,
+            keywords: ["sync", "synchronize", "compare", "mirror", "diff", "directories", "folders"]
+        ),
+        Command(
             id: "file.rename",
             title: "Rename…",
             category: .file,
@@ -269,7 +275,12 @@ public enum CommandCatalog {
             keywords: ["pin", "bookmark", "favorite", "hotlist"]
         )
     ]
+}
 
+// The Workspace, Window, and Application categories live in an extension so the main enum body
+// stays under SwiftLint's `type_body_length` limit; `all` above still composes them in with the
+// rest.
+extension CommandCatalog {
     // MARK: - Workspace
 
     private static let workspace: [Command] = [
@@ -286,11 +297,7 @@ public enum CommandCatalog {
             keywords: ["session", "snapshot", "store", "layout", "panes"]
         )
     ]
-}
 
-// The Window and Application categories live in an extension so the main enum body stays under
-// SwiftLint's `type_body_length` limit; `all` above still composes them in with the rest.
-extension CommandCatalog {
     // MARK: - Window
 
     private static let window: [Command] = [
