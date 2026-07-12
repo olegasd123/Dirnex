@@ -469,6 +469,58 @@ capability test double stands in). Pieces:
   `[.read, .write, .rename]` (no `.trash`/`.clone`). Optional polish: Settings picker for the
   preferred diff tool.
 
+Progress (2026-07-12, M5 pass 6): the **SFTPBackend read-only browse core** landed — the pure,
+tested foundation of the last M5 item. Same sidestep M4 made for the libarchive gate: rather than
+add a swift-nio-ssh/libssh2 dependency, the plan is to drive the **system `ssh`/`sftp` CLI** (ships
+with macOS) behind an **injected transport**, so the whole backend is exercised with a fake and
+needs *no live server* — the analogue of `ArchiveBackend`'s read-only first pass (browse first,
+write/copy later). Box stays `[ ]` (no live transport, no writes, no app wiring, no server
+verification yet); this is the browse half of "browse/copy through the standard queue". **Four new
+DirnexCore files, purely additive (no existing-API changes, so the app is untouched and needs no
+rebuild):**
+- **`VFS/SFTPLocation.swift`** — the connection descriptor (`host`+`port`(=22)+`username`, `Codable`,
+  **no secret** — the password/key passphrase is a Keychain reference the app resolves, so a location
+  is safe to serialize into a tab/bookmark/id). Encodes to a `VFSBackendID` as `sftp://user@host:port`
+  (the SFTP analogue of the on-disk path an archive id carries), with `init?(descriptor:)` /
+  `init?(backendID:)` and `VFSBackendID.sftp(_:)`/`.sftpLocation`/`.isSFTP` extensions — kept in this
+  file (not `VFSPath.swift`) so the addition is purely new-files. Username split at the **first** `@`,
+  port at the **last** `:` (bracketed IPv6 literal noted as a later refinement, not a hole).
+- **`VFS/SFTPTransport.swift`** — the injected boundary: `SFTPTransport` protocol (`listDirectory(_:)`
+  → raw `ls -la` text, `statItem(_:)` → raw `ls -ld` line) + `SFTPTransportError{notFound /
+  permissionDenied / failure(String)}` (the few shapes the backend maps onto `VFSError`). Synchronous
+  (the backend is always called off-main); the app supplies a `Process`-driven impl, tests a fake.
+- **`VFS/SFTPListingParser.swift`** — a **close cousin of `ArchiveTOCParser`** (same "8 fixed columns
+  then a verbatim name" shape, same `nameField` column-skip so internal spaces survive, same
+  `en_US_POSIX` `MMM d HH:mm`/`MMM d yyyy` date formats) but **flat** (one directory, no tree, no
+  ancestor synthesis) — kept separate to avoid churning the heavily-tested archive parser. `ls -la` →
+  `[Entry]` (name/kind/byteSize/mtime/**permissions**/symlinkDestination): drops the `total` header
+  and the `.`/`..` rows, mode-char → kind (`d`/`l`/`-`/other), ` -> target` split for symlinks, mode
+  string → POSIX bits, tolerates an ACL `+`/xattr `@` 11-char mode. `parseItem` reads the single
+  `ls -ld` line.
+- **`VFS/SFTPBackend.swift`** — the `VFSBackend` over the injected transport (a `struct`, like
+  `ArchiveBackend`). `id == .sftp(location)`; **`capabilities == .read`** for now (advertising `.write`
+  before copy-in works end-to-end would let the UI start a paste the backend can't finish — the honest
+  cap today; the widened `[.read, .write, .rename]` that lights up pass-5's `DeleteStrategy`/clone
+  degradation arrives with the byte-transfer pass). `listDirectory`/`stat` route through the parser;
+  `stat` **names the entry from the queried path's last component** (since `ls -ld /a/b` prints the
+  full arg as the name); a `mapErrors` helper attaches the `VFSPath` the transport (raw-string only)
+  couldn't, turning `SFTPTransportError` → `VFSError.notFound/permissionDenied/io`. `volumeIdentifier`
+  = `sftp://host:port` so **all one-host jobs serialize** (one SSH channel — parallel transfers only
+  contend), cheap/no-I/O as the protocol requires. symlink target reported as nominal `.file` (not
+  resolved — matches `ArchiveBackend`); no birth time → `creationDate = modificationDate`.
++8 `SFTPLocation` +11 `SFTPListingParser` +9 `SFTPBackend` tests (a private `FakeSFTPTransport` double
+returning canned listings / throwing configured errors) → **418 core tests** (was 390). `swift test`
+green, swiftformat/swiftlint-strict clean. GOTCHA: a year-stamped `ls` date parses at **local**
+midnight (the formatter sets no zone) → the test must read `.day` in the local calendar, not forced
+UTC, or the day shifts. **NEXT M5 (finishes the item):** the app-layer live transport — a
+`Process`-driven `ssh`/`sftp` runner (mirroring `ArchiveMounter`/`SpotlightSearchRunner`), a
+connection manager + Keychain credential storage + key auth, composite-backend routing on `isSFTP`,
+and the **write pass** (mkdir/move/remove + byte `copyFile` with resume, flipping caps to
+`[.read, .write, .rename]` → the pass-5 grey-out + Trash-less permanent-delete confirm go live). That
+tail is the genuine infra gate: it needs a live/dockerized SSH server (or local Remote Login) +
+credentials to verify against — which I can't provision here, so it awaits that setup. Optional
+polish still open: Settings picker for the preferred diff tool.
+
 ### M6 — Mac-native power features (M)
 
 - [ ] Git awareness: branch in path bar, status column (M/A/?/ignored) via a debounced
