@@ -50,7 +50,9 @@ struct PathBarArchiveCrumbsTests {
         #expect(crumbs[5].target == VFSPath(backend: archive(innerMount), path: "/"))
         // Inner directories resolve within the inner archive; the last is where we are.
         #expect(crumbs[6].target == VFSPath(backend: archive(innerMount), path: "/time-sync_v2"))
-        #expect(crumbs[7].target == VFSPath(backend: archive(innerMount), path: "/time-sync_v2/build"))
+        #expect(
+            crumbs[7].target == VFSPath(backend: archive(innerMount), path: "/time-sync_v2/build")
+        )
     }
 
     @Test("doubly-nested archive: middle-frame directories appear in order")
@@ -59,7 +61,7 @@ struct PathBarArchiveCrumbsTests {
         let midMount = "/private/tmp/mid.zip"
         let innerMount = "/private/tmp/inner.zip"
         let ancestry = [
-            VFSPath(backend: archive(outer), path: "/sub/mid.zip"),   // outermost enclosing member
+            VFSPath(backend: archive(outer), path: "/sub/mid.zip"), // outermost enclosing member
             VFSPath(backend: archive(midMount), path: "/deep/inner.zip")
         ]
         let path = VFSPath(backend: archive(innerMount), path: "/x/y")

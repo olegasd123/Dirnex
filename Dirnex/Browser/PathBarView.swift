@@ -456,12 +456,16 @@ extension PathBarView {
             // nested-archive file for an outer frame, the full browsed location for the current one.
             let isCurrentFrame = index == ancestry.count
             let innerPath = isCurrentFrame ? path.path : ancestry[index].path
-            var components = innerPath.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+            var components = innerPath.split(separator: "/", omittingEmptySubsequences: true).map(
+                String.init
+            )
             if !isCurrentFrame { components.removeLast() } // the nested-archive file, next frame's crumb
             var cumulative = ""
             for component in components {
                 cumulative += "/" + component
-                crumbs.append(Crumb(title: component, target: VFSPath(backend: backend, path: cumulative)))
+                crumbs.append(
+                    Crumb(title: component, target: VFSPath(backend: backend, path: cumulative))
+                )
             }
         }
         return crumbs
