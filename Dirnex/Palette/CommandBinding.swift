@@ -41,6 +41,7 @@ enum CommandBinding {
         "view.quickView": #selector(PanelViewController.toggleQuickViewPanel(_:)),
         "go.editLocation": #selector(PanelViewController.editLocation(_:)),
         "go.search": #selector(PanelViewController.findFiles(_:)),
+        "go.saveSearch": #selector(PanelViewController.saveCurrentSearch(_:)),
         "go.parent": #selector(PanelViewController.goToParentDirectory(_:)),
         "go.back": #selector(PanelViewController.goBack(_:)),
         "go.forward": #selector(PanelViewController.goForward(_:)),

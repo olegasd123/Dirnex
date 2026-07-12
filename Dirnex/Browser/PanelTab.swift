@@ -27,6 +27,12 @@ final class PanelTab {
     /// layout — restored from disk or inherited from the tab it was spawned from — in which
     /// case the pane falls back to the default columns.
     var columnLayout: [ColumnLayout]?
+    /// When this tab shows Spotlight results (a `.search` panel), the query and scope that
+    /// produced them — retained so "Save Search…" can persist a re-runnable saved search
+    /// (PLAN.md §M4). `nil` for a normal directory tab. Session-scoped: a restored tab is never
+    /// a results tab (search results aren't persisted), so this is never encoded.
+    var searchQuery: SpotlightQuery?
+    var searchScope: VFSPath?
 
     init(panel: Panel) {
         self.panel = panel

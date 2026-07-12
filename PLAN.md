@@ -1214,7 +1214,9 @@ Goal: cash in the VFS abstraction from M0.
 - [x] Search results → virtual panel listing: normal cursor/selection/F5 on results
 - [x] Quick view panel (⌃Q toggle — Cmd+Q quits, Cmd+Shift+Q was free but ⌃Q is the TC key):
       inactive panel becomes live Quick Look/text preview of the file under cursor
-- [ ] Saved searches as virtual folders in the places strip
+- [x] Saved searches as virtual folders in the places strip ✅ — name a results panel via
+      Go ▸ Save Search…, it lands in the sidebar's **Searches** section (magnifier icon);
+      click to re-run into a fresh results tab; right-click → Run / Rename… / Delete
 
 Exit: open a zip, fish two files out, repack — no temp-folder dance; rename 500 photos
 by date pattern and undo it; search feeds a panel.
@@ -1705,6 +1707,51 @@ through nesting is a later item), matching the app's capability-degradation patt
   Home. NEXT M4: saved searches as places-strip virtual folders, deferred search niceties (tag chip,
   content-grep fallback); archive drag-drop-in and ⌥⌘V move-paste-in remain small follow-ons, and
   writing back through nesting (edit an inner archive, re-embed it) is the natural next archive-write item.
+
+Progress (2026-07-12, M4 pass 11): **saved searches as places-strip virtual folders** landed —
+the last open M4 checklist item (**that line is now `[x]`**), macOS's answer to Finder's Smart
+Folders. Name the query behind a live results panel via **Go ▸ Save Search…**, and it lands in a
+new **Searches** section of the sidebar (magnifier icon); clicking it re-runs the query into a
+fresh virtual results tab; right-click → **Run Search / Rename… / Delete**. Reuses the whole
+existing search stack (⌥F7 `SpotlightQuery` → `SpotlightSearchRunner` → virtual `.search` panel) —
+a saved search is just that query + a name + a scope, persisted.
+- **Core (pure, tested).** NEW `DirnexCore/…/Services/SavedSearch.swift` mirrors `Workspaces`
+  *exactly* (name-as-identity): `SavedSearch` (name + `SpotlightQuery` + optional `scope: VFSPath?`,
+  `id == name`) and `SavedSearches` (ordered, name-de-duped list: `save` overwrites-in-place-else-
+  appends, `remove`, `rename` rejecting empty/collision, `move`, custom Codable that re-sanitizes on
+  decode). To persist a query, `SpotlightQuery` gained `Codable` (synthesized — every field already
+  was) plus `summaryPlainName` (the `summary` precedence without the display quotes, so the Save
+  prompt prefills an editable default). New command `go.saveSearch` ("Save Search…", no shortcut —
+  sidebar-driven, conflict-free). +15 tests (`SavedSearchTests` 13, a `SpotlightQuery` Codable +
+  plain-name pair, a `CommandCatalog` saveSearch case) → **341 core tests**, swiftformat/swiftlint-
+  strict clean. GOTCHA (recurring, hit again): the Testing `#expect` macro captures its argument
+  immutably, so a `mutating` call (`list.save`/`rename`/`remove`) must be hoisted into a `let` first
+  — see [[swift-testing-expect-optional-arithmetic]]'s sibling gotcha.
+- **App (persistence + sidebar + save flow).** NEW `SavedSearchStore.swift` (UserDefaults JSON like
+  `HotlistStore`/`WorkspaceStore`, plus a `didChangeNotification` posted on every save so open
+  sidebars — even in another window — rebuild live). `PanelTab` gained `searchQuery`/`searchScope`
+  (session-only, never encoded), set when `openSearchResults` installs a results tab, so
+  `saveCurrentSearch` can recover exactly what produced them; `runSavedSearch` re-runs a stored query
+  against its *absolute* scope (not the pane's current dir). `SidebarViewController` grew a
+  `.savedSearch` row + a **Searches** section (rebuilt on `didChangeNotification`), a magnifier
+  template icon, a `NSMenuDelegate` context menu built lazily from `clickedRow` (empty ⇒ no menu on
+  non-search rows), and Rename/Delete that mutate the store directly; Run + row-click route through a
+  new `didActivateSavedSearch` delegate call the window controller runs on the active pane.
+  `validateMenuItem` enables Save Search… only on a results pane carrying a query (`canSaveCurrentSearch`).
+  Wiring: `go.saveSearch` in `CommandBinding` + `MainMenuBuilder` (Go menu, after Find Files…).
+  App `xcodebuild build` green; new code confirmed in `Dirnex.debug.dylib`; touched files
+  swiftformat/swiftlint-strict clean.
+- **Verified live via computer-use** (fresh Debug build after a full quit; no overlay this session):
+  Go ▸ **Save Search…** was greyed on a normal pane, enabled after a ⌥F7 "jmeter" search (3 hits) —
+  the prompt prefilled the unquoted default **"jmeter"**, saved as "JMeter Stuff" → appeared under a
+  new **Searches** header with a magnifier icon (sidebar rebuilt live). Clicking it re-ran into a
+  fresh `*jmeter*` results tab (same 3 hits). Right-click → **Run / Rename… / Delete**: Rename →
+  "Perf Tests" updated the row live; Delete removed the whole section live. Re-saved as "jmeter",
+  **quit + relaunched** → the Searches section persisted with "jmeter" (while the virtual results
+  tabs correctly did *not* restore); deleted it to leave the app clean on Home. NEXT M4: deferred
+  search niceties (tag chip, content-grep fallback for non-indexed volumes); archive drag-drop-in and
+  ⌥⌘V move-paste-in remain small follow-ons, and writing back through nesting (edit an inner archive,
+  re-embed it) is the natural next archive-write item. **The M4 checklist is now fully `[x]`.**
 
 ### M5 — Network and sync (M)
 

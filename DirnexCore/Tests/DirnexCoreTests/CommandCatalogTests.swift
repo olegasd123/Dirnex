@@ -121,6 +121,15 @@ struct CommandCatalogTests {
         // ⌥F7 must not collide with plain F7 (New Folder) — the modifier set differs.
         #expect(KeyBindings().conflicts(for: "go.search").isEmpty)
     }
+
+    @Test("the M4 saved-search command is a shortcut-free Go command")
+    func coversSaveSearch() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        let save = byID["go.saveSearch"]
+        #expect(save?.category == .navigation)
+        // Sidebar-driven; deliberately no shortcut, so nothing to collide.
+        #expect(save?.shortcut == nil)
+    }
 }
 
 @Suite("CommandShortcut display")

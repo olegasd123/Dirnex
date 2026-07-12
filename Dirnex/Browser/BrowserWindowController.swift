@@ -411,4 +411,12 @@ extension BrowserWindowController: SidebarViewControllerDelegate {
         target.navigate(to: path)
         target.focusTable()
     }
+
+    /// A saved search re-runs its query in the active pane, opening the hits in a virtual
+    /// results tab, then hands focus back so browsing the results continues without a mouse.
+    func sidebar(_ sidebar: SidebarViewController, didActivateSavedSearch savedSearch: SavedSearch) {
+        let target = activePanel ?? leftPanel
+        target.runSavedSearch(savedSearch)
+        target.focusTable()
+    }
 }

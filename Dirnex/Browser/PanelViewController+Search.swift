@@ -37,10 +37,29 @@ extension PanelViewController {
 
     private func runSearch(_ query: SpotlightQuery, scopeToCurrentFolder: Bool) {
         let scope: VFSPath? = scopeToCurrentFolder ? searchScopeDirectory() : nil
+        performSearch(query, scope: scope)
+    }
+
+    /// Re-run a saved search from the sidebar (PLAN.md §M4 "Saved searches … in the places
+    /// strip"). Unlike ⌥F7, its scope is the absolute path stored with the search — it doesn't
+    /// follow the pane's current directory — so a "Pictures" saved search always searches
+    /// Pictures wherever you invoke it.
+    func runSavedSearch(_ savedSearch: SavedSearch) {
+        performSearch(savedSearch.query, scope: savedSearch.scope)
+    }
+
+    /// Run `query` within `scope` (its subtree), or everywhere when `scope` is `nil`, off the
+    /// main thread, then install the hits as a virtual results tab.
+    private func performSearch(_ query: SpotlightQuery, scope: VFSPath?) {
         let backend = backend
         Task {
             let results = await SpotlightSearchRunner.run(query, scope: scope, backend: backend)
-            openSearchResults(results.entries, query: query, truncated: results.truncated)
+            openSearchResults(
+                results.entries,
+                query: query,
+                scope: scope,
+                truncated: results.truncated
+            )
         }
     }
 
@@ -49,7 +68,12 @@ extension PanelViewController {
     /// Install the hits as a new virtual tab beside the current one and switch to it, so the
     /// user's browsing tab is preserved (closing the results tab with ⌘W returns to it). Results
     /// are a snapshot: the tab is marked loaded so nothing tries to re-list the synthetic path.
-    private func openSearchResults(_ entries: [FileEntry], query: SpotlightQuery, truncated: Bool) {
+    private func openSearchResults(
+        _ entries: [FileEntry],
+        query: SpotlightQuery,
+        scope: VFSPath?,
+        truncated: Bool
+    ) {
         captureColumnLayout()
         let listing = DirectoryListing(
             path: VFSPath(backend: .search, path: "/" + query.summary),
@@ -61,6 +85,9 @@ extension PanelViewController {
         let tab = PanelTab(panel: Panel(model: model))
         tab.hasLoaded = true
         tab.columnLayout = tabs[activeTabIndex].columnLayout
+        // Retain what produced these results so "Save Search…" can persist it.
+        tab.searchQuery = query
+        tab.searchScope = scope
 
         tabs.insert(tab, at: activeTabIndex + 1)
         activeTabIndex += 1
@@ -74,5 +101,58 @@ extension PanelViewController {
                 detail: "Your search matched more items. Narrow it to see the rest."
             )
         }
+    }
+
+    // MARK: - Saving the current search
+
+    /// Whether the active results tab carries a re-runnable query — gates "Save Search…".
+    var canSaveCurrentSearch: Bool {
+        isSearchResults && tabs[activeTabIndex].searchQuery != nil
+    }
+
+    /// "Save Search…" — name the query behind the current results tab and store it as a saved
+    /// search, so it appears in the sidebar's Searches section (PLAN.md §M4). Re-using an
+    /// existing name updates that saved search in place after a replace confirmation.
+    @objc func saveCurrentSearch(_ sender: Any?) {
+        let tab = tabs[activeTabIndex]
+        guard let query = tab.searchQuery else { return }
+        guard let name = promptForSavedSearchName(default: query.summaryPlainName) else { return }
+
+        var store = SavedSearchStore.load()
+        if store.contains(name: name), !confirmReplaceSavedSearch(named: name) { return }
+        store.save(SavedSearch(name: name, query: query, scope: tab.searchScope))
+        SavedSearchStore.save(store)
+    }
+
+    /// Ask for a saved-search name, prefilled with a sensible default, returning the trimmed
+    /// non-empty result or `nil` on cancel / an empty name.
+    private func promptForSavedSearchName(default defaultName: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = "Save Search"
+        alert.informativeText = "Give this search a name to keep it in the sidebar and re-run it later."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.placeholderString = "Search name"
+        field.stringValue = defaultName
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
+    }
+
+    /// Confirm overwriting a saved search that already uses this name, so Save never silently
+    /// clobbers one.
+    private func confirmReplaceSavedSearch(named name: String) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Replace “\(name)”?"
+        alert.informativeText = "A saved search named “\(name)” already exists. Replace it?"
+        alert.addButton(withTitle: "Replace")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }

@@ -64,7 +64,8 @@ enum MainMenuBuilder {
         ]),
         MenuSpec(title: "Go", items: [
             .command("go.back"), .command("go.forward"), .command("go.history"), .separator,
-            .command("go.editLocation"), .command("go.parent"), .command("go.search"), .separator,
+            .command("go.editLocation"), .command("go.parent"), .command("go.search"),
+            .command("go.saveSearch"), .separator,
             .command("go.hotlist"), .command("go.addToHotlist")
         ]),
         MenuSpec(title: "Workspace", items: [

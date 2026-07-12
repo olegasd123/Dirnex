@@ -128,4 +128,29 @@ struct SpotlightQueryTests {
         #expect(SpotlightQuery(kinds: [.movie, .image]).summary == "Search results")
         #expect(SpotlightQuery(minSizeBytes: 10).summary == "Search results")
     }
+
+    @Test("the plain-name summary drops the display quotes for an editable default")
+    func summaryPlainName() {
+        #expect(SpotlightQuery(nameContains: "  taxes ").summaryPlainName == "taxes")
+        #expect(SpotlightQuery(contentContains: "invoice").summaryPlainName == "invoice")
+        #expect(SpotlightQuery(kinds: [.movie]).summaryPlainName == "Movies")
+        #expect(SpotlightQuery(minSizeBytes: 10).summaryPlainName == "Search results")
+    }
+
+    @Test("a fully-populated query round-trips through Codable so it can be saved")
+    func codableRoundTrip() throws {
+        let query = SpotlightQuery(
+            nameContains: "report",
+            contentContains: "quarterly",
+            kinds: [.document, .archive],
+            minSizeBytes: 2048,
+            modifiedWithin: .month
+        )
+        let decoded = try JSONDecoder().decode(
+            SpotlightQuery.self,
+            from: try JSONEncoder().encode(query)
+        )
+        #expect(decoded == query)
+        #expect(decoded.metadataPredicate() == query.metadataPredicate())
+    }
 }

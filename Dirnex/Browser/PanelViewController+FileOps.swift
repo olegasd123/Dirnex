@@ -300,6 +300,9 @@ extension PanelViewController: NSMenuItemValidation {
             // path field editor intercepts ⌘C for text copy — so this validates the file case.
             // An archive entry has no on-disk URL to place on the pasteboard yet.
             return !isArchive && !selectionTargets().isEmpty
+        case #selector(saveCurrentSearch(_:)):
+            // Only meaningful on a results pane that still carries the query behind it.
+            return canSaveCurrentSearch
         case #selector(undoLastOperation(_:)):
             return validateUndoItem(menuItem)
         case #selector(goToParentDirectory(_:)):

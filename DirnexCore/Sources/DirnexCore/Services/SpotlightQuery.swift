@@ -85,7 +85,7 @@ public enum SearchAge: String, Sendable, Equatable, CaseIterable, Codable {
 /// A file search described as data. Any combination of the fields narrows the result set (they
 /// AND together); an all-empty query is `isEmpty` and produces no predicate, so the search UI
 /// disables "Find" until the user asks for something.
-public struct SpotlightQuery: Sendable, Equatable {
+public struct SpotlightQuery: Sendable, Equatable, Codable {
     /// Substring matched (case- and diacritic-insensitively) against the file *name*.
     public var nameContains: String
     /// Substring matched against the indexed text *content* of the file.
@@ -186,6 +186,17 @@ public struct SpotlightQuery: Sendable, Equatable {
         if !name.isEmpty { return "“\(name)”" }
         let content = trimmedContent
         if !content.isEmpty { return "“\(content)”" }
+        if kinds.count == 1, let only = kinds.first { return only.title }
+        return "Search results"
+    }
+
+    /// The same precedence as `summary` but without the display quotes — a sensible default the
+    /// "Save Search…" prompt can prefill into an editable name field.
+    public var summaryPlainName: String {
+        let name = trimmedName
+        if !name.isEmpty { return name }
+        let content = trimmedContent
+        if !content.isEmpty { return content }
         if kinds.count == 1, let only = kinds.first { return only.title }
         return "Search results"
     }

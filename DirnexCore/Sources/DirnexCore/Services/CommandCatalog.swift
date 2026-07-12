@@ -217,6 +217,12 @@ public enum CommandCatalog {
             shortcut: CommandShortcut(key: "F7", modifiers: [.function, .option])
         ),
         Command(
+            id: "go.saveSearch",
+            title: "Save Search…",
+            category: .navigation,
+            keywords: ["search", "saved", "smart", "folder", "bookmark", "sidebar"]
+        ),
+        Command(
             id: "go.parent",
             title: "Go Up",
             category: .navigation,
