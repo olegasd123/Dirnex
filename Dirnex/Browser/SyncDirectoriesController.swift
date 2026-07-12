@@ -20,8 +20,8 @@ final class SyncDirectoriesController: NSViewController {
         let action: SyncAction
     }
 
-    private let leftDir: VFSPath
-    private let rightDir: VFSPath
+    let leftDir: VFSPath
+    let rightDir: VFSPath
     private let backend: any VFSBackend
     /// Handed the checked, actionable decisions when the user commits.
     var onApply: (([Decision]) -> Void)?
@@ -34,7 +34,7 @@ final class SyncDirectoriesController: NSViewController {
 
     /// One diff row: the comparison entry, its current action under the chosen direction, and
     /// whether the user has it checked for the run.
-    fileprivate struct Row {
+    struct Row {
         let entry: SyncEntry
         var action: SyncAction
         var included: Bool
@@ -44,7 +44,7 @@ final class SyncDirectoriesController: NSViewController {
     private let headerLabel = NSTextField(labelWithString: "")
     private let directionControl = NSSegmentedControl()
     private let comparisonControl = NSSegmentedControl()
-    private let tableView = NSTableView()
+    let tableView = NSTableView()
     private let scrollView = NSScrollView()
     private let spinner = NSProgressIndicator()
     private let statusLabel = NSTextField(labelWithString: "")
@@ -163,9 +163,24 @@ final class SyncDirectoriesController: NSViewController {
         updateChrome()
     }
 
-    @objc private func toggleInclude(_ sender: NSButton) {
+    @objc func toggleInclude(_ sender: NSButton) {
         guard rows.indices.contains(sender.tag) else { return }
         rows[sender.tag].included = sender.state == .on
+        updateChrome()
+    }
+
+    /// Override one row's action from its right-click menu — flip a copy the other way, or turn a
+    /// copy into a delete. Picking an action opts the row into the run (the checkbox can still skip
+    /// it afterward); a direction change later re-derives defaults and drops the override.
+    @objc func setRowAction(_ sender: NSMenuItem) {
+        guard let action = sender.representedObject as? SyncAction,
+              rows.indices.contains(sender.tag) else { return }
+        rows[sender.tag].action = action
+        rows[sender.tag].included = true
+        tableView.reloadData(
+            forRowIndexes: IndexSet(integer: sender.tag),
+            columnIndexes: IndexSet(integersIn: 0..<tableView.numberOfColumns)
+        )
         updateChrome()
     }
 
@@ -217,17 +232,17 @@ final class SyncDirectoriesController: NSViewController {
         statusLabel.textColor = isError ? .systemRed : .secondaryLabelColor
     }
 
-    // MARK: - Row model access (for the table extension)
+    // MARK: - Row model access (for the diff-table extension)
 
-    fileprivate var rowCount: Int { rows.count }
+    var rowCount: Int { rows.count }
 
-    fileprivate func row(at index: Int) -> Row? {
+    func row(at index: Int) -> Row? {
         rows.indices.contains(index) ? rows[index] : nil
     }
 
     // MARK: - Helpers
 
-    private func isActionable(_ action: SyncAction) -> Bool {
+    func isActionable(_ action: SyncAction) -> Bool {
         action != .none && action != .conflict
     }
 
@@ -291,13 +306,20 @@ private extension SyncDirectoriesController {
         comparisonControl.target = self
         comparisonControl.action = #selector(comparisonChanged(_:))
 
+        let hint = label("Right-click a row to change its action")
+        hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        hint.textColor = .tertiaryLabelColor
+        hint.lineBreakMode = .byTruncatingTail
+
         let row = NSStackView(views: [
             label("Direction:"), directionControl,
             spacer(width: 16),
-            label("Compare by:"), comparisonControl
+            label("Compare by:"), comparisonControl,
+            spacer(width: 0), hint
         ])
         row.orientation = .horizontal
         row.spacing = 8
+        row.widthAnchor.constraint(equalToConstant: 680).isActive = true
         return row
     }
 
@@ -312,6 +334,11 @@ private extension SyncDirectoriesController {
         tableView.allowsColumnResizing = true
         tableView.dataSource = self
         tableView.delegate = self
+
+        // Right-click a row to override its action (rebuilt per-click from the clicked row).
+        let rowMenu = NSMenu()
+        rowMenu.delegate = self
+        tableView.menu = rowMenu
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -359,107 +386,5 @@ private extension SyncDirectoriesController {
         footer.spacing = 10
         footer.widthAnchor.constraint(equalToConstant: 680).isActive = true
         return footer
-    }
-}
-
-// MARK: - Diff table
-
-extension SyncDirectoriesController: NSTableViewDataSource {
-    func numberOfRows(in tableView: NSTableView) -> Int { rowCount }
-}
-
-extension SyncDirectoriesController: NSTableViewDelegate {
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard let column = tableColumn, let data = self.row(at: row) else { return nil }
-        switch column.identifier.rawValue {
-        case "include": return includeCheckbox(
-                included: data.included,
-                action: data.action,
-                row: row
-            )
-        case "name": return nameCell(for: data.entry)
-        case "left": return detailCell(for: data.entry.left)
-        case "action": return actionCell(for: data.action)
-        case "right": return detailCell(for: data.entry.right)
-        default: return nil
-        }
-    }
-
-    private func includeCheckbox(included: Bool, action: SyncAction, row: Int) -> NSView {
-        let button = NSButton(
-            checkboxWithTitle: "",
-            target: self,
-            action: #selector(toggleInclude(_:))
-        )
-        button.tag = row
-        button.state = included ? .on : .off
-        button.isEnabled = isActionable(action)
-        return button
-    }
-
-    private func nameCell(for entry: SyncEntry) -> NSView {
-        let name = entry.isDirectory ? entry.relativePath + "/" : entry.relativePath
-        let field = NSTextField(labelWithString: name)
-        field.lineBreakMode = .byTruncatingMiddle
-        field.toolTip = entry.relativePath
-        return field
-    }
-
-    private func detailCell(for entry: FileEntry?) -> NSView {
-        guard let entry else {
-            let dash = NSTextField(labelWithString: "—")
-            dash.textColor = .tertiaryLabelColor
-            return dash
-        }
-        let size = entry.isDirectory ? "folder" : FileFormatting.sizeString(for: entry)
-        let field = NSTextField(
-            labelWithString: size + " · " + FileFormatting.dateString(for: entry)
-        )
-        field.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        field.textColor = .secondaryLabelColor
-        field.lineBreakMode = .byTruncatingTail
-        field.toolTip = field.stringValue
-        return field
-    }
-
-    private func actionCell(for action: SyncAction) -> NSView {
-        let display = actionDisplay(action)
-        let field = NSTextField(labelWithString: display.glyph)
-        field.alignment = .center
-        field.textColor = display.color
-        field.toolTip = display.tip
-        field.font = .systemFont(ofSize: 13, weight: .semibold)
-        return field
-    }
-
-    /// Glyph, colour, and tooltip for an action's cell — an arrow toward the side that changes
-    /// for a copy, a red ✕ for a delete (which side is clear from the populated detail column),
-    /// and a warning for a conflict the run skips.
-    private func actionDisplay(_ action: SyncAction) -> ActionStyle {
-        switch action {
-        case .copyToRight: return ActionStyle("→", .systemGreen, "Copy to \(rightDir.lastComponent)")
-        case .copyToLeft: return ActionStyle("←", .systemGreen, "Copy to \(leftDir.lastComponent)")
-        case .deleteRight: return ActionStyle(
-                "✕",
-                .systemRed,
-                "Delete from \(rightDir.lastComponent)"
-            )
-        case .deleteLeft: return ActionStyle("✕", .systemRed, "Delete from \(leftDir.lastComponent)")
-        case .conflict: return ActionStyle("⚠", .systemOrange, "Conflict — left unchanged")
-        case .none: return ActionStyle("=", .tertiaryLabelColor, "Identical")
-        }
-    }
-}
-
-/// The rendered appearance of one row's action, in the diff table's action column.
-private struct ActionStyle {
-    let glyph: String
-    let color: NSColor
-    let tip: String
-
-    init(_ glyph: String, _ color: NSColor, _ tip: String) {
-        self.glyph = glyph
-        self.color = color
-        self.tip = tip
     }
 }

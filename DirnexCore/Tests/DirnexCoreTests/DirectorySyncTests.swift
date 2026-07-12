@@ -307,3 +307,43 @@ struct DirectorySyncActionTests {
         #expect(entry.defaultAction(for: .rightToLeft) == .deleteLeft)
     }
 }
+
+@Suite("DirectorySync — override actions")
+struct DirectorySyncOverrideTests {
+    @Test("a one-sided item can be propagated or deleted from its side")
+    func oneSidedOverrides() {
+        #expect(DirectorySync.availableActions(for: .leftOnly) == [.copyToRight, .deleteLeft])
+        #expect(DirectorySync.availableActions(for: .rightOnly) == [.copyToLeft, .deleteRight])
+    }
+
+    @Test("a both-sides difference can be copied either way, but never deleted")
+    func bothSidesOverrides() {
+        for status in [SyncStatus.leftNewer, .rightNewer, .differ] {
+            #expect(DirectorySync.availableActions(for: status) == [.copyToRight, .copyToLeft])
+        }
+    }
+
+    @Test("identical and type-mismatch rows offer no override")
+    func noOverrideForIdenticalOrClash() {
+        #expect(DirectorySync.availableActions(for: .identical).isEmpty)
+        #expect(DirectorySync.availableActions(for: .typeMismatch).isEmpty)
+    }
+
+    @Test("override lists exclude the non-runnable .none and .conflict")
+    func overridesAreRunnable() {
+        for status in [SyncStatus.leftOnly, .rightOnly, .leftNewer, .rightNewer, .differ] {
+            let actions = DirectorySync.availableActions(for: status)
+            #expect(!actions.contains(.none))
+            #expect(!actions.contains(.conflict))
+        }
+    }
+
+    @Test("SyncEntry.availableActions matches the free function")
+    func entryConvenienceMatches() {
+        let entry = SyncEntry(
+            relativePath: "a.txt", name: "a.txt",
+            left: nil, right: nil, status: .rightOnly
+        )
+        #expect(entry.availableActions == [.copyToLeft, .deleteRight])
+    }
+}

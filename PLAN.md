@@ -1804,9 +1804,10 @@ a saved search is just that query + a name + a scope, persisted.
 - [ ] Capability degradation: panels grey out unsupported ops per backend (no Trash on
       SFTP → explicit delete confirm; no clone → always chunked)
 - [x] Synchronize directories: two-panel diff view (left-only / right-only / differs /
-      same ✅), by size+date or content ✅; selective sync actions through the queue ✅
-      (per-row *direction override* — flip one row against the global direction — is the one
-      deferred niceness; include/exclude per row is done)
+      same ✅), by size+date or content ✅; selective sync actions through the queue ✅;
+      per-row *direction override* ✅ (right-click a row → flip a copy the other way, or turn a
+      copy into a delete; also resolves a bidirectional `differ` conflict by hand) — include/
+      exclude per row already done
 - [~] Compare by content: **byte compare ✅** (`ByteComparator`, drives sync `.content` mode);
       FileMerge/Kaleidoscope/BBEdit external-diff handoff still TODO
 
@@ -1909,6 +1910,48 @@ reported "already in sync" (metadata preserved → idempotent). App `xcodebuild`
 green, swiftformat/swiftlint-strict clean. NEXT M5: per-row direction override (flip one row);
 the `SFTPBackend` infra gate (swift-nio-ssh/libssh2 + live server); capability degradation;
 external-diff-tool handoff.
+
+Progress (2026-07-12, M5 pass 3): **per-row direction override** — the one deferred niceness on
+the sync item, **now `[x]`**. Right-click any diff row to override its action against the global
+direction: flip a copy the other way, or turn a copy into a delete; a bidirectional `differ`
+conflict (or a mirror row you disagree with) is resolved by hand this way. Two-part, core→app as
+always:
+- **Core** (pure, tested): `DirectorySync.availableActions(for status:) -> [SyncAction]` (+ a
+  `SyncEntry.availableActions` convenience) — the *actionable* choices a user may assign to one
+  row: a both-sides difference (`leftNewer`/`rightNewer`/`differ`) → `[.copyToRight, .copyToLeft]`
+  (copy either way, never delete a file that exists on both sides); a one-sided item → propagate
+  *or* delete from its side (`leftOnly`→`[.copyToRight, .deleteLeft]`, mirror for `rightOnly`);
+  `identical` and `typeMismatch` → `[]` (no safe override — a file-vs-folder clash still can't be
+  auto-resolved, matching the strict stance). `.none`/`.conflict` are deliberately absent (skip is
+  the checkbox's job; conflict is a non-action). +5 tests → **374 core tests** (was 369).
+- **App**: `SyncDirectoriesController` gains an `NSMenu` (delegate = self) on the diff table;
+  `menuNeedsUpdate` rebuilds it per-click from `tableView.clickedRow` — one item per
+  `availableActions`, a `.on` checkmark on the row's current action, target `setRowAction(_:)`
+  (row in `tag`, `SyncAction` in `representedObject`); an empty list shows one disabled caption
+  ("One side is a folder — resolve manually"). Picking an item sets the row's action + forces
+  `included = true`, reloads that row, and recomputes the footer. Added a "Right-click a row to
+  change its action" hint in the controls row. A direction/comparison change still re-derives
+  defaults and drops overrides (documented behavior). GOTCHA (recurring, `file_length` this time,
+  not `type_body_length`): the new menu tipped the controller over swiftlint's 500-line
+  `file_length` → **split the diff-table + override-menu rendering into a companion file**
+  `SyncDirectoriesController+DiffTable.swift` (data source + delegate + `NSMenuDelegate` +
+  `ActionStyle`). That cross-file split forced widening `Row`, `rowCount`, `row(at:)`,
+  `isActionable`, `toggleInclude`, `setRowAction`, `tableView`, `leftDir`, `rightDir` from
+  `private`/`fileprivate` to internal (Swift `private` doesn't cross files; a `private`
+  `tableView` in a `NSTableViewDelegate`-conforming type even resolves to the delegate *method* in
+  the other file → "has no member 'clickedRow'" until widened). App `xcodebuild` (into `build/`
+  via `-derivedDataPath build`, since the default DerivedData copy isn't the one LaunchServices
+  launches) + `swift test` green, swiftformat/swiftlint-strict clean. VERIFIED LIVE end-to-end:
+  seeded two fixture trees (`changed.txt` left-newer, `only_left.txt`, `only_right.txt`, identical
+  `same.txt`); right-click `changed.txt` showed "✓ Copy to R / Copy to L" → picked Copy to L (glyph
+  → ←); right-click `only_left.txt` showed "✓ Copy to R / Delete from L" → picked Delete from L
+  (footer went "2 to copy, 1 to delete" → "1 to copy, 2 to delete"); Synchronize raised the
+  **2-item** trash confirm (proving the overridden delete count drives it), and on disk `L/changed.txt`
+  became the *right* copy (6 B "right", i.e. copied **leftward** per the override, NOT the L→R
+  default's 34 B), `only_left.txt` was trashed from L (not copied to R), `only_right.txt` trashed
+  from R — both panes refreshed to identical `changed.txt`+`same.txt`, no crash. NEXT M5: the
+  `SFTPBackend` infra gate (swift-nio-ssh/libssh2 + live server); capability degradation;
+  external-diff-tool handoff (FileMerge/Kaleidoscope/BBEdit — the remaining `[~]` slice).
 
 ### M6 — Mac-native power features (M)
 

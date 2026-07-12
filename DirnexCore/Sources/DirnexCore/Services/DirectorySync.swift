@@ -125,6 +125,11 @@ public struct SyncEntry: Sendable, Equatable, Identifiable {
     public func defaultAction(for direction: SyncDirection) -> SyncAction {
         DirectorySync.defaultAction(for: status, direction: direction)
     }
+
+    /// The override actions the user may pick for this row (see `DirectorySync.availableActions`).
+    public var availableActions: [SyncAction] {
+        DirectorySync.availableActions(for: status)
+    }
 }
 
 // MARK: - Engine
@@ -200,6 +205,27 @@ public enum DirectorySync {
 
         results.sort { $0.relativePath < $1.relativePath }
         return results
+    }
+
+    /// The *actionable* choices a user may assign to one row, overriding the direction's default —
+    /// the menu the diff view offers on a right-click ("flip this row the other way", "delete it
+    /// instead of copying"). Each is a real operation the apply path can run, so `.none` (skip is
+    /// the checkbox's job) and `.conflict` (a non-action) are deliberately absent.
+    ///
+    /// - A both-sides difference (`leftNewer`/`rightNewer`/`differ`) can be copied *either* way —
+    ///   this is the "flip one row against the global direction" case, and it also lets the user
+    ///   resolve a bidirectional `differ` conflict by hand. Deleting a file that exists on both
+    ///   sides is never offered — that isn't a sync action.
+    /// - A one-sided item can be propagated to the other side *or* deleted from the side it's on.
+    /// - `identical` has nothing to do, and a `typeMismatch` (file-vs-directory) has no safe
+    ///   automatic resolution — both return an empty list, so the diff view shows no override menu.
+    public static func availableActions(for status: SyncStatus) -> [SyncAction] {
+        switch status {
+        case .identical, .typeMismatch: return []
+        case .leftOnly: return [.copyToRight, .deleteLeft]
+        case .rightOnly: return [.copyToLeft, .deleteRight]
+        case .leftNewer, .rightNewer, .differ: return [.copyToRight, .copyToLeft]
+        }
     }
 
     /// The pre-selected action for a row of the given `status` under `direction`.
