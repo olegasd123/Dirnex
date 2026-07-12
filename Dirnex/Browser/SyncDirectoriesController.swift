@@ -25,6 +25,9 @@ final class SyncDirectoriesController: NSViewController {
     private let backend: any VFSBackend
     /// Handed the checked, actionable decisions when the user commits.
     var onApply: (([Decision]) -> Void)?
+    /// Invoked to open two files in an external diff tool (Compare Contents…). The controller is a
+    /// pure view; the panel owns process launching and error UI.
+    var onCompare: ((VFSPath, VFSPath) -> Void)?
 
     private var direction: SyncDirection = .leftToRight
     private var comparison: SyncComparison = .sizeAndDate
@@ -182,6 +185,15 @@ final class SyncDirectoriesController: NSViewController {
             columnIndexes: IndexSet(integersIn: 0..<tableView.numberOfColumns)
         )
         updateChrome()
+    }
+
+    /// Open the clicked both-sides row's two files in an external diff tool. Only offered when both
+    /// sides are regular files (see `menuNeedsUpdate`), so both paths are present.
+    @objc func compareContents(_ sender: NSMenuItem) {
+        guard let data = row(at: sender.tag),
+              let left = data.entry.left?.path,
+              let right = data.entry.right?.path else { return }
+        onCompare?(left, right)
     }
 
     @objc private func cancel(_ sender: Any?) {

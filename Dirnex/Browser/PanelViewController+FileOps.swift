@@ -357,6 +357,9 @@ extension PanelViewController: NSMenuItemValidation {
         case #selector(synchronizeDirectories(_:)):
             // Compares the two panes' folders — needs two distinct real local directories.
             return canSynchronize
+        case #selector(compareByContents(_:)):
+            // Diffs the two panes' cursor files — needs a real file under each cursor.
+            return canCompareByContents
         default:
             return nil
         }

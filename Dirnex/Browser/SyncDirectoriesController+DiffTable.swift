@@ -106,17 +106,33 @@ extension SyncDirectoriesController: NSMenuDelegate {
         let clicked = tableView.clickedRow
         guard let data = row(at: clicked) else { return }
 
-        let actions = DirectorySync.availableActions(for: data.entry.status)
-        guard !actions.isEmpty else {
-            let item = NSMenuItem(
-                title: overrideUnavailableTitle(for: data.entry.status),
-                action: nil,
+        // A both-sides pair of regular files can be opened in an external diff tool — the
+        // "how do they differ?" companion to the byte comparison (PLAN.md §M5 Compare-by-content).
+        if data.entry.left?.kind == .file, data.entry.right?.kind == .file {
+            let compare = NSMenuItem(
+                title: compareContentsTitle(),
+                action: #selector(compareContents(_:)),
                 keyEquivalent: ""
             )
-            item.isEnabled = false
-            menu.addItem(item)
+            compare.target = self
+            compare.tag = clicked
+            menu.addItem(compare)
+        }
+
+        let actions = DirectorySync.availableActions(for: data.entry.status)
+        guard !actions.isEmpty else {
+            if menu.items.isEmpty {
+                let item = NSMenuItem(
+                    title: overrideUnavailableTitle(for: data.entry.status),
+                    action: nil,
+                    keyEquivalent: ""
+                )
+                item.isEnabled = false
+                menu.addItem(item)
+            }
             return
         }
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
         for action in actions {
             let item = NSMenuItem(
                 title: menuTitle(for: action),
@@ -145,6 +161,15 @@ extension SyncDirectoriesController: NSMenuDelegate {
         status == .typeMismatch
             ? "One side is a folder — resolve manually"
             : "No actions available"
+    }
+
+    /// Name the external-diff item after the tool that would open (so the user knows what launches),
+    /// or a neutral title when none is installed — the click then explains how to get one.
+    private func compareContentsTitle() -> String {
+        if let tool = ExternalDiffLauncher.preferredTool() {
+            return "Compare with \(tool.displayName)…"
+        }
+        return "Compare Contents…"
     }
 }
 

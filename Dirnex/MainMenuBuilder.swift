@@ -45,7 +45,7 @@ enum MainMenuBuilder {
         MenuSpec(title: "File", items: [
             .command("file.newTab"), .command("file.closeTab"), .separator,
             .command("file.copy"), .command("file.move"), .command("file.pack"),
-            .command("file.syncDirectories"), .separator,
+            .command("file.syncDirectories"), .command("file.compareByContents"), .separator,
             .command("file.rename"), .command("file.multiRename"), .separator,
             .command("file.newFolder"), .separator,
             .command("file.trash"), .command("file.deletePermanently")

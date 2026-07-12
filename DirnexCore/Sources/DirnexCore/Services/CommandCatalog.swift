@@ -66,6 +66,12 @@ public enum CommandCatalog {
             keywords: ["sync", "synchronize", "compare", "mirror", "diff", "directories", "folders"]
         ),
         Command(
+            id: "file.compareByContents",
+            title: "Compare By Contents…",
+            category: .file,
+            keywords: ["compare", "diff", "contents", "filemerge", "kaleidoscope", "bbedit"]
+        ),
+        Command(
             id: "file.rename",
             title: "Rename…",
             category: .file,

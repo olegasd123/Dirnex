@@ -245,8 +245,9 @@ _Shipped over 11 passes (2026-07-09 → 07-12); 341 core tests. Per-pass detail 
       per-row *direction override* ✅ (right-click a row → flip a copy the other way, or turn a
       copy into a delete; also resolves a bidirectional `differ` conflict by hand) — include/
       exclude per row already done
-- [~] Compare by content: **byte compare ✅** (`ByteComparator`, drives sync `.content` mode);
-      FileMerge/Kaleidoscope/BBEdit external-diff handoff still TODO
+- [x] Compare by content: **byte compare ✅** (`ByteComparator`, drives sync `.content` mode) +
+      **external-diff handoff ✅** (FileMerge/Kaleidoscope/BBEdit via `ExternalDiffTool` — a
+      **Compare By Contents…** command plus a right-click **Compare with …** in the sync sheet)
 
 Exit: mirror a local folder to a server over SFTP, verify with sync-dirs, all queued
 and pausable.
@@ -389,6 +390,38 @@ always:
   from R — both panes refreshed to identical `changed.txt`+`same.txt`, no crash. NEXT M5: the
   `SFTPBackend` infra gate (swift-nio-ssh/libssh2 + live server); capability degradation;
   external-diff-tool handoff (FileMerge/Kaleidoscope/BBEdit — the remaining `[~]` slice).
+
+Progress (2026-07-12, M5 pass 4): **external-diff-tool handoff** — the remaining `[~]` slice of
+Compare-by-content, **now `[x]`**. `ByteComparator` says *whether* two files differ; this opens them
+side-by-side in a real diff tool to show *how*. Core→app as always:
+- **Core** (pure, tested): `DirnexCore/Services/ExternalDiffTool.swift` — a value descriptor of a
+  known diff app (`identifier`+`displayName`+`candidateExecutablePaths` most-preferred-first+
+  `leadingArguments`) with `invocation(comparing:with:executableExists:)→ExternalDiffInvocation?`
+  (executable + argv = `leadingArguments + [left, right]`; nil when not installed). Locating the
+  launcher is an **injected** `(String)->Bool` probe, so the whole thing is testable with no real
+  install. Registry `known` = `[.kaleidoscope, .bbEdit, .fileMerge]` (dedicated diff apps first,
+  FileMerge/`opendiff` as the ships-with-Xcode fallback); `installed(where:)` filters, `preferred(
+  identifier:where:)` honors a saved choice then falls back to the first installed. Paths: FileMerge
+  `/usr/bin/opendiff`; Kaleidoscope `ksdiff` and BBEdit `bbdiff` under `/opt/homebrew/bin` then
+  `/usr/local/bin`. +8 tests → **383 core tests** (was 374).
+- **App**: `Dirnex/Browser/ExternalDiffLauncher.swift` — supplies the real probe
+  (`FileManager.isExecutableFile`) and spawns the resolved invocation off-main via `Process`
+  (`run()` then detach — never blocks on the GUI tool; streams → nullDevice), mirroring
+  `ArchiveExtractor`. `preferredTool()` (cheap) titles/enables the menu; `compare(_:_:completion:)`
+  reports `noToolInstalled` / `launchFailed` back on the main actor. Two entry points: (1) a
+  right-click **Compare with <tool>…** item prepended to the sync sheet's row menu for any
+  both-sides regular-file pair (wired via `SyncDirectoriesController.onCompare`); (2) a standalone
+  **Compare By Contents…** File command (`file.compareByContents`, no shortcut → conflict-free;
+  `coversCompareByContents` test) that diffs the two panes' **cursor** files (`comparableCursorPair`
+  — both must be real local files and distinct; gates `validateMenuItem` via `canCompareByContents`).
+  Failures surface through the existing `presentOperationFailure` alert ("No comparison tool found —
+  install FileMerge/Kaleidoscope/BBEdit"). App `xcodebuild` (into `build/` via `-derivedDataPath
+  build`) + `swift test` green, swiftformat/swiftlint-strict clean. VERIFIED the handoff mechanic
+  live: only `/usr/bin/opendiff` is installed here → `preferred()` resolves FileMerge; spawning
+  `opendiff <L> <R>` exactly as the launcher does launched FileMerge (confirmed via `pgrep`), then
+  quit it. **NEXT M5:** the `SFTPBackend` infra gate (swift-nio-ssh/libssh2 + live server);
+  capability degradation. A Settings picker for the preferred diff tool (the `preferred(identifier:)`
+  hook already exists) is optional polish.
 
 ### M6 — Mac-native power features (M)
 
