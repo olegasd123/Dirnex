@@ -45,12 +45,15 @@ extension PanelViewController {
     /// follow the pane's current directory — so a "Pictures" saved search always searches
     /// Pictures wherever you invoke it.
     func runSavedSearch(_ savedSearch: SavedSearch) {
-        performSearch(savedSearch.query, scope: savedSearch.scope)
+        // A saved search carries a friendly name — label its results tab with it, not the raw query.
+        performSearch(savedSearch.query, scope: savedSearch.scope, title: savedSearch.name)
     }
 
     /// Run `query` within `scope` (its subtree), or everywhere when `scope` is `nil`, off the
-    /// main thread, then install the hits as a virtual results tab.
-    private func performSearch(_ query: SpotlightQuery, scope: VFSPath?) {
+    /// main thread, then install the hits as a virtual results tab. `title`, when given, is the
+    /// tab's chip label (a saved search's name); a fresh ⌥F7 search leaves it `nil` and the chip
+    /// shows the query summary.
+    private func performSearch(_ query: SpotlightQuery, scope: VFSPath?, title: String? = nil) {
         let backend = backend
         Task {
             let results = await SpotlightSearchRunner.run(query, scope: scope, backend: backend)
@@ -58,7 +61,8 @@ extension PanelViewController {
                 results.entries,
                 query: query,
                 scope: scope,
-                truncated: results.truncated
+                truncated: results.truncated,
+                title: title
             )
         }
     }
@@ -72,7 +76,8 @@ extension PanelViewController {
         _ entries: [FileEntry],
         query: SpotlightQuery,
         scope: VFSPath?,
-        truncated: Bool
+        truncated: Bool,
+        title: String? = nil
     ) {
         captureColumnLayout()
         let listing = DirectoryListing(
@@ -88,6 +93,8 @@ extension PanelViewController {
         // Retain what produced these results so "Save Search…" can persist it.
         tab.searchQuery = query
         tab.searchScope = scope
+        // A saved search names its results tab; an ad-hoc ⌥F7 search leaves the query-summary chip.
+        tab.customTitle = title
 
         tabs.insert(tab, at: activeTabIndex + 1)
         activeTabIndex += 1
@@ -122,6 +129,11 @@ extension PanelViewController {
         if store.contains(name: name), !confirmReplaceSavedSearch(named: name) { return }
         store.save(SavedSearch(name: name, query: query, scope: tab.searchScope))
         SavedSearchStore.save(store)
+
+        // Relabel the current results tab with the name the user just gave it.
+        tab.customTitle = name
+        refreshTabBar()
+        persistState()
     }
 
     /// Ask for a saved-search name, prefilled with a sensible default, returning the trimmed

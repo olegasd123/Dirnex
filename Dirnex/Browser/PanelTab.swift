@@ -33,6 +33,11 @@ final class PanelTab {
     /// a results tab (search results aren't persisted), so this is never encoded.
     var searchQuery: SpotlightQuery?
     var searchScope: VFSPath?
+    /// An explicit chip label overriding the path-derived one — set when a search is saved (or a
+    /// saved search is re-run) so a results tab reads as its friendly name ("JMeter search")
+    /// rather than the raw query (`"jmeter"`). `nil` for an ordinary tab. Session-scoped like
+    /// `searchQuery` (search tabs aren't persisted).
+    var customTitle: String?
 
     init(panel: Panel) {
         self.panel = panel
@@ -52,9 +57,10 @@ final class PanelTab {
         columnLayout = columns
     }
 
-    /// The short label shown on the tab chip — the directory name, or the volume name at
-    /// the backend root (matching the path bar's root crumb).
+    /// The short label shown on the tab chip — a saved search's custom name when set, else the
+    /// directory name (or the volume name at the backend root, matching the path bar's root crumb).
     var title: String {
-        panel.path.isRoot ? "Macintosh HD" : panel.path.lastComponent
+        if let customTitle, !customTitle.isEmpty { return customTitle }
+        return panel.path.isRoot ? "Macintosh HD" : panel.path.lastComponent
     }
 }

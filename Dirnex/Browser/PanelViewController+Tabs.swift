@@ -57,21 +57,39 @@ extension PanelViewController {
     // MARK: - Operations
 
     /// Open a new tab beside the current one, showing the same directory and inheriting
-    /// its sort/hidden settings (Cmd+T).
+    /// its sort/hidden settings (Cmd+T / the tab strip's `+`).
     func addTab() {
         // Snapshot the current tab's live column geometry first, so the new tab inherits
         // exactly what's on screen (matching the sort/hidden inheritance below).
         captureColumnLayout()
-        let tab = PanelTab(
-            path: panel.path,
-            sort: panel.model.sort,
-            showHidden: panel.model.showHidden,
-            columns: tabs[activeTabIndex].columnLayout
-        )
+        let currentTab = tabs[activeTabIndex]
+        let tab = newTab(basedOn: currentTab)
+        tab.columnLayout = currentTab.columnLayout
         tabs.insert(tab, at: activeTabIndex + 1)
         activeTabIndex += 1
         activateTab()
         persistState()
+    }
+
+    /// Build the tab `+` opens. Normally a fresh tab at the same directory (loaded on activate).
+    /// A **search-results** tab has no real directory — cloning its virtual `search:` path would
+    /// make `activateTab` navigate a backend nothing can list ("No backend can handle search:/…"),
+    /// so instead duplicate the results snapshot (marked already-loaded, carrying the query) so
+    /// `+` just opens another view of the same hits with no error.
+    private func newTab(basedOn currentTab: PanelTab) -> PanelTab {
+        guard isSearchResults else {
+            return PanelTab(
+                path: panel.path,
+                sort: panel.model.sort,
+                showHidden: panel.model.showHidden
+            )
+        }
+        let duplicate = PanelTab(panel: panel) // `panel` is a value type → an independent copy
+        duplicate.hasLoaded = true
+        duplicate.searchQuery = currentTab.searchQuery
+        duplicate.searchScope = currentTab.searchScope
+        duplicate.customTitle = currentTab.customTitle
+        return duplicate
     }
 
     func selectTab(at index: Int) {

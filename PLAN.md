@@ -1761,6 +1761,27 @@ a saved search is just that query + a name + a scope, persisted.
   Search… ⌘S**; ⌘S on the `*jmeter*` results tab opened the Save sheet; ⌘S on the normal `oleg`
   tab did nothing. `coversSaveSearch` updated to assert the shortcut + conflict-freedom (still
   **341 core tests**).
+- **Bugfix (same day): New Tab (`+` / Cmd+T) on a search-results tab no longer errors.** `addTab`
+  cloned the current tab's `panel.path`; on a results tab that path is the virtual `search:/…`,
+  and a fresh tab (`hasLoaded == false`) made `activateTab` call `navigate(to:)` on it → a
+  spurious **"No backend can handle search:/…"** alert (the results still rendered, since the
+  shared table shows the snapshot, but the failed navigate fired the dialog). Fix (app-only,
+  `PanelViewController+Tabs.newTab(basedOn:)`): when `isSearchResults`, the new tab **duplicates
+  the results snapshot** (`PanelTab(panel:)` — `Panel` is a value type → an independent copy —
+  marked `hasLoaded = true`, carrying `searchQuery`/`searchScope`) instead of navigating the
+  un-listable path; the normal-directory and archive cases are unchanged (both are browsable).
+  Verified live: `+` and Cmd+T on a `*jmeter*` results tab each opened another results view with
+  **no dialog**, and Cmd+T on the normal `oleg` tab still opened a fresh same-directory tab.
+- **Enhancement (same day): a saved search names its tab.** `PanelTab` gained a `customTitle`
+  (session-only, like `searchQuery`); `title` returns it when set, else the path-derived label. On
+  **Save Search…** the current results tab is relabeled with the given name (`refreshTabBar`), and
+  re-running a saved search from the sidebar titles its new tab the same — so a `"jmeter"` results
+  chip becomes **"JMeter search"** end-to-end, while an ad-hoc ⌥F7 search keeps the query-summary
+  chip (`title:` threaded through `runSavedSearch`→`performSearch`→`openSearchResults`, defaulting
+  `nil`). The duplicate-snapshot path (`newTab(basedOn:)`) copies `customTitle` too. The path-bar
+  header still reads "🔍 Results for “jmeter”" (it usefully shows the underlying query). Verified
+  live: saving "JMeter search" renamed the active chip; clicking the sidebar entry opened a second
+  "JMeter search" tab; a fresh unsaved "postman" search still showed the `"postman"` chip.
 
 ### M5 — Network and sync (M)
 
