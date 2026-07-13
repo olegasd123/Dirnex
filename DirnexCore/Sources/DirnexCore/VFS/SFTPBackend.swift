@@ -1,15 +1,18 @@
 import Foundation
 
-/// A `VFSBackend` that browses one remote SSH/SFTP account as a folder tree (PLAN.md §M5
-/// "`SFTPBackend`: browse/copy through the standard queue"). This is the *browse* half — the
-/// analogue of `ArchiveBackend`'s read-only first pass — so it answers `list`/`stat` and nothing
-/// more; the write primitives and byte transfer arrive next.
+/// A `VFSBackend` that browses *and mutates* one remote SSH/SFTP account as a folder tree
+/// (PLAN.md §M5 "`SFTPBackend`: browse/copy through the standard queue"). It answers `list`/`stat`
+/// and the write primitives — `createDirectory`, `moveItem` (remote rename), `removeItem`
+/// (recursive, since `sftp` has no `rm -r`), and byte transfer (`copyFile` up/down via the
+/// transport's `get`/`put`) — so the operation queue drives copies, moves, and deletes onto a
+/// remote just as it does on disk.
 ///
 /// All the logic lives here and is tested: path handling, listing parsing (`SFTPListingParser`),
-/// the stat interpretation, error mapping. The only non-hermetic piece — the network — is an
-/// injected `SFTPTransport`, so the backend is exercised end-to-end with a fake and needs no live
-/// server (PLAN.md §2). The app supplies a `Process`-driven transport over the system `sftp` tool
-/// (the `bsdtar`-style sidestep of a swift-nio-ssh/libssh2 dependency).
+/// the stat interpretation, error mapping, the recursive-delete walk, and the download-vs-upload
+/// decision. The only non-hermetic piece — the network — is an injected `SFTPTransport`, so the
+/// backend is exercised end-to-end with a fake and needs no live server (PLAN.md §2). The app
+/// supplies a `Process`-driven transport over the system `sftp` tool (the `bsdtar`-style sidestep
+/// of a swift-nio-ssh/libssh2 dependency).
 ///
 /// The backend's `id` encodes the account (`sftp://user@host:port`), so a `VFSPath` under it names
 /// both which account and which remote path; the app's composite backend routes on that id.
@@ -25,13 +28,13 @@ public struct SFTPBackend: VFSBackend {
 
     public var id: VFSBackendID { .sftp(location) }
 
-    /// Read-only for now — browsing a remote account as folders. The write primitives
-    /// (mkdir/rename/delete) and byte transfer, plus the widened `[.read, .write, .rename]`
-    /// capabilities that light up the M5 "capability degradation" path (no Trash → confirmed
-    /// permanent delete, no clone → chunked), arrive with the byte-transfer pass. Advertising
-    /// `.write` before copy-in works end-to-end would let the UI start a paste the backend can't
-    /// finish, so the honest capability today is `.read`.
-    public var capabilities: VFSCapabilities { .read }
+    /// Browse, rename, and write — but no Trash and no copy-on-write clone. This is exactly the
+    /// set the M5 "capability degradation" path was built for (PLAN.md §M5): with `.write` but not
+    /// `.trash`, a delete degrades to a *confirmed permanent* delete rather than silently failing
+    /// on a missing Trash; without `.clone`, `CopyEngine` skips the doomed clone attempt and goes
+    /// straight to chunked transfer. `.watch` is absent too — an SFTP pane has no FSEvents, so it
+    /// re-lists explicitly after a mutation instead.
+    public var capabilities: VFSCapabilities { [.read, .write, .rename] }
 
     public func listDirectory(at path: VFSPath) throws -> [FileEntry] {
         try requireOwnBackend(path)
@@ -56,6 +59,93 @@ public struct SFTPBackend: VFSBackend {
             throw VFSError.notFound(path)
         }
         return entry(from: match, at: path, name: path.lastComponent)
+    }
+
+    // MARK: - Writes
+
+    public func createDirectory(at path: VFSPath) throws {
+        try requireOwnBackend(path)
+        try mapErrors(path) { try transport.makeDirectory(path.path) }
+    }
+
+    /// Rename within this account. A move whose destination lives on a *different* backend
+    /// (download-then-delete, upload-then-delete) is not a remote rename — throw `EXDEV` so
+    /// `CopyEngine` falls back to copy-then-delete across backends, exactly as it does for a
+    /// cross-volume local move.
+    public func moveItem(at source: VFSPath, to destination: VFSPath) throws {
+        try requireOwnBackend(source)
+        guard destination.backend == id else {
+            throw VFSError.io(path: source, code: EXDEV)
+        }
+        try mapErrors(source) { try transport.rename(source.path, to: destination.path) }
+    }
+
+    /// Permanently remove `path`, recursively for directories — `sftp` has no `rm -r`, so a
+    /// directory is emptied (depth-first) before its `rmdir`. The item's kind is read from its
+    /// **parent listing**, not a `stat` of the path itself: `sftp`'s `ls` follows a symlink, so
+    /// statting a link-to-directory would misreport it as a directory and delete the *target's*
+    /// contents — a parent listing shows the link as a link, so `rm` removes the link alone.
+    public func removeItem(at path: VFSPath) throws {
+        try requireOwnBackend(path)
+        guard let parent = path.parent else {
+            throw VFSError.unsupported("Can’t delete the connection root.")
+        }
+        let siblings = try listDirectory(at: parent)
+        guard let entry = siblings.first(where: { $0.name == path.lastComponent }) else {
+            throw VFSError.notFound(path)
+        }
+        try removeResolved(entry)
+    }
+
+    /// Remove one already-classified entry: a directory has its children removed first (each
+    /// child's kind comes from *its* directory listing, so nested links are removed as links),
+    /// then the now-empty directory itself; a file or symlink is removed directly.
+    private func removeResolved(_ entry: FileEntry) throws {
+        if entry.kind == .directory {
+            for child in try listDirectory(at: entry.path) {
+                try removeResolved(child)
+            }
+            try mapErrors(entry.path) { try transport.removeDirectory(entry.path.path) }
+        } else {
+            try mapErrors(entry.path) { try transport.removeFile(entry.path.path) }
+        }
+    }
+
+    public func createSymbolicLink(at destination: VFSPath, withDestination target: String) throws {
+        try requireOwnBackend(destination)
+        try mapErrors(destination) { try transport.createSymbolicLink(
+            destination.path,
+            target: target
+        ) }
+    }
+
+    /// Copy one file's bytes between this remote account and the local disk — a **download**
+    /// (remote source → local destination, via `get`) or an **upload** (local source → remote
+    /// destination, via `put`). The whole file transfers as one `sftp` command, so `progress` is
+    /// reported once with the transferred byte count and `isCancelled` is honoured at the file
+    /// boundary (the queue's pause/cancel still acts between files). A copy that is neither
+    /// direction — remote-to-remote, or between two different accounts — has no `sftp` expression
+    /// yet and is refused.
+    public func copyFile(
+        at source: VFSPath,
+        to destination: VFSPath,
+        progress: (Int64) -> Void,
+        isCancelled: () -> Bool
+    ) throws {
+        if isCancelled() { throw CancellationError() }
+        let bytes: Int64
+        if source.backend == id, destination.backend == .local {
+            bytes = try mapErrors(source) { try transport.download(source.path, to: destination.path) }
+        } else if source.backend == .local, destination.backend == id {
+            bytes = try mapErrors(destination) { try transport.upload(
+                source.path,
+                to: destination.path
+            ) }
+        } else {
+            throw VFSError.unsupported("Copying directly between remote locations isn’t supported.")
+        }
+        if isCancelled() { throw CancellationError() }
+        progress(bytes)
     }
 
     /// Everything on one host shares a single connection, so all its jobs serialize (cheap, no

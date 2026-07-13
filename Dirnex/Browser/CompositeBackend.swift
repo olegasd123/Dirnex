@@ -57,15 +57,18 @@ final class CompositeBackend: VFSBackend, @unchecked Sendable {
     var id: VFSBackendID { local.id }
     var capabilities: VFSCapabilities { local.capabilities }
 
-    /// The capabilities of the backend that owns `path`: the full local set on disk, `.read`
-    /// for a virtual location (an `archive:…` browse or a search-results listing). A browsed
-    /// archive is read-only *through the VFS primitives* — its writes (F8 delete, add-into) go
-    /// through the app's separate rewrite path, gated by `isWritableArchive`, not these caps —
-    /// so reporting `.read` here correctly greys the VFS-driven mutations (New Folder, rename,
-    /// VFS delete) on any virtual pane. Cheap by design (no archive mount), like
-    /// `volumeIdentifier(for:)`.
+    /// The capabilities of the backend that owns `path`: the full local set on disk, a connected
+    /// SFTP account's `[.read, .write, .rename]` (writable but Trash-less/clone-less — the M5
+    /// degradation path), and `.read` for a virtual location (an `archive:…` browse or a
+    /// search-results listing). A browsed archive is read-only *through the VFS primitives* — its
+    /// writes (F8 delete, add-into) go through the app's separate rewrite path, gated by
+    /// `isWritableArchive`, not these caps. An SFTP path whose connection has dropped falls back to
+    /// `.read` so the pane greys writes rather than offering ones it can't perform. Cheap by design
+    /// (no archive mount, no network), like `volumeIdentifier(for:)`.
     func capabilities(for path: VFSPath) -> VFSCapabilities {
-        path.backend == .local ? local.capabilities : .read
+        if path.backend == .local { return local.capabilities }
+        if path.backend.isSFTP { return sftpBackend(for: path.backend)?.capabilities ?? .read }
+        return .read
     }
 
     func listDirectory(at path: VFSPath) throws -> [FileEntry] {
@@ -81,6 +84,12 @@ final class CompositeBackend: VFSBackend, @unchecked Sendable {
     }
 
     func moveItem(at source: VFSPath, to destination: VFSPath) throws {
+        // A move whose ends live on different backends (local ⇄ SFTP) is not an in-place rename —
+        // signal EXDEV so `CopyEngine` falls back to copy-then-delete, exactly as it does for a
+        // cross-volume local move. A same-backend move routes normally (local rename, SFTP rename).
+        guard source.backend == destination.backend else {
+            throw VFSError.io(path: source, code: EXDEV)
+        }
         try backend(for: source).moveItem(at: source, to: destination)
     }
 
@@ -103,7 +112,14 @@ final class CompositeBackend: VFSBackend, @unchecked Sendable {
         progress: (Int64) -> Void,
         isCancelled: () -> Bool
     ) throws {
-        try backend(for: source).copyFile(
+        // A byte copy is performed by whichever backend can move the bytes. An upload (local
+        // source → SFTP destination) is the SFTP backend's `put`, so route on the *destination*
+        // when it is remote; otherwise route on the source, which covers a download (SFTP source
+        // → local destination = the SFTP backend's `get`) and a plain local-to-local copy.
+        let mover = destination.backend.isSFTP ? try backend(for: destination) : try backend(
+            for: source
+        )
+        try mover.copyFile(
             at: source,
             to: destination,
             progress: progress,
@@ -135,12 +151,18 @@ final class CompositeBackend: VFSBackend, @unchecked Sendable {
     }
 
     private func connectedSFTP(for backendID: VFSBackendID) throws -> SFTPBackend {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let backend = sftpConnections[backendID.rawValue] else {
+        guard let backend = sftpBackend(for: backendID) else {
             throw VFSError.unsupported("Not connected to \(backendID). Reconnect to the server.")
         }
         return backend
+    }
+
+    /// The connected SFTP backend for `backendID`, or `nil` when there's no live connection — the
+    /// non-throwing lookup `capabilities(for:)` needs (it must never throw and must stay cheap).
+    private func sftpBackend(for backendID: VFSBackendID) -> SFTPBackend? {
+        lock.lock()
+        defer { lock.unlock() }
+        return sftpConnections[backendID.rawValue]
     }
 
     private func mountedArchive(at archivePath: String) throws -> ArchiveBackend {

@@ -236,10 +236,12 @@ _Shipped over 11 passes (2026-07-09 → 07-12); 341 core tests. Per-pass detail 
 
 ### M5 — Network and sync (M)
 
-- [~] `SFTPBackend`: connection manager, key auth; **browse DONE and verified live** (via the
-      system `sftp` CLI, not swift-nio-ssh/libssh2 — the same sidestep M4 made with `bsdtar`).
-      Remaining: byte transfer (copy-out/-in through the standard queue with resume),
-      keychain-stored password auth
+- [~] `SFTPBackend`: connection manager, key auth; **browse + byte transfer DONE and verified
+      live** (via the system `sftp` CLI, not swift-nio-ssh/libssh2 — the same sidestep M4 made
+      with `bsdtar`). Copy-out (`get`) / copy-in (`put`), remote mkdir / rename / recursive-delete
+      all run through the standard queue; an SFTP pane is writable (`[.read, .write, .rename]`) so
+      the pass-5 grey-out + Trash-less confirmed-permanent-delete light up. Remaining:
+      keychain-stored **password auth** (needs a PTY) and mid-file **resume**
 - [x] Capability degradation: panels grey out unsupported ops per backend ✅ (per-path
       `capabilities(for:)`; no Trash → explicit permanent-delete confirm ✅; no clone →
       always chunked ✅) — driven off the owning backend's caps, ready for SFTP to plug into
@@ -571,6 +573,51 @@ flipping SFTP caps to `[.read, .write, .rename]` so the pass-5 grey-out + Trash-
 confirm light up; then password/Keychain auth (needs a PTY). Optional polish: an SSH ControlMaster so
 repeated listings reuse one connection instead of re-handshaking per directory; saved connections in
 the sidebar; Settings picker for the preferred diff tool.
+
+Progress (2026-07-13, M5 pass 8): the **SFTP write pass** — remote mutation + byte transfer, so the
+operation queue drives copies, moves, and deletes onto a remote exactly as on disk. **`SFTPBackend`
+box stays `[~]`** (byte transfer now DONE; only keychain **password auth** + mid-file **resume**
+remain). **VERIFIED LIVE** against `oleg@mac` (a throwaway key the user authorized for the session,
+all artifacts cleaned up after — including the remote scratch dir, which the recursive-delete proved
+it removes): the gated live suite's new **write round-trip** (mkdir → `put` upload → list-and-check-
+size → `get` download → byte-compare → recursive remove) passed through the real `sftp` CLI, plus the
+5 existing browse tests. Core→app as always:
+- **Core** (hermetic, +14 tests → **441**): `SFTPTransport` grew the write verbs (`makeDirectory`/
+  `rename`/`removeFile`/`removeDirectory`/`createSymbolicLink`/`download`/`upload`) + matching
+  quoted/escaped `SFTPBatchCommand` builders (`mkdir`/`rename`/`rm`/`rmdir`/`ln -s`/`get`/`put`).
+  `SFTPBackend.capabilities` flipped **`.read` → `[.read, .write, .rename]`** (no `.trash`, no
+  `.clone` — the exact shape pass 5's `DeleteStrategy`/clone degradation was built for). New
+  primitives: `createDirectory` (mkdir); `moveItem` = remote rename within one account, else
+  **throws `EXDEV`** so `CopyEngine` falls back to copy-then-delete for a cross-backend (local⇄SFTP)
+  move; **recursive `removeItem`** — `sftp` has no `rm -r`, so it empties a directory depth-first
+  then `rmdir`s it, and crucially classifies the top item from its **parent listing**, not a `stat`
+  of the path (`sftp`'s `ls` *follows* a symlink, so statting a link-to-dir would delete the
+  *target's* contents — a parent listing shows the link as a link, so `rm` removes the link alone);
+  `copyFile` = **download** (`id` source → `.local` dest, `get`) or **upload** (`.local` source →
+  `id` dest, `put`), reporting the transferred bytes once for the progress bar and honouring
+  `isCancelled` at the file boundary, refusing an unexpressible remote↔remote copy. The fake
+  transport now records every write call so the recursion/routing is asserted without a server.
+- **App**: `SFTPProcessTransport` spawns each verb as one `sftp` batch command (reusing the pass-7
+  `run(batch:)`), transfers returning the local file's size for progress. `CompositeBackend` routes
+  `capabilities(for:)` to a **connected** SFTP backend (`[.read, .write, .rename]`; an unconnected /
+  dropped SFTP path falls back to `.read` so writes grey out rather than fail), routes `copyFile` on
+  the **destination** when it is remote (so an upload reaches the SFTP `put`; a download/local-local
+  still routes on the source), and throws `EXDEV` for any cross-backend move. Reconciled
+  `isVirtualDirectory` → **`isArchive || isSearchResults`** (an SFTP dir is a *real* writable remote
+  directory, not virtual), which — together with pass-5's capability-driven `validateMenuItem` —
+  lights up New Folder (mkdir), F2/⇧F2 rename (remote rename), F8 delete (Trash-less → confirmed
+  permanent), ⌘V paste-upload, and F5/F6 up/down on an SFTP pane; relaxed `beginTransfer`'s
+  destination guard to allow an SFTP target (upload), made `refreshCurrentDirectory` re-list an SFTP
+  pane after a mutation (no FSEvents), and gated ⌘C off SFTP (a remote entry has no *local* URL for
+  the pasteboard — F5 is the copy-out route). +1 app test → **16** (`CompositeBackendTests` now
+  asserts a connected SFTP path is writable/`.permanent`, an unconnected one read-only). GOTCHA
+  (recurring): the new write tests tipped `SFTPBackendTests` over swiftlint `type_body_length` 250 →
+  split them into a same-file `extension SFTPBackendTests`. `swift test` (441) + app `xcodebuild
+  test` (16) green, swiftformat/swiftlint-strict clean. **NEXT M5 (finishes `SFTPBackend` → `[x]`):**
+  password/Keychain auth (needs a PTY, so not the batch `sftp -b -` path — likely `expect`-style or
+  an `SSH_ASKPASS` helper) and mid-file resume (`get -a`/`put -a`). Optional polish: SSH
+  ControlMaster connection reuse, saved connections in the sidebar, Settings picker for the diff
+  tool. **M6 is the next milestone** once SFTP closes out.
 
 ### M6 — Mac-native power features (M)
 

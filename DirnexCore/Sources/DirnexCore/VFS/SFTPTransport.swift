@@ -11,16 +11,49 @@ import Foundation
 /// (swift-nio-ssh/libssh2). Tests supply a fake that returns canned listings, so the whole backend
 /// is exercised without a server.
 ///
-/// One method suffices for the read-only browse: `sftp`'s batch `ls -la` both lists a directory
-/// (many rows) and stats a single item (one row, or — for a directory — a self `.` row whose stat
-/// *is* the directory's), so `SFTPBackend` interprets one raw listing for both. The method is
-/// synchronous and may block on the network — the backend is always called off the main thread by
-/// the operation engine and the panel's background list, never on it.
+/// `sftp`'s batch `ls -la` both lists a directory (many rows) and stats a single item (one row,
+/// or — for a directory — a self `.` row whose stat *is* the directory's), so `SFTPBackend`
+/// interprets one raw listing for both. The write primitives each map onto one `sftp` batch verb
+/// (`mkdir`/`rename`/`rm`/`rmdir`/`ln`/`get`/`put`); the backend composes them (e.g. it empties a
+/// directory before `rmdir`, since `sftp` has no recursive remove). Every method is synchronous and
+/// may block on the network — the backend is always called off the main thread by the operation
+/// engine and the panel's background list, never on it.
 public protocol SFTPTransport: Sendable {
     /// The raw `sftp` `ls -la` output for `remotePath` — one entry per line. For a directory this
     /// is its children (each printed as a full path, plus the `.`/`..` self/parent rows); for a
     /// file it is that single file's row. Throws `SFTPTransportError` on a remote failure.
     func listDirectory(_ remotePath: String) throws -> String
+
+    /// Create a single remote directory (`mkdir`). Throws on any failure (the parent is missing,
+    /// something already occupies the path, permission denied) — the backend never relies on
+    /// intermediate directories being created, mirroring `mkdir(2)`.
+    func makeDirectory(_ remotePath: String) throws
+
+    /// Rename or move a remote item within the account (`rename`). Only valid within one
+    /// connection; a cross-backend move is copy-then-delete, decided above the transport.
+    func rename(_ source: String, to destination: String) throws
+
+    /// Remove a remote regular file or symbolic link (`rm`) — the link itself, never its target.
+    /// Directories are emptied and removed with `removeDirectory` by the backend.
+    func removeFile(_ remotePath: String) throws
+
+    /// Remove an *empty* remote directory (`rmdir`); the backend deletes the contents first, since
+    /// `sftp` has no recursive remove.
+    func removeDirectory(_ remotePath: String) throws
+
+    /// Create a remote symbolic link at `remotePath` pointing at the raw (unresolved) `target`
+    /// (`ln -s`) — used when a copied/mirrored tree contains a symlink.
+    func createSymbolicLink(_ remotePath: String, target: String) throws
+
+    /// Download the remote file at `remotePath` to a local path (`get`), returning the number of
+    /// bytes transferred so the operation engine can advance its progress bar.
+    @discardableResult
+    func download(_ remotePath: String, to localPath: String) throws -> Int64
+
+    /// Upload the local file at `localPath` to a remote path (`put`), returning the number of bytes
+    /// transferred so the operation engine can advance its progress bar.
+    @discardableResult
+    func upload(_ localPath: String, to remotePath: String) throws -> Int64
 }
 
 /// A remote operation's failure, in the few shapes the backend needs to distinguish so it can map
@@ -63,6 +96,42 @@ public enum SFTPBatchCommand {
     /// The batch line that lists (or stats) `remotePath`: `ls -la "…"`.
     public static func list(_ remotePath: String) -> String {
         "ls -la \(quote(remotePath))"
+    }
+
+    /// The batch line that creates a remote directory: `mkdir "…"`.
+    public static func makeDirectory(_ remotePath: String) -> String {
+        "mkdir \(quote(remotePath))"
+    }
+
+    /// The batch line that renames/moves a remote item: `rename "src" "dst"`.
+    public static func rename(_ source: String, to destination: String) -> String {
+        "rename \(quote(source)) \(quote(destination))"
+    }
+
+    /// The batch line that removes a remote file or symlink: `rm "…"`.
+    public static func removeFile(_ remotePath: String) -> String {
+        "rm \(quote(remotePath))"
+    }
+
+    /// The batch line that removes an empty remote directory: `rmdir "…"`.
+    public static func removeDirectory(_ remotePath: String) -> String {
+        "rmdir \(quote(remotePath))"
+    }
+
+    /// The batch line that creates a remote symbolic link: `ln -s "target" "link"` (`sftp`'s `ln`
+    /// takes the existing target first, the new link path second, like `ln(1)`).
+    public static func createSymbolicLink(_ remotePath: String, target: String) -> String {
+        "ln -s \(quote(target)) \(quote(remotePath))"
+    }
+
+    /// The batch line that downloads a remote file to a local path: `get "remote" "local"`.
+    public static func download(_ remotePath: String, to localPath: String) -> String {
+        "get \(quote(remotePath)) \(quote(localPath))"
+    }
+
+    /// The batch line that uploads a local file to a remote path: `put "local" "remote"`.
+    public static func upload(_ localPath: String, to remotePath: String) -> String {
+        "put \(quote(localPath)) \(quote(remotePath))"
     }
 
     /// The batch line that prints the remote working directory (`pwd`), used to discover the home

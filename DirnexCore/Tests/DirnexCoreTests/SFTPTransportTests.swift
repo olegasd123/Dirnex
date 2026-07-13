@@ -19,6 +19,29 @@ struct SFTPTransportTests {
         #expect(SFTPBatchCommand.list("/back\\slash") == "ls -la \"/back\\\\slash\"")
     }
 
+    @Test("the write verbs quote each path argument")
+    func writeVerbsQuotePaths() {
+        #expect(
+            SFTPBatchCommand.makeDirectory("/home/oleg/new dir") == "mkdir \"/home/oleg/new dir\""
+        )
+        #expect(SFTPBatchCommand.removeFile("/home/oleg/a.txt") == "rm \"/home/oleg/a.txt\"")
+        #expect(SFTPBatchCommand.removeDirectory("/home/oleg/sub") == "rmdir \"/home/oleg/sub\"")
+    }
+
+    @Test("the two-argument verbs quote both paths in order")
+    func twoArgumentVerbsQuoteBothPaths() {
+        #expect(SFTPBatchCommand.rename("/a b", to: "/c d") == "rename \"/a b\" \"/c d\"")
+        // ln takes the existing target first, the new link path second (like ln(1)).
+        #expect(
+            SFTPBatchCommand.createSymbolicLink("/link", target: "rel/target") == "ln -s \"rel/target\" \"/link\""
+        )
+        // get pulls remote→local; put pushes local→remote.
+        #expect(
+            SFTPBatchCommand.download("/remote/f", to: "/tmp/f") == "get \"/remote/f\" \"/tmp/f\""
+        )
+        #expect(SFTPBatchCommand.upload("/tmp/f", to: "/remote/f") == "put \"/tmp/f\" \"/remote/f\"")
+    }
+
     // MARK: - SFTPTransportError.classify
 
     @Test("a not-found stderr classifies as notFound")
@@ -33,7 +56,9 @@ struct SFTPTransportTests {
         #expect(SFTPTransportError.classify(stderr: stderr) == .permissionDenied)
     }
 
-    @Test("a failed key auth (both 'no such file' warning and 'Permission denied') is permissionDenied")
+    @Test(
+        "a failed key auth (both 'no such file' warning and 'Permission denied') is permissionDenied"
+    )
     func classifyBadKeyPrefersPermissionDenied() {
         // A missing/rejected identity file prints a key warning *and* the auth failure; the auth
         // failure is the actionable one, so it must win over the stray "no such file".

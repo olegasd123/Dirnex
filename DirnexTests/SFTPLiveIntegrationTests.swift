@@ -4,9 +4,10 @@ import Testing
 
 @testable import Dirnex
 
-/// End-to-end SFTP browse against a real server, exercising the actual `SFTPProcessTransport`
-/// (spawning `sftp`) → `SFTPBackend` → `SFTPListingParser` chain. Gated on a config file so it never
-/// runs in CI (which has no server): drop a JSON file at `/tmp/dirnex_sftp_live_test.json` with
+/// End-to-end SFTP browse *and write* against a real server, exercising the actual
+/// `SFTPProcessTransport` (spawning `sftp`) → `SFTPBackend` → `SFTPListingParser` chain, including a
+/// mkdir/upload/download/recursive-remove round trip. Gated on a config file so it never runs in CI
+/// (which has no server): drop a JSON file at `/tmp/dirnex_sftp_live_test.json` with
 /// `{ "host": …, "port": 22, "user": …, "identityFile": …, "remotePath": … }` for a reachable
 /// key-auth account (a file, not env vars, because `xcodebuild` doesn't forward the shell
 /// environment to the test runner). Without the file the suite is skipped.
@@ -14,14 +15,20 @@ import Testing
 struct SFTPLiveIntegrationTests {
     private func makeBackend() throws -> (SFTPBackend, SFTPLiveEnvironment.Config) {
         let config = try #require(SFTPLiveEnvironment.current)
-        let transport = SFTPProcessTransport(location: config.location, identityFile: config.identityFile)
+        let transport = SFTPProcessTransport(
+            location: config.location,
+            identityFile: config.identityFile
+        )
         return (SFTPBackend(location: config.location, transport: transport), config)
     }
 
     @Test("resolves the remote home directory (proves auth + connection)")
     func resolvesHome() throws {
         let config = try #require(SFTPLiveEnvironment.current)
-        let transport = SFTPProcessTransport(location: config.location, identityFile: config.identityFile)
+        let transport = SFTPProcessTransport(
+            location: config.location,
+            identityFile: config.identityFile
+        )
         let home = try transport.resolveHomeDirectory()
         #expect(home.hasPrefix("/"))
     }
@@ -57,10 +64,59 @@ struct SFTPLiveIntegrationTests {
         composite.connectSFTP(location: config.location, identityFile: config.identityFile)
         let path = VFSPath(backend: .sftp(config.location), path: config.remotePath)
         // The composite must route the sftp path to the connection registered above (not the local
-        // backend) and degrade its capabilities to read-only.
-        #expect(composite.capabilities(for: path) == .read)
+        // backend) and report its writable-but-Trash-less capabilities.
+        #expect(composite.capabilities(for: path) == [.read, .write, .rename])
         let entries = try composite.listDirectory(at: path)
         #expect(!entries.isEmpty)
+    }
+
+    @Test("round-trips a write end-to-end: mkdir → upload → list → download → recursive remove")
+    func writeRoundTrip() throws {
+        let (backend, config) = try makeBackend()
+        let base = VFSPath(backend: .sftp(config.location), path: config.remotePath)
+        // A unique scratch subtree under the remote path so a stray run never clobbers real data.
+        let dir = base.appending("dirnex_write_test_\(UUID().uuidString)")
+
+        let fileManager = FileManager.default
+        let scratch = fileManager.temporaryDirectory
+            .appendingPathComponent("dirnex_sftp_\(UUID().uuidString)")
+        try fileManager.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: scratch) }
+
+        let localSource = scratch.appendingPathComponent("hello.txt")
+        let payload = Data("hello over sftp \(UUID().uuidString)".utf8)
+        try payload.write(to: localSource)
+
+        // mkdir on the remote, then upload the local file into it.
+        try backend.createDirectory(at: dir)
+        let remoteFile = dir.appending("hello.txt")
+        try backend.copyFile(
+            at: .local(localSource.path),
+            to: remoteFile,
+            progress: { _ in },
+            isCancelled: { false }
+        )
+
+        // Listing the new remote directory shows the upload with its true size.
+        let listed = try backend.listDirectory(at: dir)
+        let uploaded = try #require(listed.first { $0.name == "hello.txt" })
+        #expect(uploaded.byteSize == Int64(payload.count))
+
+        // Download it back and confirm the bytes survived the round trip.
+        let localDest = scratch.appendingPathComponent("roundtrip.txt")
+        try backend.copyFile(
+            at: remoteFile,
+            to: .local(localDest.path),
+            progress: { _ in },
+            isCancelled: { false }
+        )
+        #expect(try Data(contentsOf: localDest) == payload)
+
+        // Recursive remove empties and deletes the subtree; the directory is gone afterwards.
+        try backend.removeItem(at: dir)
+        #expect(throws: (any Error).self) {
+            try backend.listDirectory(at: dir)
+        }
     }
 
     @Test("maps a missing remote path to VFSError.notFound")

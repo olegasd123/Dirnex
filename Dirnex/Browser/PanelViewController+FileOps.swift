@@ -248,9 +248,11 @@ extension PanelViewController {
     /// the cursor/marks by identity, so this survives the new entry appearing mid-list.
     /// Internal so `PanelViewController+Copy` can refresh both panes after a transfer.
     func refreshCurrentDirectory(selecting target: VFSPath? = nil) {
-        // A virtual results pane has no directory to re-list — skip so a both-panes refresh
-        // after a file operation leaves the search results snapshot untouched.
-        guard panel.path.backend == .local else { return }
+        // Re-list a real directory — on disk or on a connected SFTP account (an SFTP path is
+        // re-listable, so it must refresh after an upload/delete/mkdir even without FSEvents). A
+        // virtual pane (search results, a browsed archive) has no directory to re-list, so a
+        // both-panes refresh after a file operation leaves its snapshot untouched.
+        guard panel.path.backend == .local || panel.path.backend.isSFTP else { return }
         loadToken += 1
         let token = loadToken
         let path = panel.path
@@ -304,8 +306,9 @@ extension PanelViewController: NSMenuItemValidation {
         case #selector(copy(_:)):
             // `copy:` only reaches the pane when the file table is first responder — a name/
             // path field editor intercepts ⌘C for text copy — so this validates the file case.
-            // An archive entry has no on-disk URL to place on the pasteboard yet.
-            return !isArchive && !selectionTargets().isEmpty
+            // An archive entry has no on-disk URL to place on the pasteboard, and a remote SFTP
+            // entry has no *local* one (F5 copies it out instead), so both are excluded.
+            return !isArchive && !panel.path.backend.isSFTP && !selectionTargets().isEmpty
         case #selector(saveCurrentSearch(_:)):
             // Only meaningful on a results pane that still carries the query behind it.
             return canSaveCurrentSearch

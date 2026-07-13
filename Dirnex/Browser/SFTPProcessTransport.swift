@@ -22,6 +22,49 @@ struct SFTPProcessTransport: SFTPTransport {
         try run(batch: SFTPBatchCommand.list(remotePath))
     }
 
+    // MARK: - Writes
+
+    func makeDirectory(_ remotePath: String) throws {
+        _ = try run(batch: SFTPBatchCommand.makeDirectory(remotePath))
+    }
+
+    func rename(_ source: String, to destination: String) throws {
+        _ = try run(batch: SFTPBatchCommand.rename(source, to: destination))
+    }
+
+    func removeFile(_ remotePath: String) throws {
+        _ = try run(batch: SFTPBatchCommand.removeFile(remotePath))
+    }
+
+    func removeDirectory(_ remotePath: String) throws {
+        _ = try run(batch: SFTPBatchCommand.removeDirectory(remotePath))
+    }
+
+    func createSymbolicLink(_ remotePath: String, target: String) throws {
+        _ = try run(batch: SFTPBatchCommand.createSymbolicLink(remotePath, target: target))
+    }
+
+    @discardableResult
+    func download(_ remotePath: String, to localPath: String) throws -> Int64 {
+        _ = try run(batch: SFTPBatchCommand.download(remotePath, to: localPath))
+        // `sftp get` writes the whole file, so its final on-disk size is the bytes transferred.
+        return localFileSize(localPath)
+    }
+
+    @discardableResult
+    func upload(_ localPath: String, to remotePath: String) throws -> Int64 {
+        _ = try run(batch: SFTPBatchCommand.upload(localPath, to: remotePath))
+        // The local source's size is what `put` sent — cheaper and safer than re-statting the
+        // remote (which would cost another round trip).
+        return localFileSize(localPath)
+    }
+
+    private func localFileSize(_ path: String) -> Int64 {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attributes[.size] as? Int64 else { return 0 }
+        return size
+    }
+
     /// The remote working (home) directory reported by `pwd`, to land in on connect. Doubles as a
     /// connection test: it fails fast (classified) when auth, the host, or the key is wrong.
     func resolveHomeDirectory() throws -> String {

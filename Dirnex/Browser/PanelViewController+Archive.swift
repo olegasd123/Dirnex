@@ -16,10 +16,13 @@ extension PanelViewController {
         panel.path.backend.isArchive
     }
 
-    /// The active tab shows a virtual listing (search results or an archive) rather than a
-    /// real on-disk directory — the gate for New Folder / rename / delete / paste and friends.
+    /// The active tab shows a virtual listing — search results or a browsed archive — with no real,
+    /// writable directory behind it, the gate for the New Folder / rename / paste flows to bail out
+    /// early. A remote SFTP directory is *not* virtual: it's a real, writable, listable directory
+    /// (just over the network), so those flows run against it through the SFTP backend's write
+    /// primitives; whether an individual op is offered is decided by `capabilities(for:)`.
     var isVirtualDirectory: Bool {
-        panel.path.backend != .local
+        isArchive || isSearchResults
     }
 
     /// The archive-root location for a local archive file — the target Enter navigates to.
