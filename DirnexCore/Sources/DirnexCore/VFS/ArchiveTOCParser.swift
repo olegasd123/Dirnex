@@ -185,10 +185,17 @@ enum ArchiveTOCParser {
     }
 
     private static func dateFormatters() -> [DateFormatter] {
-        ["MMM d HH:mm", "MMM d yyyy", "MMM d HH:mm:ss"].map { format in
+        // `bsdtar -tvf` prints a recent member as "MMM d HH:mm" (no year — the *current* year is
+        // implied) and an older one as "MMM d yyyy". A `DateFormatter` fills a missing year from
+        // `defaultDate`, which defaults to a 2000 reference — so the no-year formats must default
+        // to *now*, or a recent member would wrongly show the year 2000. The year-stamped format
+        // keeps its own year.
+        let now = Date()
+        return ["MMM d HH:mm", "MMM d yyyy", "MMM d HH:mm:ss"].map { format in
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
             formatter.dateFormat = format
+            if !format.contains("yyyy") { formatter.defaultDate = now }
             return formatter
         }
     }
@@ -201,8 +208,16 @@ enum ArchiveTOCParser {
     ) -> Date {
         let string = "\(month) \(day) \(timeOrYear)"
         for formatter in formatters {
-            if let date = formatter.date(from: string) { return date }
+            if let date = formatter.date(from: string) { return rollBackIfFuture(date) }
         }
         return .distantPast
+    }
+
+    /// A no-year date assigned the current year can land in the future near a year boundary (a
+    /// "Dec 30 12:00" member read on Jan 2 means *last* December). `bsdtar` would then have shown
+    /// a year, but defensively roll a clearly-future date back one year.
+    private static func rollBackIfFuture(_ date: Date) -> Date {
+        guard date.timeIntervalSinceNow > 24 * 60 * 60 else { return date }
+        return Calendar(identifier: .gregorian).date(byAdding: .year, value: -1, to: date) ?? date
     }
 }

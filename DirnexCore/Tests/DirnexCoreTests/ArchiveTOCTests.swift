@@ -103,6 +103,25 @@ struct ArchiveTOCTests {
         #expect(alpha?.modificationDate != .distantPast)
     }
 
+    @Test("a recent no-year member gets the current year, not the 2000 default")
+    func recentDateUsesCurrentYear() {
+        let calendar = Calendar(identifier: .gregorian)
+        let currentYear = calendar.component(.year, from: Date())
+        // A recently-modified member prints as "MMM d HH:mm" with no year; it must resolve to
+        // (about) now, never the formatter's 2000 reference.
+        let toc = ArchiveTOC(verboseListing: """
+        -rw-r--r--  0 501    20         11 Jul 10 16:19 recent.txt
+        """)
+        let date = try? #require(
+            entry(toc.children(inDirectory: "/"), "recent.txt")?.modificationDate
+        )
+        if let date {
+            let year = calendar.component(.year, from: date)
+            #expect(year != 2000)
+            #expect(abs(year - currentYear) <= 1) // current year, or last year via boundary rollback
+        }
+    }
+
     @Test("tar's ./ prefix is stripped and the ./ root line adds no phantom entry")
     func tarPrefixStripped() {
         let toc = ArchiveTOC(verboseListing: tarListing)
