@@ -8,6 +8,11 @@ protocol SidebarViewControllerDelegate: AnyObject {
     /// A saved-search row was picked — re-run its query in the active pane and show the hits in
     /// a virtual results panel (PLAN.md §M4 "Saved searches … in the places strip").
     func sidebar(_ sidebar: SidebarViewController, didActivateSavedSearch savedSearch: SavedSearch)
+    /// A click landed on the sidebar's empty space or a non-selectable header. Keep keyboard
+    /// focus on the active file pane rather than letting the source list steal it — the pane's
+    /// file commands (F5/F6/F8) are dispatched through the responder chain and go dead the moment
+    /// no pane is first responder.
+    func sidebarDidClickEmptyArea(_ sidebar: SidebarViewController)
 }
 
 /// The places/volumes strip (PLAN.md §M1 "Volumes/places strip … replaces TC's drive
@@ -51,7 +56,9 @@ final class SidebarViewController: NSViewController {
 
     weak var delegate: SidebarViewControllerDelegate?
 
-    private let tableView = NSTableView()
+    // A focus-preserving subclass: empty-space / header clicks don't steal keyboard focus from
+    // the active file pane (which would disable the responder-chain file commands).
+    private let tableView = SidebarTableView()
     private let scrollView = NSScrollView()
     private var rows: [Row] = []
 
@@ -78,6 +85,18 @@ final class SidebarViewController: NSViewController {
         let contextMenu = NSMenu()
         contextMenu.delegate = self
         tableView.menu = contextMenu
+
+        // An empty-space or header click (on the table, or in the clip area below the rows) must
+        // not pull keyboard focus off the active file pane — re-focus it instead. See
+        // `SidebarTableView` / `SidebarClipView`.
+        let refocusActivePane: () -> Void = { [weak self] in
+            guard let self else { return }
+            self.delegate?.sidebarDidClickEmptyArea(self)
+        }
+        tableView.onEmptyClick = refocusActivePane
+        let clipView = SidebarClipView()
+        clipView.onBackgroundClick = refocusActivePane
+        scrollView.contentView = clipView
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true

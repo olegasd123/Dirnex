@@ -230,7 +230,10 @@ final class PanelViewController: NSViewController {
         // runs edge-to-edge). Pin the chrome stack's top to the safe-area guide so the tab
         // strip / path bar clear the traffic-light zone when the sidebar is collapsed and
         // this pane slides under the buttons; the sides and bottom stay flush.
-        let container = NSView()
+        let container = PanelContainerView()
+        // A click in the pane's chrome gaps (insets, spacing) must refocus the file table so the
+        // responder-chain file commands (F5/F6/F8) stay live — see `PanelContainerView`.
+        container.fileTable = tableView
         stack.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(stack)
         NSLayoutConstraint.activate([

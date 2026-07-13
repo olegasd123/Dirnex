@@ -419,4 +419,10 @@ extension BrowserWindowController: SidebarViewControllerDelegate {
         target.runSavedSearch(savedSearch)
         target.focusTable()
     }
+
+    /// An empty-space / header click in the sidebar re-focuses the active pane so its keyboard
+    /// focus — and the responder-chain file commands (F5/F6/F8) — survive the click.
+    func sidebarDidClickEmptyArea(_ sidebar: SidebarViewController) {
+        (activePanel ?? leftPanel).focusTable()
+    }
 }
