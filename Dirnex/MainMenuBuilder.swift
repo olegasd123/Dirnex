@@ -67,7 +67,8 @@ enum MainMenuBuilder {
             .command("go.back"), .command("go.forward"), .command("go.history"), .separator,
             .command("go.editLocation"), .command("go.parent"), .command("go.search"),
             .command("go.saveSearch"), .separator,
-            .command("go.hotlist"), .command("go.addToHotlist")
+            .command("go.hotlist"), .command("go.addToHotlist"), .separator,
+            .command("go.connectServer")
         ]),
         MenuSpec(title: "Workspace", items: [
             .command("workspace.list"), .command("workspace.save")

@@ -315,8 +315,11 @@ final class PanelViewController: NSViewController {
         loadToken += 1
         let token = loadToken
         let tabIndex = activeTabIndex
-        // Captured before the async load: was this tab showing virtual results when we left?
-        let wasVirtual = panel.path.backend != .local
+        // Captured before the async load: was this tab showing a *non-re-listable* virtual pane
+        // when we left? A `.search` results listing (and a browsed archive) can't be re-entered
+        // from a history trail, so leaving one starts fresh. An SFTP location *is* re-listable, so
+        // it keeps a normal back/forward trail like a local directory.
+        let wasVirtual = panel.path.backend != .local && !panel.path.backend.isSFTP
         Task {
             do {
                 let listing = try await DirectoryLoader.list(backend, at: path)

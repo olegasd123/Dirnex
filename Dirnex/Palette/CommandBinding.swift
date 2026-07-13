@@ -41,6 +41,7 @@ enum CommandBinding {
         "view.toggleHidden": #selector(PanelViewController.toggleShowHidden(_:)),
         "view.quickLook": #selector(PanelViewController.toggleQuickLookPreview(_:)),
         "view.quickView": #selector(PanelViewController.toggleQuickViewPanel(_:)),
+        "go.connectServer": #selector(PanelViewController.connectToServer(_:)),
         "go.editLocation": #selector(PanelViewController.editLocation(_:)),
         "go.search": #selector(PanelViewController.findFiles(_:)),
         "go.saveSearch": #selector(PanelViewController.saveCurrentSearch(_:)),

@@ -236,8 +236,10 @@ _Shipped over 11 passes (2026-07-09 → 07-12); 341 core tests. Per-pass detail 
 
 ### M5 — Network and sync (M)
 
-- [ ] `SFTPBackend` (swift-nio-ssh or libssh2): connection manager, keychain-stored
-      credentials, key auth; browse/copy through the standard queue with resume
+- [~] `SFTPBackend`: connection manager, key auth; **browse DONE and verified live** (via the
+      system `sftp` CLI, not swift-nio-ssh/libssh2 — the same sidestep M4 made with `bsdtar`).
+      Remaining: byte transfer (copy-out/-in through the standard queue with resume),
+      keychain-stored password auth
 - [x] Capability degradation: panels grey out unsupported ops per backend ✅ (per-path
       `capabilities(for:)`; no Trash → explicit permanent-delete confirm ✅; no clone →
       always chunked ✅) — driven off the owning backend's caps, ready for SFTP to plug into
@@ -520,6 +522,55 @@ and the **write pass** (mkdir/move/remove + byte `copyFile` with resume, flippin
 tail is the genuine infra gate: it needs a live/dockerized SSH server (or local Remote Login) +
 credentials to verify against — which I can't provision here, so it awaits that setup. Optional
 polish still open: Settings picker for the preferred diff tool.
+
+Progress (2026-07-13, M5 pass 7): the **live SFTP transport + app wiring + Connect-to-Server UI** —
+**SFTP browse now works end-to-end and is VERIFIED LIVE** against a real server (`oleg@mac`, local
+Remote Login), so the `SFTPBackend` box goes `[ ]`→`[~]` (browse done; byte transfer + password/
+Keychain auth remain). The user enabled `ssh oleg@mac`; key auth was set up (a throwaway ed25519 key
+authorized for the session, all test artifacts cleaned up after). CRITICAL: driving the real `sftp`
+CLI first showed its batch `ls -la` **differs from GNU `ls -l`** (captured live), so **pass 6's core
+was reworked to match reality** (pass 6 was still uncommitted): (1) the link-count column is `?`;
+(2) names are printed as **full paths** (`ls -la <abs>` echoes the arg) → every name reduced to its
+last component; (3) symlink **targets aren't shown** (no ` -> t`); (4) `sftp` has **no `ls -d`** → a
+single-item stat can't use it. Core changes (still purely additive to DirnexCore): `SFTPTransport`
+slimmed to one method `listDirectory` + a tested `SFTPTransportError.classify(stderr:)` (maps `sftp`
+stderr → notFound/permissionDenied/failure; permission-denied checked **first** so a bad-key
+`identity file … no such file` + `Permission denied` classifies as the actionable auth failure) +
+`SFTPBatchCommand.list` (quoted/escaped batch line, tested); `SFTPListingParser` now `parse`s **all**
+rows basenamed **including `.`/`..`**; `SFTPBackend.stat` uses the **`.` self-row trick** (a dir
+listing carries a `.` row that *is* the directory's stat → identify it, else it's a single-file
+row). App layer: `SFTPProcessTransport` (spawns `sftp -i key -o BatchMode=yes -b -`, drains stderr on
+a bg queue to dodge a two-pipe deadlock, `resolveHomeDirectory` via `pwd`); `CompositeBackend`
+gained an `sftpConnections` registry + `connectSFTP` + `isSFTP` routing (`connectedSFTP` throws a
+clear "Not connected" otherwise); `go.connectServer` command → `PanelViewController+SFTP.connectToServer`
+(probes home off-main = a fail-fast connection test, then registers + navigates) + `SFTPConnectPrompt`
+(NSAlert grid: host/port/user/key-file, rejects leading-`-` args). Two LIVE-found bugs fixed: (a) the
+path bar rendered SFTP as **"🔍 Results for oleg"** (the search-results dead-end label) → added an
+`isSFTP` branch giving **clickable breadcrumbs rooted at the account** (`oleg@mac › Users › oleg`),
+since an SFTP path is re-listable; also `PanelViewController.navigate` no longer treats SFTP as
+"wasVirtual" (it keeps a normal back/forward trail) and `FrecencyStore.recordVisit` now only records
+`.local` paths (a remote path can't be fuzzy-jumped). (b) recent `ls` dates showed **year 2000** —
+the "MMM d HH:mm" form omits the year and `DateFormatter` defaults it to a 2000 reference → set
+`defaultDate = now` on the no-year formats (+ a future-date year rollback for the Dec/Jan boundary).
+Tests: +`SFTPTransport`(batch/classify incl. bad-key ordering) +`connectServer` catalog cmd +current-
+year date +CompositeBackend sftp routing/read-only + a **gated live integration suite**
+(`DirnexTests/SFTPLiveIntegrationTests`, enabled only when `/tmp/dirnex_sftp_live_test.json` exists —
+`xcodebuild` doesn't forward shell env, so a file not env vars) → **427 core tests**, **14 app tests**
+(4 live: resolve-home, list, stat, composite-route — proven genuinely live by a bogus-key run that
+*fails* them, not skips). GOTCHA (recurring): the connectServer command tipped `CommandCatalog` over
+`type_body_length` 250 → moved the whole `navigation` array into the bottom extension. VERIFIED LIVE
+end-to-end via the GUI: Go ▸ Connect to Server → filled host/user/key → the left pane browsed the
+remote home (21 items, `oleg@mac › Users › oleg` breadcrumb, correct 2026 dates), then **double-clicked
+into `dirnex_sftp_fixture`** — breadcrumb extended, listed `emptydir`/`photos`/`latest` (symlink)/`my
+report.txt` (space preserved)/`notes.txt`, `.`/`..` dropped. App `xcodebuild` + `swift test` green,
+swiftformat/swiftlint-strict clean. SPOTTED FOLLOW-UP (out of scope, pre-existing): `ArchiveTOCParser`
+shares the same no-year→2000 date bug for recent archive members — worth the same `defaultDate = now`
+fix. **NEXT M5 (finishes `SFTPBackend`):** the write pass — `SFTPProcessTransport` gains
+mkdir/rename/remove + `copyFile` (download via `sftp get`, upload via `put`) with progress/resume,
+flipping SFTP caps to `[.read, .write, .rename]` so the pass-5 grey-out + Trash-less permanent-delete
+confirm light up; then password/Keychain auth (needs a PTY). Optional polish: an SSH ControlMaster so
+repeated listings reuse one connection instead of re-handshaking per directory; saved connections in
+the sidebar; Settings picker for the preferred diff tool.
 
 ### M6 — Mac-native power features (M)
 

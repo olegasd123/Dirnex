@@ -38,4 +38,21 @@ struct CompositeBackendTests {
         #expect(backend.capabilities(for: results) == .read)
         #expect(backend.capabilities(for: results).deleteStrategy == .unsupported)
     }
+
+    @Test("an sftp path degrades to read-only")
+    func sftpPathIsReadOnly() {
+        let remote = VFSPath(backend: .sftp(SFTPLocation(host: "h", username: "u")), path: "/home/u")
+        #expect(backend.capabilities(for: remote) == .read)
+        #expect(backend.capabilities(for: remote).deleteStrategy == .unsupported)
+    }
+
+    @Test("listing an sftp path with no connection reports a clear not-connected error")
+    func unconnectedSFTPPathThrows() {
+        // Routing recognizes the sftp id but there's no registered connection — a helpful error,
+        // not a crash or a mis-route to the local backend.
+        let remote = VFSPath(backend: .sftp(SFTPLocation(host: "h", username: "u")), path: "/home/u")
+        #expect(throws: (any Error).self) {
+            try backend.listDirectory(at: remote)
+        }
+    }
 }

@@ -95,6 +95,16 @@ struct CommandCatalogTests {
         #expect(KeyBindings().conflicts(for: "file.compareByContents").isEmpty)
     }
 
+    @Test("the M5 connect-to-server command is a shortcut-free navigation command")
+    func coversConnectServer() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        let connect = byID["go.connectServer"]
+        #expect(connect?.category == .navigation)
+        // No default shortcut (reached via menu/palette), so it can never collide.
+        #expect(connect?.shortcut == nil)
+        #expect(KeyBindings().conflicts(for: "go.connectServer").isEmpty)
+    }
+
     @Test("the M4 pack tool is a conflict-free File command on ⌥F5")
     func coversPack() {
         let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })

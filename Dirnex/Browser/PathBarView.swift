@@ -131,9 +131,9 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         rebuildContents(for: path, archiveAncestry: archiveAncestry)
     }
 
-    private func rebuildCrumbs(for path: VFSPath) {
+    private func rebuildCrumbs(for path: VFSPath, rootTitle: String = "Macintosh HD") {
         installCrumbs(path.ancestorsFromRoot.map { ancestor in
-            Crumb(title: ancestor.isRoot ? "Macintosh HD" : ancestor.lastComponent, target: ancestor)
+            Crumb(title: ancestor.isRoot ? rootTitle : ancestor.lastComponent, target: ancestor)
         })
     }
 
@@ -400,6 +400,11 @@ extension PathBarView {
             rebuildCrumbs(for: path)
         } else if path.backend.isArchive {
             rebuildArchiveLabel(for: path, ancestry: archiveAncestry)
+        } else if let location = path.backend.sftpLocation {
+            // A remote SFTP location is re-listable, so it gets clickable breadcrumbs rooted at the
+            // account (`oleg@mac › Users › oleg › Dev`), like a local path — not the dead-end
+            // "results" label a search snapshot gets.
+            rebuildCrumbs(for: path, rootTitle: "\(location.username)@\(location.host)")
         } else {
             rebuildVirtualLabel(for: path)
         }

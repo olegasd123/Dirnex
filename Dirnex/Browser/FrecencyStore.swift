@@ -34,6 +34,10 @@ final class FrecencyStore {
     /// index. Called from every pane's `navigate`, so it learns from crumb clicks, the
     /// sidebar, hotlist jumps, and back/forward alike.
     func recordVisit(_ path: VFSPath) {
+        // Only local directories belong in the fuzzy-jump index: it navigates by typing a path
+        // fragment and picks the first candidate that still exists on disk, which a remote SFTP
+        // location or a virtual archive/search path can't satisfy.
+        guard path.backend == .local else { return }
         frecency.visit(path)
         persist()
     }

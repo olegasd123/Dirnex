@@ -210,7 +210,12 @@ public enum CommandCatalog {
             shortcut: CommandShortcut(key: "q", modifiers: .control)
         )
     ]
+}
 
+// The Workspace, Window, and Application categories live in an extension so the main enum body
+// stays under SwiftLint's `type_body_length` limit; `all` above still composes them in with the
+// rest.
+extension CommandCatalog {
     // MARK: - Go
 
     private static let navigation: [Command] = [
@@ -238,6 +243,12 @@ public enum CommandCatalog {
             // any other pane it's an inert no-op rather than a mis-save. (Distinct from ⌃⌘S,
             // Show Sidebar.)
             shortcut: CommandShortcut(key: "s", modifiers: .command)
+        ),
+        Command(
+            id: "go.connectServer",
+            title: "Connect to Server…",
+            category: .navigation,
+            keywords: ["sftp", "ssh", "remote", "network", "server", "connect", "host"]
         ),
         Command(
             id: "go.parent",
@@ -281,12 +292,7 @@ public enum CommandCatalog {
             keywords: ["pin", "bookmark", "favorite", "hotlist"]
         )
     ]
-}
 
-// The Workspace, Window, and Application categories live in an extension so the main enum body
-// stays under SwiftLint's `type_body_length` limit; `all` above still composes them in with the
-// rest.
-extension CommandCatalog {
     // MARK: - Workspace
 
     private static let workspace: [Command] = [

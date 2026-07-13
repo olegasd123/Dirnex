@@ -17,9 +17,28 @@ final class CompositeBackend: VFSBackend, @unchecked Sendable {
     /// on detached tasks — two panes can mount the same archive concurrently.
     private let lock = NSLock()
     private var mounted: [String: ArchiveBackend] = [:]
+    /// Live SFTP connections keyed by the account descriptor (`sftp://user@host:port`). A connection
+    /// is established by the Connect-to-Server flow (`connectSFTP`) before a pane navigates onto it;
+    /// each holds a `Process`-driven transport, so listing an SFTP pane routes here (PLAN.md §M5
+    /// "browse … through the standard queue"). Guarded by `lock` like the archive mounts.
+    private var sftpConnections: [String: SFTPBackend] = [:]
 
     init(local: LocalBackend) {
         self.local = local
+    }
+
+    /// Establish (or replace) a key-auth SFTP connection for `location`, returning its backend so
+    /// the caller can test it (list the home directory) before navigating a pane onto it. Storing
+    /// the identity-file path is safe — it is a reference, not a secret (the private key never
+    /// leaves disk); password/Keychain auth is a later pass.
+    @discardableResult
+    func connectSFTP(location: SFTPLocation, identityFile: String) -> SFTPBackend {
+        let transport = SFTPProcessTransport(location: location, identityFile: identityFile)
+        let backend = SFTPBackend(location: location, transport: transport)
+        lock.lock()
+        defer { lock.unlock() }
+        sftpConnections[location.descriptor] = backend
+        return backend
     }
 
     /// Drop the cached mount for the archive at `archivePath`, so its next list/stat re-reads it
@@ -111,7 +130,17 @@ final class CompositeBackend: VFSBackend, @unchecked Sendable {
     private func backend(for path: VFSPath) throws -> any VFSBackend {
         if path.backend == .local { return local }
         if let archivePath = path.backend.archivePath { return try mountedArchive(at: archivePath) }
+        if path.backend.isSFTP { return try connectedSFTP(for: path.backend) }
         throw VFSError.unsupported("No backend can handle \(path).")
+    }
+
+    private func connectedSFTP(for backendID: VFSBackendID) throws -> SFTPBackend {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let backend = sftpConnections[backendID.rawValue] else {
+            throw VFSError.unsupported("Not connected to \(backendID). Reconnect to the server.")
+        }
+        return backend
     }
 
     private func mountedArchive(at archivePath: String) throws -> ArchiveBackend {
