@@ -105,6 +105,15 @@ final class FileTableView: NSTableView {
         if inputDelegate?.fileTable(self, didClickRow: row, modifiers: flags) == true {
             return
         }
+        // A plain click in the empty area below the last row would make `super` clear the
+        // selection (the table allows empty selection), dropping the cursor highlight and — since
+        // the file commands need a cursor/selection — effectively disabling F5/F6/F8. In a Total
+        // Commander pane an empty-space click is a no-op, not a deselect: take (or keep) focus for
+        // this pane but leave the cursor where it is. `super` is skipped so the selection stands.
+        if row < 0 {
+            window?.makeFirstResponder(self)
+            return
+        }
         super.mouseDown(with: event)
     }
 
