@@ -91,7 +91,7 @@ final class SidebarViewController: NSViewController {
         // `SidebarTableView` / `SidebarClipView`.
         let refocusActivePane: () -> Void = { [weak self] in
             guard let self else { return }
-            self.delegate?.sidebarDidClickEmptyArea(self)
+            delegate?.sidebarDidClickEmptyArea(self)
         }
         tableView.onEmptyClick = refocusActivePane
         let clipView = SidebarClipView()
