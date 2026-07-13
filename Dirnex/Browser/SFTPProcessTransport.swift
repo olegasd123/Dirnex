@@ -1,22 +1,46 @@
 import DirnexCore
 import Foundation
 
-/// Drives the system `sftp` tool to satisfy an `SFTPBackend`'s `listDirectory` — the non-hermetic
-/// half of SFTP browse (PLAN.md §M5), mirroring `ArchiveMounter`/`SpotlightSearchRunner`. All the
-/// parsing, escaping, and error classification live in `DirnexCore` (`SFTPListingParser`,
-/// `SFTPBatchCommand`, `SFTPTransportError.classify`); this just spawns `sftp -b -` in batch mode
-/// with a key-auth identity file and pipes one command in.
+/// Drives the system `sftp` tool to satisfy an `SFTPBackend`'s operations — the non-hermetic half of
+/// SFTP browse and transfer (PLAN.md §M5), mirroring `ArchiveMounter`/`SpotlightSearchRunner`. All
+/// the parsing, escaping, argument assembly, and error classification live in `DirnexCore`
+/// (`SFTPListingParser`, `SFTPBatchCommand`, `SFTPProcessArguments`, `SFTPTransportError.classify`);
+/// this spawns `sftp -b -` and pipes one command in.
 ///
-/// Key auth with `BatchMode=yes` is deliberate: OpenSSH reads a password only from a TTY, so a
-/// spawned `sftp` could never answer a password prompt — batch mode disables the prompt entirely
-/// and fails fast instead of hanging. Password/Keychain auth (which needs a pseudo-terminal) is a
-/// later pass; key auth is the path the plan lists first and the one verifiable here.
+/// Key auth uses `-b -` (quiet, fail-fast, parseable) — `sftp`'s native non-interactive path.
+/// Password auth can't use `-b` (it disables the prompt), so it runs `sftp` interactively and answers
+/// the prompt through an `SSH_ASKPASS` helper (`SFTPProcessArguments` in core assembles the flags):
+/// the password rides only in the child's environment (`SFTPAskpassHelper`), never on the command
+/// line or on disk. Interactive mode means stdout carries `sftp>` echo lines (the parser skips them)
+/// and a failed command exits zero (so this scans stderr with `detect`), and a wall-clock timeout
+/// bounds a server that never closes the channel.
 struct SFTPProcessTransport: SFTPTransport {
     let location: SFTPLocation
-    /// Path to the private key used for key-based auth.
-    let identityFile: String
+    /// How to authenticate — a key file, or a password fed via `SSH_ASKPASS`.
+    let authentication: SFTPAuthentication
+    /// The plaintext password for `.password` auth, resolved from the Keychain by the caller; `nil`
+    /// for key auth. Held for the connection's lifetime so each spawned `sftp` can re-authenticate.
+    var password: String?
     /// Seconds to wait for the connection before giving up — a dead host must not hang the pane.
     var connectTimeout: Int = 15
+    /// Overall wall-clock bound (seconds) on a single *password* command, so an unresponsive or
+    /// non-standard server can't hang the pane on a read that never ends (some servers hold the
+    /// channel open after the reply). Generous enough for browse/metadata and small transfers; large
+    /// password-auth transfers are a follow-up (alongside resume). Key auth keeps its unbounded,
+    /// verified path.
+    var passwordTimeout: Int = 30
+
+    init(
+        location: SFTPLocation,
+        authentication: SFTPAuthentication,
+        password: String? = nil,
+        connectTimeout: Int = 15
+    ) {
+        self.location = location
+        self.authentication = authentication
+        self.password = password
+        self.connectTimeout = connectTimeout
+    }
 
     func listDirectory(_ remotePath: String) throws -> String {
         try run(batch: SFTPBatchCommand.list(remotePath))
@@ -67,8 +91,14 @@ struct SFTPProcessTransport: SFTPTransport {
 
     /// The remote working (home) directory reported by `pwd`, to land in on connect. Doubles as a
     /// connection test: it fails fast (classified) when auth, the host, or the key is wrong.
+    /// `tolerateChannelHold` lets it accept the reply from a server that holds the channel open
+    /// afterwards (some appliances do) rather than timing out — safe here because `pwd`'s reply is a
+    /// single line that has fully arrived by then.
     func resolveHomeDirectory() throws -> String {
-        let output = try run(batch: SFTPBatchCommand.printWorkingDirectory)
+        let output = try run(
+            batch: SFTPBatchCommand.printWorkingDirectory,
+            tolerateChannelHold: true
+        )
         let marker = "Remote working directory: "
         for line in output.split(whereSeparator: \.isNewline) {
             if let range = line.range(of: marker) {
@@ -84,10 +114,20 @@ struct SFTPProcessTransport: SFTPTransport {
     /// the `ls` rows to stdout (the parser ignores the echo) and errors to stderr, exiting non-zero
     /// on a failed command — so a non-zero status is classified from stderr. Blocks on `sftp`; call
     /// it off the main thread.
-    private func run(batch command: String) throws -> String {
+    private func run(batch command: String, tolerateChannelHold: Bool = false) throws -> String {
+        let isPassword: Bool
+        if case .password = authentication { isPassword = true } else { isPassword = false }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sftp")
-        process.arguments = arguments
+        process.arguments = SFTPProcessArguments.batch(
+            location: location,
+            authentication: authentication,
+            connectTimeout: connectTimeout
+        )
+        if isPassword {
+            process.environment = try passwordEnvironment()
+        }
 
         let input = Pipe()
         let output = Pipe()
@@ -106,39 +146,59 @@ struct SFTPProcessTransport: SFTPTransport {
         input.fileHandleForWriting.write(Data((command + "\n").utf8))
         try? input.fileHandleForWriting.close()
 
-        // Drain stderr on a background queue while reading stdout here, so neither pipe can fill and
-        // deadlock the other on a large listing.
-        let errorQueue = DispatchQueue(label: "com.dirnex.sftp.stderr")
+        // Drain both pipes on background queues — so neither can fill and deadlock the other on a
+        // large listing — and join them through a group, which lets a password session bound its
+        // wait (an unresponsive server must not hang the pane).
+        var outputData = Data()
         var errorData = Data()
         let group = DispatchGroup()
+        let ioQueue = DispatchQueue(label: "com.dirnex.sftp.io", attributes: .concurrent)
         group.enter()
-        errorQueue.async {
+        ioQueue.async {
+            outputData = output.fileHandleForReading.readDataToEndOfFile()
+            group.leave()
+        }
+        group.enter()
+        ioQueue.async {
             errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
             group.leave()
         }
-        let outputData = output.fileHandleForReading.readDataToEndOfFile()
+
+        if isPassword, group.wait(timeout: .now() + .seconds(passwordTimeout)) == .timedOut {
+            process.terminate() // SIGTERM closes the pipes so the drains unblock
+            group.wait() // terminate closed the pipes, so the readers finish promptly
+            if tolerateChannelHold {
+                // The server replied but never closed the channel; the reply is complete, so hand it
+                // back (only the single-line connect probe opts in — a multi-row listing must not be
+                // read partially, hence the default-throw below).
+                return String(bytes: outputData, encoding: .utf8) ?? ""
+            }
+            throw SFTPTransportError.failure("The SFTP server stopped responding.")
+        }
         group.wait()
         process.waitUntilExit()
 
+        let stderrText = String(bytes: errorData, encoding: .utf8) ?? ""
         if process.terminationStatus != 0 {
-            throw SFTPTransportError.classify(
-                stderr: String(bytes: errorData, encoding: .utf8) ?? ""
-            )
+            throw SFTPTransportError.classify(stderr: stderrText)
+        }
+        // An interactive (password) session exits zero even on a failed command, so its errors live
+        // only in stderr — scan for them; key auth's `-b -` already fails non-zero above.
+        if isPassword, let error = SFTPTransportError.detect(stderr: stderrText) {
+            throw error
         }
         return String(bytes: outputData, encoding: .utf8) ?? ""
     }
 
-    private var arguments: [String] {
-        [
-            "-i", identityFile,
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=\(connectTimeout)",
-            // Trust-on-first-use for the host key: a fresh host is added to known_hosts rather than
-            // aborting, but a *changed* key still fails (the MITM guard stays intact).
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-P", String(location.port),
-            "-b", "-",
-            "\(location.username)@\(location.host)"
-        ]
+    /// The `sftp` child's environment for password auth: the parent environment (so `HOME`, `PATH`,
+    /// and the rest survive — `ssh` needs `HOME` to find `known_hosts`) plus the `SSH_ASKPASS`
+    /// wiring that feeds the password without a TTY. `SSH_ASKPASS_REQUIRE=force` makes modern OpenSSH
+    /// use the helper even with no controlling terminal.
+    private func passwordEnvironment() throws -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment["SSH_ASKPASS"] = try SFTPAskpassHelper.scriptPath()
+        environment["SSH_ASKPASS_REQUIRE"] = "force"
+        environment[SFTPAskpassHelper.passwordEnvironmentKey] = password ?? ""
+        return environment
     }
 }

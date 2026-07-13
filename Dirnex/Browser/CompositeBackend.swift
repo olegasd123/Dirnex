@@ -27,13 +27,23 @@ final class CompositeBackend: VFSBackend, @unchecked Sendable {
         self.local = local
     }
 
-    /// Establish (or replace) a key-auth SFTP connection for `location`, returning its backend so
-    /// the caller can test it (list the home directory) before navigating a pane onto it. Storing
-    /// the identity-file path is safe — it is a reference, not a secret (the private key never
-    /// leaves disk); password/Keychain auth is a later pass.
+    /// Establish (or replace) an SFTP connection for `location`, returning its backend so the caller
+    /// can test it (list the home directory) before navigating a pane onto it. `authentication` is a
+    /// key file or a password; for password auth `password` is the plaintext the transport feeds to
+    /// `sftp` out-of-band (held only in memory for the connection's lifetime, mirrored into the
+    /// Keychain separately). An identity-file path is a reference, not a secret, so it is safe to
+    /// retain either way.
     @discardableResult
-    func connectSFTP(location: SFTPLocation, identityFile: String) -> SFTPBackend {
-        let transport = SFTPProcessTransport(location: location, identityFile: identityFile)
+    func connectSFTP(
+        location: SFTPLocation,
+        authentication: SFTPAuthentication,
+        password: String? = nil
+    ) -> SFTPBackend {
+        let transport = SFTPProcessTransport(
+            location: location,
+            authentication: authentication,
+            password: password
+        )
         let backend = SFTPBackend(location: location, transport: transport)
         lock.lock()
         defer { lock.unlock() }

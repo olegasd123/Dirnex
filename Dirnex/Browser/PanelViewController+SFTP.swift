@@ -2,10 +2,10 @@ import AppKit
 import DirnexCore
 
 /// Connect-to-Server (PLAN.md §M5 "`SFTPBackend`: browse … through the standard queue"). Prompts
-/// for a remote SFTP account and a private-key file (key auth only — BatchMode, so no password
-/// prompt can hang a spawned `sftp`), tests the connection off-main by resolving the remote home,
-/// then browses it in this pane. The routing lives in `CompositeBackend`; this is just the entry
-/// point and the async connect.
+/// for a remote SFTP account and either a private key or a password, tests the connection off-main
+/// by resolving the remote home, then browses it in this pane. Password auth feeds the password to
+/// `sftp` via `SSH_ASKPASS` and files it in the Keychain on success. The routing lives in
+/// `CompositeBackend`; this is just the entry point and the async connect.
 extension PanelViewController {
     @objc func connectToServer(_ sender: Any?) {
         guard let composite = backend as? CompositeBackend,
@@ -16,7 +16,8 @@ extension PanelViewController {
         // backend can route subsequent listings to it.
         let transport = SFTPProcessTransport(
             location: form.location,
-            identityFile: form.identityFile
+            authentication: form.authentication,
+            password: form.password
         )
         let token = loadToken
         Task {
@@ -28,7 +29,15 @@ extension PanelViewController {
             guard token == loadToken else { return } // the pane moved on while we probed
             switch result {
             case let .success(home):
-                composite.connectSFTP(location: form.location, identityFile: form.identityFile)
+                // Only persist a password once it actually authenticated, so a typo isn't cached.
+                if case .password = form.authentication, let password = form.password {
+                    SFTPKeychain.store(password: password, for: form.location)
+                }
+                composite.connectSFTP(
+                    location: form.location,
+                    authentication: form.authentication,
+                    password: form.password
+                )
                 navigate(to: VFSPath(backend: .sftp(form.location), path: home))
             case let .failure(error):
                 presentOperationFailure(

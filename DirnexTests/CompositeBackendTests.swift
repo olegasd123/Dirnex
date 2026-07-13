@@ -53,7 +53,7 @@ struct CompositeBackendTests {
         let location = SFTPLocation(host: "h", username: "u")
         // Registering a connection doesn't touch the network — it just installs the backend so the
         // pane can route to it; the capabilities are then the SFTP backend's own.
-        backend.connectSFTP(location: location, identityFile: "/tmp/key")
+        backend.connectSFTP(location: location, authentication: .key(identityFile: "/tmp/key"))
         let remote = VFSPath(backend: .sftp(location), path: "/home/u")
         let caps = backend.capabilities(for: remote)
         #expect(caps == [.read, .write, .rename])

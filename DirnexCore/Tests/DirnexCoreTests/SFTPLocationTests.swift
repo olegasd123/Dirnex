@@ -70,4 +70,13 @@ struct SFTPLocationTests {
         let decoded = try JSONDecoder().decode(SFTPLocation.self, from: data)
         #expect(decoded == original)
     }
+
+    @Test("keychain account is the scheme-less user@host:port, stable per account")
+    func keychainAccount() {
+        let location = SFTPLocation(host: "example.com", port: 2222, username: "oleg")
+        #expect(location.keychainAccount == "oleg@example.com:2222")
+        // The default port is spelled out too, so two accounts differing only by port don't collide.
+        #expect(SFTPLocation(host: "h", username: "u").keychainAccount == "u@h:22")
+        #expect(SFTPLocation.keychainService == "com.dirnex.sftp")
+    }
 }

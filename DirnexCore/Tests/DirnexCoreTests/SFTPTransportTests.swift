@@ -83,4 +83,67 @@ struct SFTPTransportTests {
             Issue.record("expected a .failure for empty stderr")
         }
     }
+
+    // MARK: - SFTPProcessArguments
+
+    private let location = SFTPLocation(host: "mac", port: 2222, username: "oleg")
+
+    @Test("key auth passes the identity file and forces BatchMode=yes with -b -")
+    func keyAuthArguments() {
+        let arguments = SFTPProcessArguments.batch(
+            location: location,
+            authentication: .key(identityFile: "/keys/id_ed25519"),
+            connectTimeout: 15
+        )
+        #expect(arguments == [
+            "-i", "/keys/id_ed25519",
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=15",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-P", "2222",
+            "-b", "-",
+            "oleg@mac"
+        ])
+    }
+
+    @Test("password auth drops the key and -b, offering only the password method, interactive")
+    func passwordAuthArguments() {
+        let arguments = SFTPProcessArguments.batch(
+            location: location,
+            authentication: .password,
+            connectTimeout: 20
+        )
+        #expect(!arguments.contains("-i"))
+        // No `-b`: it forces BatchMode=yes, which disables the prompt SSH_ASKPASS must answer.
+        #expect(!arguments.contains("-b"))
+        #expect(!arguments.contains("BatchMode=yes"))
+        // Only `password` — keyboard-interactive stalls on a wrong password under askpass.
+        #expect(arguments.contains("PreferredAuthentications=password"))
+        #expect(arguments.contains("PubkeyAuthentication=no"))
+        #expect(arguments.contains("NumberOfPasswordPrompts=1"))
+        #expect(arguments.contains("ConnectTimeout=20"))
+        #expect(arguments.last == "oleg@mac")
+    }
+
+    // MARK: - SFTPTransportError.detect (interactive-mode command errors)
+
+    @Test("detect returns nil for benign interactive stderr")
+    func detectIgnoresBenignStderr() {
+        #expect(SFTPTransportError.detect(stderr: "") == nil)
+        #expect(SFTPTransportError.detect(stderr: "Connected to example.com.") == nil)
+        #expect(SFTPTransportError.detect(stderr: "Welcome to the SFTP service") == nil)
+        let hostKeyNote = "Warning: Permanently added 'host' (ED25519) to the list of known hosts."
+        #expect(SFTPTransportError.detect(stderr: hostKeyNote) == nil)
+    }
+
+    @Test("detect maps interactive command failures that exited zero")
+    func detectMapsCommandFailures() {
+        #expect(SFTPTransportError.detect(stderr: "Can't ls: \"/x\" not found") == .notFound)
+        #expect(
+            SFTPTransportError.detect(stderr: "remote readdir(\"/root\"): Permission denied") == .permissionDenied
+        )
+        // A write verb's failure has no "not found"/"denied" marker — the prefix/suffix catches it.
+        #expect(SFTPTransportError.detect(stderr: "remote mkdir \"/x\": Failure") != nil)
+        #expect(SFTPTransportError.detect(stderr: "Couldn't rename file \"/a\" to \"/b\"") != nil)
+    }
 }

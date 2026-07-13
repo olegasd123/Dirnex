@@ -61,6 +61,14 @@ public extension SFTPLocation {
     init?(backendID: VFSBackendID) {
         self.init(descriptor: backendID.rawValue)
     }
+
+    /// The Keychain service every SFTP password is filed under (a generic-password item's service).
+    static let keychainService = "com.dirnex.sftp"
+
+    /// The Keychain account key for this location's stored password: `user@host:port`. Stable and
+    /// unique per account (the descriptor without the `sftp://` scheme), so re-connecting to the
+    /// same server later finds the password the app saved the first time.
+    var keychainAccount: String { "\(username)@\(host):\(port)" }
 }
 
 public extension VFSBackendID {

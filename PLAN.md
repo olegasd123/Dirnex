@@ -236,12 +236,14 @@ _Shipped over 11 passes (2026-07-09 → 07-12); 341 core tests. Per-pass detail 
 
 ### M5 — Network and sync (M)
 
-- [~] `SFTPBackend`: connection manager, key auth; **browse + byte transfer DONE and verified
-      live** (via the system `sftp` CLI, not swift-nio-ssh/libssh2 — the same sidestep M4 made
-      with `bsdtar`). Copy-out (`get`) / copy-in (`put`), remote mkdir / rename / recursive-delete
-      all run through the standard queue; an SFTP pane is writable (`[.read, .write, .rename]`) so
-      the pass-5 grey-out + Trash-less confirmed-permanent-delete light up. Remaining:
-      keychain-stored **password auth** (needs a PTY) and mid-file **resume**
+- [~] `SFTPBackend`: connection manager, **key auth + password auth**; **browse + byte transfer
+      DONE and verified live** (via the system `sftp` CLI, not swift-nio-ssh/libssh2 — the same
+      sidestep M4 made with `bsdtar`). Copy-out (`get`) / copy-in (`put`), remote mkdir / rename /
+      recursive-delete all run through the standard queue; an SFTP pane is writable
+      (`[.read, .write, .rename]`) so the pass-5 grey-out + Trash-less confirmed-permanent-delete
+      light up. **Password auth DONE (pass 9, verified live)** via `SSH_ASKPASS` (no PTY needed) +
+      Keychain storage. Only remaining item: mid-file **resume** (`get -a`/`put -a`) — optional
+      polish, not in the M5 exit criteria
 - [x] Capability degradation: panels grey out unsupported ops per backend ✅ (per-path
       `capabilities(for:)`; no Trash → explicit permanent-delete confirm ✅; no clone →
       always chunked ✅) — driven off the owning backend's caps, ready for SFTP to plug into
@@ -618,6 +620,56 @@ size → `get` download → byte-compare → recursive remove) passed through th
   an `SSH_ASKPASS` helper) and mid-file resume (`get -a`/`put -a`). Optional polish: SSH
   ControlMaster connection reuse, saved connections in the sidebar, Settings picker for the diff
   tool. **M6 is the next milestone** once SFTP closes out.
+
+Progress (2026-07-13, M5 pass 9): **SFTP password auth** — the harder of the two remaining
+`SFTPBackend` items, **DONE and verified live** against a real password server (user-provided
+`sa@192.168.1.176`, pass `123`). The plan predicted this "needs a PTY"; it doesn't — the sidestep is
+`SSH_ASKPASS`. Key facts discovered by probing OpenSSH 10.2 live before writing any Swift, all of
+which shaped the design: (1) `sftp -b -` forces `-oBatchMode=yes` onto `ssh`, which **disables the
+password prompt entirely** ("no more authentication methods"), so password auth **cannot use `-b`** —
+it runs `sftp` *interactively* over a piped stdin, and the parser's pre-existing `sftp>`-echo skipping
+(pass 6/7) already handles the interactive output. (2) With no TTY, `SSH_ASKPASS_REQUIRE=force`
+(OpenSSH ≥ 8.4) makes `ssh` call the `SSH_ASKPASS` program for the password — **proven live via a
+marker-file probe** that the helper actually fires. (3) **`keyboard-interactive` HANGS for ~60 s on a
+*wrong* password** when askpass auto-answers it (macOS PAM), which would freeze the pane on a typo —
+so only the `password` method is offered (`PreferredAuthentications=password`, plus
+`PubkeyAuthentication=no` so a stray local key can't bypass the choice, `NumberOfPasswordPrompts=1` to
+fail fast). Core→app as always:
+- **Core** (pure, tested, +6 → **446**): `SFTPAuthentication` enum (`.key(identityFile:)` / `.password`,
+  **no secret** — the password is resolved by the app and fed out-of-band); `SFTPProcessArguments.batch(
+  location:authentication:connectTimeout:)` assembles the argv — **key** = the untouched verified
+  `-i … -o BatchMode=yes … -b -`, **password** = interactive (no `-b`) + the password-only flags above
+  — pinned by tests so the security-sensitive flag set (which auth methods, prompt on/off) is verified
+  without a server, like `SFTPBatchCommand`; `SFTPTransportError.detect(stderr:)` — interactive `sftp`
+  **exits zero on a failed command**, so its errors live only in stderr, and this scans for them
+  (`permission denied`/`not found`/`Couldn't …`/`: Failure`) while ignoring benign banners/`Connected
+  to …`/host-key warnings; `SFTPLocation.keychainService` + `keychainAccount` (`user@host:port`).
+- **App**: `SFTPProcessTransport` reworked to `authentication` + `password` (was `identityFile`), builds
+  argv from the core builder, and for password sets the child env (`SSH_ASKPASS` → helper,
+  `SSH_ASKPASS_REQUIRE=force`, the password in `DIRNEX_SFTP_PASSWORD`) — the password rides **only** in
+  the process environment, never on the argv or on disk. `SFTPAskpassHelper` writes a **secret-free**
+  `#!/bin/sh; printf '%s\n' "$DIRNEX_SFTP_PASSWORD"` once to Application Support (0700). `run` now
+  drains **both** pipes on a concurrent queue joined by a `DispatchGroup` so a password session can
+  **bound its wait** (`passwordTimeout`, 30 s) — a server that never closes the channel can't hang the
+  pane — and throws on a bad interactive command via `detect`. `resolveHomeDirectory` opts into
+  `tolerateChannelHold` (the connect probe's single-line `pwd` reply is complete even if the server
+  holds the channel open — the live test server does exactly that, so a real connect there takes the
+  full timeout but succeeds). `SFTPKeychain` (Security framework) stores/loads/deletes the password
+  keyed by `keychainAccount`; `SFTPConnectPrompt` gained a Private-Key/Password segmented control + an
+  `NSSecureTextField` (irrelevant field greys out); `connectToServer` stores the password to the
+  Keychain **only after** the probe authenticates (so a typo isn't cached); `CompositeBackend.connectSFTP`
+  + the live/app-test call sites thread `authentication`/`password`. +1 app test (askpass helper is
+  executable) + a self-gated **localhost wrong-password** live test (real transport → `.permissionDenied`
+  in ~2.4 s, **no TTY hang** — the crux) + a credential-gated **live password-auth** suite
+  (`/tmp/dirnex_sftp_password_test.json`) → **19 app tests**. VERIFIED LIVE end-to-end: the real
+  `SFTPProcessTransport` authenticated against the user's server with `sa`/`123` through the actual
+  `sftp`+`SSH_ASKPASS` path and resolved the remote home. `swift test` (446) + app `xcodebuild test`
+  (19) green, swiftformat/swiftlint-strict clean. GOTCHA: the test server ("ServeSense … Brute Force
+  Protection") returns an **empty root and holds the channel open** (hangs even after `quit`) — proved
+  auth but not browse; `tolerateChannelHold` + `passwordTimeout` keep it from hanging the pane. Also:
+  `NSSecureTextField` + a 6-field form tripped swiftlint `function_parameter_count` → grouped the
+  controls into a `Fields` struct. **NEXT (finishes `SFTPBackend` → `[x]`):** mid-file **resume**
+  (`get -a`/`put -a`) — optional polish, not in the M5 exit criteria; then **M6**.
 
 ### M6 — Mac-native power features (M)
 

@@ -86,6 +86,28 @@ public enum SFTPTransportError: Error, Sendable, Equatable {
         let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         return .failure(trimmed.isEmpty ? "The SFTP server reported an error." : trimmed)
     }
+
+    /// An error found in the stderr of an interactive (password-auth) session that *exited zero*, or
+    /// `nil` if the stderr shows no failure. `sftp` in interactive mode doesn't abort on a bad
+    /// command — it prints one error line and carries on — so the transport can't rely on the exit
+    /// code there and scans for `sftp`'s error lines instead. Benign lines (`Connected to …`, a
+    /// server banner, a `Warning: Permanently added …` host-key note) match none of these and yield
+    /// `nil`, so a successful command isn't mistaken for a failure.
+    public static func detect(stderr: String) -> SFTPTransportError? {
+        let lowered = stderr.lowercased()
+        if lowered.contains("permission denied") { return .permissionDenied }
+        if lowered.contains("not found") || lowered.contains("no such file") { return .notFound }
+        // `sftp` prints one failed-command line per error; these forms cover the write verbs
+        // (mkdir/rename/rm/get/put) whose failure text ends in ": Failure" or starts "Couldn't …".
+        for line in stderr.split(whereSeparator: \.isNewline) {
+            let text = line.trimmingCharacters(in: .whitespaces).lowercased()
+            if text.hasPrefix("can't ") || text.hasPrefix("couldn't ") || text.hasPrefix("cannot ")
+                || text.hasPrefix("remote ") || text.hasSuffix(": failure") {
+                return .failure(line.trimmingCharacters(in: .whitespaces))
+            }
+        }
+        return nil
+    }
 }
 
 /// Builds the `sftp` batch commands the transport feeds on stdin. Pure and tested so the escaping —
@@ -143,5 +165,62 @@ public enum SFTPBatchCommand {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "\"\(escaped)\""
+    }
+}
+
+/// How the CLI-driven transport authenticates against a server. Carries no secret for `.password`:
+/// the password is resolved from the Keychain by the app and fed to `sftp` out-of-band via an
+/// `SSH_ASKPASS` helper (never on the command line, never in this value, never on disk), so an auth
+/// *method* is safe to describe and thread around like an `SFTPLocation`.
+public enum SFTPAuthentication: Sendable, Equatable {
+    /// Public-key auth with the private key at `identityFile` — `sftp`'s native non-interactive path.
+    case key(identityFile: String)
+    /// Password auth; the password is supplied out-of-band, never held here.
+    case password
+}
+
+/// Builds the `sftp` process arguments (after the executable path) for a one-command session. Pure
+/// and tested so the security-sensitive flag assembly — which auth methods are offered, and crucially
+/// whether the interactive password prompt is enabled — is verified without spawning `sftp`, the
+/// same reason `SFTPBatchCommand` is pure.
+///
+/// The two modes differ fundamentally, verified live against OpenSSH 10:
+/// - **Key auth uses `-b -`**: quiet, fail-fast batch semantics (no `sftp>` echo, a non-zero exit on
+///   a failed command). `-b` also forces `-oBatchMode=yes` onto `ssh`, which is what makes key auth
+///   fully non-interactive. This is the shipped, verified browse/transfer path — left untouched.
+/// - **Password auth cannot use `-b`**: it forces `BatchMode=yes`, which disables the password prompt
+///   entirely (`ssh` would report "no more authentication methods"). So password auth runs `sftp`
+///   *interactively* over a piped stdin — the prompt is answered out-of-band by `SSH_ASKPASS` — which
+///   means stdout carries `sftp>` echo lines (`SFTPListingParser` skips them) and a failed command
+///   exits zero (so the transport must scan stderr with `detect(stderr:)`, not just the exit code).
+///   Only the `password` method is offered: `keyboard-interactive` stalls for a minute on a *wrong*
+///   password when `SSH_ASKPASS` auto-answers it (macOS PAM), which would hang the pane on a typo;
+///   and `PubkeyAuthentication=no` stops a machine's stray authorized key from bypassing the choice.
+public enum SFTPProcessArguments {
+    public static func batch(
+        location: SFTPLocation,
+        authentication: SFTPAuthentication,
+        connectTimeout: Int
+    ) -> [String] {
+        let common = [
+            "-o", "ConnectTimeout=\(connectTimeout)",
+            // Trust-on-first-use: a fresh host is added to known_hosts, a *changed* key still fails.
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-P", String(location.port)
+        ]
+        let target = "\(location.username)@\(location.host)"
+        switch authentication {
+        case let .key(identityFile):
+            return ["-i", identityFile, "-o", "BatchMode=yes"] + common + ["-b", "-", target]
+        case .password:
+            // No `-b`: it would disable the prompt. Interactive over piped stdin; `SSH_ASKPASS`
+            // answers the prompt (wired by the transport's environment).
+            return [
+                "-o", "PreferredAuthentications=password",
+                "-o", "PubkeyAuthentication=no",
+                // One attempt, so a wrong password fails fast instead of re-prompting three times.
+                "-o", "NumberOfPasswordPrompts=1"
+            ] + common + [target]
+        }
     }
 }
