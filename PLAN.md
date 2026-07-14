@@ -244,7 +244,7 @@ _Shipped over 11 passes (2026-07-09 → 07-12); 341 core tests. Per-pass detail 
       confirmed-permanent-delete light up. **Password auth** (pass 9) via `SSH_ASKPASS` (no PTY
       needed) + Keychain storage. **Mid-file resume** (pass 10) — `copyFile` picks up a partial
       destination via `get -a`/`put -a` instead of restarting; verified live against a real server
-- [ ] **SMB shares + unified connection manager** (scoped, not yet built): browse/copy to another
+- [x] **SMB shares + unified connection manager** (built + verified live 2026-07-14): browse/copy to another
       Mac / PC / NAS over SMB, and one place that keeps every saved remote — SFTP and SMB alike. SMB
       is done the OS-native way: macOS ships **no `smbclient`** CLI to shell out to, so the sidestep
       here is the **mounter**, not a client — `NetFSMountURLSync` / `mount_smbfs` mounts
@@ -869,6 +869,29 @@ error; explicit mount-point cap degradation ([.read,.write,.rename]) was deliber
 couple `CompositeBackend` to the mounter) — deferred. **NEXT: live-verify against a LAN SMB share**
 (mount guest + auth, browse/copy/rename/delete, disconnect-unmounts-only-ours, quit-cleanup); then the
 share-picker for a bare `smb://host`, Bonjour `_smb._tcp` discovery (M6-ish), and the deferred cap tweak.
+
+Progress (2026-07-14, M5 SMB pass 2 — VERIFIED LIVE against a LAN Windows SMB box, `192.168.1.50`,
+share `Temp`, user `smbtest`): drove the built app end-to-end via computer-use. Confirmed: the Connect
+dialog renders both layouts; **SMB address `smb://smbtest@host/Temp` two-way-synced into host/share/user
+fields**; guest is refused by the box (auth required — mapped cleanly); an authed mount lands at
+`/Volumes/Temp`, appears in the sidebar's Volumes section, and browses via `LocalBackend` (`test.txt`
+visible); the named connection persisted to the **Servers** section and **survived relaunch**;
+right-click **Connect / Edit… / Remove** all work — Connect re-mounts from the Keychain password (no
+re-prompt), **Edit… prefills every field incl. the Keychain secret**; **New Folder (createDirectory)
+and Delete Immediately (permanent removeItem) both work over SMB**; a **clean quit unmounts only our
+mount**, and an externally-mounted share is **left mounted** on quit (the "unmount only ours" safety
+guarantee). TWO bugs found + fixed live: (1) the `NSAlert` accessory collapsed and overlapped the
+message — cause was setting `translatesAutoresizingMaskIntoConstraints = false` + sizing the container
+by constraints; `NSAlert` sizes an accessory by its **frame**, so the container now keeps an explicit
+frame and the grid is pinned top-left inside it; (2) re-connecting an already-mounted share hit NetFS
+`EEXIST` (17, empty mountpoints) → added `existingMountPoint(for:)` (matches a mounted volume's
+`statfs.f_mntfromname` `//host/share`, case-insensitive) so `mount()` **detects and reuses** an existing
+mount (Finder's or ours) instead of re-mounting — which also realizes the "detect already-mounted share"
+design goal. CONFIRMED the deferred cap gap is real: **Move-to-Trash (F8) fails on the Windows share**
+(error 3328) since SMB carries full local caps; Delete Immediately is the working path. 481 core + 24
+app tests green, swiftformat/swiftlint-strict clean. The SMB item is now `[x]`; only the optional
+niceties (bare-host share-picker, Bonjour discovery, F8→permanent-delete cap-degradation on SMB mounts)
+remain, all deferrable to M6-ish polish.
 
 ### M6 — Mac-native power features (M)
 

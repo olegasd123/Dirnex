@@ -127,19 +127,18 @@ final class ConnectServerForm: NSObject, NSTextFieldDelegate {
 
     /// Wrap the grid in a fixed-size container sized to the *taller* of the two protocol layouts, so
     /// switching protocols (which hides/shows rows) never resizes the modal mid-flight — the slack
-    /// just sits below the shorter layout. Pins the grid to the top so both layouts read from there.
+    /// just sits below the shorter layout. The container keeps an explicit **frame** (autoresizing,
+    /// not `false`): `NSAlert` sizes an accessory view by its frame, so a constraint-only container
+    /// collapses to zero and overlaps the alert's message. The grid is pinned to the top-left inside
+    /// it and keeps its own intrinsic size (so a shorter layout just leaves slack below).
     private func layout(grid: NSGridView) {
         let reserved = reservedSize(of: grid)
+        accessoryView.frame = NSRect(origin: .zero, size: reserved)
         grid.translatesAutoresizingMaskIntoConstraints = false
-        accessoryView.translatesAutoresizingMaskIntoConstraints = false
         accessoryView.addSubview(grid)
         NSLayoutConstraint.activate([
-            accessoryView.widthAnchor.constraint(equalToConstant: reserved.width),
-            accessoryView.heightAnchor.constraint(equalToConstant: reserved.height),
             grid.topAnchor.constraint(equalTo: accessoryView.topAnchor),
-            grid.leadingAnchor.constraint(equalTo: accessoryView.leadingAnchor),
-            grid.trailingAnchor.constraint(equalTo: accessoryView.trailingAnchor),
-            grid.bottomAnchor.constraint(lessThanOrEqualTo: accessoryView.bottomAnchor)
+            grid.leadingAnchor.constraint(equalTo: accessoryView.leadingAnchor)
         ])
     }
 

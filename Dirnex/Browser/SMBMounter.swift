@@ -33,9 +33,20 @@ final class SMBMounter {
     /// guest; otherwise `password` authenticates (a `nil` password means "empty password"). The
     /// blocking NetFS call runs off-main; the registry update happens back on the main actor.
     ///
-    /// If the share is already mounted (Finder, or an earlier connect), NetFS returns the existing
-    /// mount point and we record it as *not* ours — so a later disconnect leaves it in place.
+    /// If the share is already mounted (Finder, or an earlier connect), we detect and reuse that
+    /// mount point rather than re-mounting, recording it as ours only if we were the ones who
+    /// mounted it — so a later disconnect leaves someone else's mount in place.
     func mount(_ location: SMBLocation, username: String?, password: String?) async throws -> MountResult {
+        // If this exact share is already mounted — by Finder, or an earlier connect — reuse that
+        // mount instead of asking NetFS again (which returns EEXIST with no mount point). Whether
+        // we surface it as ours depends on whether *we* were the ones who mounted it.
+        if let existing = Self.existingMountPoint(for: location) {
+            return MountResult(
+                mountPoint: existing,
+                createdByUs: ownedMountPoints.contains(existing.path)
+            )
+        }
+
         let alreadyMounted = Self.mountedVolumePaths()
         let outcome = await Task.detached(priority: .userInitiated) {
             Self.netfsMount(location, username: username, password: password)
@@ -133,6 +144,32 @@ final class SMBMounter {
         if location.port != SMBLocation.defaultPort { result += ":\(location.port)" }
         if let share = location.share { result += "/\(share)" }
         return result
+    }
+
+    /// The mount point of `location`'s share if it's already mounted (by Finder or an earlier
+    /// connect), else `nil` — so a re-connect reuses the mount instead of hitting NetFS's EEXIST.
+    /// Matches on the volume's `f_mntfromname` (the smbfs source, `//[user@]host/share`): the host
+    /// and share are compared case-insensitively, since SMB is case-insensitive. A share-less
+    /// location can't be matched to a specific mount, so it always re-mounts.
+    private nonisolated static func existingMountPoint(for location: SMBLocation) -> URL? {
+        guard let share = location.share else { return nil }
+        let host = location.host.lowercased()
+        let shareSuffix = "/" + share.lowercased()
+        let urls = FileManager.default.mountedVolumeURLs(
+            includingResourceValuesForKeys: nil,
+            options: []
+        ) ?? []
+        for url in urls {
+            var info = statfs()
+            guard statfs(url.path, &info) == 0 else { continue }
+            let source = withUnsafeBytes(of: &info.f_mntfromname) { raw in
+                String(cString: raw.baseAddress!.assumingMemoryBound(to: CChar.self))
+            }
+            guard source.hasPrefix("//") else { continue } // an smbfs/network source
+            let lowered = source.lowercased()
+            if lowered.contains(host), lowered.hasSuffix(shareSuffix) { return url }
+        }
+        return nil
     }
 
     /// The paths of every currently-mounted volume — snapshotted before a mount so we can tell a
