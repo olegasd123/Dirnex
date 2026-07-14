@@ -228,11 +228,15 @@ private final class CopyRun {
             return
         }
 
-        // Copy: try a copy-on-write clone of the whole item first (instant same-volume) — but
-        // only where the source's backend advertises cloning; a backend without `.clone` (SFTP)
-        // goes straight to the chunked path instead of a doomed clone attempt (PLAN.md §M5
-        // "no clone → always chunked").
+        // Copy: try a copy-on-write clone of the whole item first (instant same-volume) — but only
+        // *within one backend*, and only where that backend advertises cloning. A CoW clone is a
+        // single-filesystem primitive, so it can never span backends: an upload (local → SFTP) would
+        // otherwise route the clone to `LocalBackend`, which reads the SFTP destination's path string
+        // as a *local* path — cloning to nowhere (ENOENT → a spurious "no longer exists") or, worse,
+        // silently onto the local disk instead of the remote. Cross-backend copies and a backend
+        // without `.clone` (SFTP) go straight to the chunked path (PLAN.md §M5 "no clone → chunked").
         if entry.kind != .symlink,
+           entry.path.backend == target.backend,
            backend.capabilities(for: entry.path).contains(.clone),
            try backend.cloneItem(at: entry.path, to: target) {
             completedBytes += bytes

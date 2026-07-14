@@ -207,6 +207,37 @@ struct CopyEngineTests {
         #expect(link.kind == .symlink)
         #expect(link.symlinkDestination == "/some/target")
     }
+
+    // MARK: - Cross-backend copy (upload) never clones
+
+    /// Regression: a copy whose source and destination live on *different* backends (an upload —
+    /// local file → remote pane) must not attempt a copy-on-write clone. A clone is a
+    /// single-filesystem primitive, so routing one across backends made `LocalBackend` read the
+    /// remote destination path as a *local* one — a subfolder like `/test/x` then failed with
+    /// `clonefile`'s ENOENT, surfaced to the user as "The item no longer exists". The engine must
+    /// skip the clone on backend mismatch and transfer by hand instead.
+    @Test("a cross-backend copy skips cloning and transfers by hand")
+    func crossBackendCopyDoesNotClone() throws {
+        let tree = try TempTree()
+        defer { tree.cleanup() }
+        try tree.writeFile("a.txt", contents: "payload")
+
+        let backend = CrossBackendUploadBackend()
+        // The destination is a subfolder on a *different* backend — the shape that misrouted the clone.
+        let destDir = VFSPath(backend: CrossBackendUploadBackend.remoteID, path: "/test")
+        let op = FileOperation(
+            kind: .copy,
+            sources: [try stat(tree, "a.txt")],
+            destinationDirectory: destDir
+        )
+
+        let report = CopyEngine.run(op, using: backend)
+
+        #expect(report.succeeded)
+        #expect(backend.cloneCalls == 0) // a clone can't cross backends — it must never be attempted
+        let landed = try backend.stat(at: destDir.appending("a.txt"))
+        #expect(landed.byteSize == Int64("payload".utf8.count))
+    }
 }
 
 // MARK: - Test backends
@@ -283,4 +314,70 @@ private struct CrossVolumeBackend: VFSBackend {
     func copyMetadata(at source: VFSPath, to destination: VFSPath) throws {
         try inner.copyMetadata(at: source, to: destination)
     }
+}
+
+/// A two-namespace routing fake, modelling the app's `CompositeBackend` for an upload: real on-disk
+/// files under `.local`, plus an in-memory "remote" backend under a distinct id that advertises no
+/// clone (like SFTP). `cloneItem` traps a cross-backend call — a clone can only be same-backend, so
+/// the engine must never route one here across backends; if it does (the pre-fix bug), the trap
+/// throws `.notFound`, reproducing the misrouted `clonefile`'s failure.
+private final class CrossBackendUploadBackend: VFSBackend, @unchecked Sendable {
+    static let remoteID = VFSBackendID("test-remote")
+    private let localInner = LocalBackend()
+    private let lock = NSLock()
+    private var remoteStore: [String: Data] = [:]
+    private(set) var cloneCalls = 0
+
+    var id: VFSBackendID { .local }
+    var capabilities: VFSCapabilities { localInner.capabilities }
+
+    /// Local paths report the full local set (crucially `.clone`, so the *source*-only check the bug
+    /// relied on would pass); the remote backend is writable but clone-less, like a connected SFTP.
+    func capabilities(for path: VFSPath) -> VFSCapabilities {
+        path.backend == .local ? localInner.capabilities : [.read, .write, .rename]
+    }
+
+    func cloneItem(at source: VFSPath, to destination: VFSPath) throws -> Bool {
+        lock.lock(); cloneCalls += 1; lock.unlock()
+        guard source.backend == destination.backend else {
+            // What the misroute did: `LocalBackend` read the remote path as a local one and found
+            // nothing there (`clonefile` → ENOENT → `.notFound`).
+            throw VFSError.notFound(destination)
+        }
+        return try localInner.cloneItem(at: source, to: destination)
+    }
+
+    func copyFile(
+        at source: VFSPath,
+        to destination: VFSPath,
+        progress: (Int64) -> Void,
+        isCancelled: () -> Bool
+    ) throws {
+        let data = try Data(contentsOf: URL(fileURLWithPath: source.path))
+        lock.lock(); remoteStore[destination.path] = data; lock.unlock()
+        progress(Int64(data.count))
+    }
+
+    func stat(at path: VFSPath) throws -> FileEntry {
+        if path.backend == .local { return try localInner.stat(at: path) }
+        lock.lock(); let data = remoteStore[path.path]; lock.unlock()
+        guard let data else { throw VFSError.notFound(path) }
+        return FileEntry(
+            path: path,
+            name: path.lastComponent,
+            kind: .file,
+            byteSize: Int64(data.count),
+            modificationDate: .init(),
+            creationDate: .init(),
+            isHidden: false,
+            permissions: 0o644,
+            inode: 0,
+            symlinkDestination: nil,
+            symlinkTargetKind: nil
+        )
+    }
+
+    func listDirectory(at path: VFSPath) throws -> [FileEntry] { try localInner.listDirectory(
+        at: path
+    ) }
 }
