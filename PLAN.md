@@ -244,6 +244,20 @@ _Shipped over 11 passes (2026-07-09 → 07-12); 341 core tests. Per-pass detail 
       confirmed-permanent-delete light up. **Password auth** (pass 9) via `SSH_ASKPASS` (no PTY
       needed) + Keychain storage. **Mid-file resume** (pass 10) — `copyFile` picks up a partial
       destination via `get -a`/`put -a` instead of restarting; verified live against a real server
+- [ ] **SMB shares + unified connection manager** (scoped, not yet built): browse/copy to another
+      Mac / PC / NAS over SMB, and one place that keeps every saved remote — SFTP and SMB alike. SMB
+      is done the OS-native way: macOS ships **no `smbclient`** CLI to shell out to, so the sidestep
+      here is the **mounter**, not a client — `NetFSMountURLSync` / `mount_smbfs` mounts
+      `smb://user@host/share` and the existing `LocalBackend` browses the resulting `/Volumes/…`
+      tree, so every M2 op, sync-dirs, compare-by-content, and archive-over-SMB works unchanged —
+      **no new `CompositeBackend` routing, no libsmb2 dependency** (the deliberate choice over a
+      protocol `SMBBackend`, mirroring SFTP's system-CLI sidestep). Caps reuse the pass-5 degradation
+      path (read/write/rename, no clone, Trash-varies → confirmed-permanent-delete). The **connection
+      manager** unifies today's ephemeral SFTP registry with persisted saved servers: a
+      `ServerConnection` / `ServerConnections` core (name-as-identity, like `SavedSearch`) + a
+      `ServerConnectionStore` + a **Servers** sidebar section (mirrors **Searches**), plus a
+      generalized Connect-to-Server prompt (protocol picker SFTP | SMB + Save). Subsumes the deferred
+      "saved SFTP connections in the sidebar" item
 - [x] Capability degradation: panels grey out unsupported ops per backend ✅ (per-path
       `capabilities(for:)`; no Trash → explicit permanent-delete confirm ✅; no clone →
       always chunked ✅) — driven off the owning backend's caps, ready for SFTP to plug into
@@ -257,7 +271,8 @@ _Shipped over 11 passes (2026-07-09 → 07-12); 341 core tests. Per-pass detail 
       **Compare By Contents…** command plus a right-click **Compare with …** in the sync sheet)
 
 Exit: mirror a local folder to a server over SFTP, verify with sync-dirs, all queued
-and pausable.
+and pausable; and browse/copy to an SMB share on another Mac or NAS, connected and
+managed from the Servers sidebar.
 
 Progress (2026-07-12, M5 pass 1): the **directory-synchronization comparison core** landed —
 the tested, headless *comparison* half of the "Synchronize directories" item (its two-panel
@@ -727,6 +742,43 @@ app as always:
   browse cheap, and could sidestep the ServeSense per-command hang), saved SFTP connections in the
   sidebar, a Settings picker for the preferred diff tool; and the user's FTP/FTPS servers remain
   available if FTP(S) backends are ever added (a plan expansion beyond M5's SFTP-only scope).
+
+Progress (2026-07-14, M5 — SMB + unified connection manager, SCOPED not yet built): with the four
+original M5 boxes `[x]`, the milestone gains one more remote protocol (SMB, for LAN Macs / PCs / NAS)
+plus the "keep every connection in one place" manager the SFTP work deferred. Two design decisions,
+both taken deliberately over the tidier-looking alternative:
+- **SMB rides the OS mounter, not a protocol backend.** SFTP could shell out to the system `sftp`
+  CLI; macOS ships **no `smbclient`**, so the equivalent OS-native sidestep for SMB is the *mounter*.
+  `NetFSMountURLSync` (or `Process` → `/sbin/mount_smbfs`) mounts `smb://user@host/share`, and the
+  existing `LocalBackend` browses the `/Volumes/…` tree it produces — so copy/move/rename/delete
+  (M2), synchronize-directories, compare-by-content, quick-view, and even browsing a zip *on* the
+  share all work with **zero new code** and **no new `CompositeBackend` routing**. The rejected
+  alternative was a real `SMBBackend` over libsmb2/AMSMB2: it keeps the clean "just another
+  VFSBackend" symmetry SFTP has (`smb://…` routed like `sftp://…`, no `/Volumes`), but it's the heavy
+  C dependency the plan avoided for SFTP — a module gate like the deferred libarchive one — with no
+  CLI to sidestep it and every M2/sync/compare guarantee to re-prove over it. Consistent with the
+  non-goals ("folders work as folders; no proprietary APIs"), the mount wins. The one genuinely new
+  surface is a **mount lifecycle**: an app-layer `SMBMounter` + mount registry (the non-hermetic I/O
+  boundary, like `ArchiveMounter`), mounting on connect, unmounting only what *we* mounted on
+  disconnect/quit (leaving a Finder-mounted share alone), and detecting an already-mounted share. Caps
+  = `[.read, .write, .rename]`, no APFS clone, Trash-varies → **reuse the pass-5 capability-degradation
+  + Trash-less permanent-delete path verbatim**. Guest/anonymous mounts (blank user) supported for
+  home NAS; `smbutil view //user@host` share-discovery and Bonjour `_smb._tcp` LAN auto-discovery are
+  optional niceties (the latter M6-ish).
+- **One connection manager for both protocols.** Today live SFTP connections are ephemeral in
+  `CompositeBackend.sftpConnections` (lost on quit) and nothing persists a saved server. Rather than
+  add a second, SMB-only model, unify: a pure `ServerConnection` (name = identity like `SavedSearch`;
+  `kind: .sftp / .smb`; coordinates + auth *method*, never the secret — Keychain still holds those) +
+  `ServerConnections` list (the `SavedSearches` save/rename/move/dedupe shape, unit-tested headless);
+  an app `ServerConnectionStore` (UserDefaults JSON + `didChangeNotification`, a `SavedSearchStore`
+  clone); a **Servers** sidebar section mirroring **Searches** (click → connect/mount + navigate;
+  right-click → Connect / Edit… / Remove; live connected/mounted indicator); and a generalized prompt
+  (rename `SFTPConnectPrompt` → `ConnectServerPrompt`, `PanelViewController+SFTP` → `+Connect`) with a
+  protocol segmented control (SFTP | SMB) above the existing Auth control and a "Save connection" name
+  field. This **subsumes** the deferred "saved SFTP connections in the sidebar" polish item. The app
+  stays non-sandboxed (a plan non-goal), so `mount_smbfs` / NetFS needs no special entitlement.
+Nothing built yet — this is the scoped design; core-first as always (`ServerConnection(s)` + tests,
+then `SMBMounter` / store / sidebar / prompt), verified live against a LAN SMB share.
 
 ### M6 — Mac-native power features (M)
 
