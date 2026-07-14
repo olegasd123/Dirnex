@@ -181,7 +181,7 @@ public enum SFTPBatchCommand {
 /// the password is resolved from the Keychain by the app and fed to `sftp` out-of-band via an
 /// `SSH_ASKPASS` helper (never on the command line, never in this value, never on disk), so an auth
 /// *method* is safe to describe and thread around like an `SFTPLocation`.
-public enum SFTPAuthentication: Sendable, Equatable {
+public enum SFTPAuthentication: Sendable, Hashable, Codable {
     /// Public-key auth with the private key at `identityFile` — `sftp`'s native non-interactive path.
     case key(identityFile: String)
     /// Password auth; the password is supplied out-of-band, never held here.

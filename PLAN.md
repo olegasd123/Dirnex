@@ -785,6 +785,42 @@ both taken deliberately over the tidier-looking alternative:
 Nothing built yet — this is the scoped design; core-first as always (`ServerConnection(s)` + tests,
 then `SMBMounter` / store / sidebar / prompt), verified live against a LAN SMB share.
 
+Progress (2026-07-14, M5 SMB pass 1 — the pure core): the tested, headless value types landed, the
+same core-first opener every M5 slice used. Two new `DirnexCore` files, no behavioural change to any
+existing type (one additive conformance):
+- **`VFS/SMBLocation.swift`** — the SMB analogue of `SFTPLocation`: `host` / `share?` / `username?` /
+  `port` (default 445), *without* a secret. Deliberately **not** a `VFSBackendID` address — SMB rides
+  the OS mounter, so this is purely the Finder-⌘K URL the user types/pastes and the sidebar stores
+  plus the mount target it resolves to. `url` renders the canonical `smb://[user@]host[:port][/share]`
+  (default port elided, guest omits `user@`, share-less stops at the host); `init?(url:)` parses that
+  form back into editable coordinates — the "address field parses into host/share/user fields below"
+  the design calls for is just this round-trip. Parse rules: username up to the first `@`, host up to
+  the first `/`, a `:digits` tail split off as the port (a non-numeric colon stays in the host), the
+  **first** path component as the share (deeper `…/share/sub` mounts the share; the subpath is
+  navigated post-mount). Empty share/username normalize to `nil` so guest and share-less each have one
+  representation. `keychainService = "com.dirnex.smb"` + `keychainAccount` = the scheme-less URL
+  (unused for guest). Domain (`DOMAIN;user`) and bracketed IPv6 are noted later refinements, like
+  SFTP's IPv6 note.
+- **`Services/ServerConnection.swift`** — the unified saved-server model (mirrors `SavedSearch`
+  name-as-identity): `ServerConnection`(name + `ServerEndpoint`) where `ServerEndpoint` is
+  `.sftp(location:authentication:)` | `.smb(SMBLocation)` — one list covers both protocols rather than
+  a second SMB-only model. Convenience `kind: ServerKind{.sftp,.smb}` (sidebar icon/branch) and
+  `address` (the SFTP descriptor / SMB URL for the subtitle). No secret in the endpoint: SFTP carries
+  its auth *method* (`.key(identityFile:)` path or the `.password` marker), SMB's guest-vs-auth is
+  captured by whether `username` is set — Keychain still holds any actual password. `ServerConnections`
+  is the `SavedSearches` collection verbatim (`save` replace-in-place/append, `remove`,
+  `rename` with collision guard, `move`, dedupe-on-init, sanitizing `Codable`). Needed one additive
+  change: **`SFTPAuthentication` gained `Hashable, Codable`** (it was `Equatable`) so the endpoint
+  enum synthesizes both — purely additive, the full app still builds.
+- **`SMBLocationTests` (13) + `ServerConnectionTests` (17)** → **481 core tests** (was 451; +30),
+  covering URL format/parse/round-trip/malformed for SMB and the full collection contract +
+  per-protocol Codable for the connection list. `swift test` green, swiftformat + swiftlint-strict
+  clean, `xcodebuild` app build succeeds. **NEXT (SMB pass 2, app layer):** `SMBMounter` + mount
+  registry (NetFS `NetFSMountURLSync` / `mount_smbfs`; mount on connect, unmount only our own),
+  `ServerConnectionStore` (a `SavedSearchStore` clone), the **Servers** sidebar section (mirrors
+  **Searches**), and the generalized `ConnectServerPrompt` (rename `SFTPConnectPrompt`; protocol picker
+  SFTP | SMB + Save + the URL-expands-to-fields entry) — verified live against a LAN SMB share.
+
 ### M6 — Mac-native power features (M)
 
 - [ ] Git awareness: branch in path bar, status column (M/A/?/ignored) via a debounced
