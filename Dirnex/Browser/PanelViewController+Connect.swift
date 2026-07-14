@@ -129,6 +129,20 @@ extension PanelViewController {
                 // work with immediately — no extra click to activate it first.
                 focusTable()
             case let .failure(error):
+                // A changed host key isn't a dead end — offer to re-trust the new key and reconnect,
+                // preserving the auth and save name so the retry behaves exactly like the first try.
+                if case let .hostKeyChanged(change)? = error as? SFTPTransportError {
+                    presentHostKeyChangeWarning(location: location, change: change) { [weak self] in
+                        self?.repairKnownHostsAndReconnect(
+                            location: location,
+                            authentication: authentication,
+                            password: password,
+                            saveName: saveName,
+                            change: change
+                        )
+                    }
+                    return
+                }
                 presentOperationFailure(
                     message: "Couldn’t connect to “\(location.host)”.",
                     detail: Self.connectFailureDetail(error)
@@ -147,8 +161,90 @@ extension PanelViewController {
             return "The remote path wasn’t found."
         case .permissionDenied:
             return "Permission denied. Check the username and that the key is authorized on the server."
+        case let .hostKeyChanged(change):
+            // Reached only if a host-key change surfaces outside the connect probe's re-trust flow.
+            return "The server’s host key has changed (new fingerprint \(change.fingerprint))."
         case let .failure(message):
             return message
+        }
+    }
+
+    // MARK: - Host key changed
+
+    /// Warn that a host's key no longer matches the one pinned in `known_hosts`, and offer to re-trust
+    /// it. Presented as a critical sheet whose default (and rightmost) button is the safe "Cancel", so
+    /// re-trusting a changed key — usually a reinstalled server, but possibly a man-in-the-middle — is
+    /// always a deliberate click, never the button you hit by reflex. Confirming runs `trust`.
+    private func presentHostKeyChangeWarning(
+        location: SFTPLocation,
+        change: SFTPHostKeyChange,
+        trust: @escaping () -> Void
+    ) {
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "The identity of “\(location.host)” has changed"
+        alert.informativeText = Self.hostKeyChangeDetail(change)
+        // "Cancel" is added first so it's the default (Return / Escape) and rightmost.
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Trust New Key & Connect")
+
+        let handler: (NSApplication.ModalResponse) -> Void = { response in
+            if response == .alertSecondButtonReturn { trust() }
+        }
+        if let window = view.window {
+            alert.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            handler(alert.runModal())
+        }
+    }
+
+    private static func hostKeyChangeDetail(_ change: SFTPHostKeyChange) -> String {
+        let keyLabel = change.keyType.isEmpty ? "key" : "\(change.keyType) key"
+        let fingerprint = change.fingerprint.isEmpty ? "(unavailable)" : change.fingerprint
+        return """
+        This server is presenting a different host \(keyLabel) than the one you trusted before. \
+        If you reinstalled the server or pointed a new SFTP app at this address, this is expected — \
+        but it can also mean someone is intercepting the connection (a man-in-the-middle attack).
+
+        New fingerprint:
+        \(fingerprint)
+
+        Only continue if you recognize this fingerprint. Trusting it replaces the old key so future \
+        connections to this server succeed.
+        """
+    }
+
+    /// Drop the stale `known_hosts` pin (via `ssh-keygen -R`) and reconnect. `StrictHostKeyChecking=
+    /// accept-new` then pins the server's current key as if it were a fresh host, so the reconnect
+    /// verifies cleanly — and password auth, which OpenSSH disables to a *changed*-key host, works
+    /// again. Preserves the original save name so a re-trusted connect still lands in the sidebar.
+    private func repairKnownHostsAndReconnect(
+        location: SFTPLocation,
+        authentication: SFTPAuthentication,
+        password: String?,
+        saveName: String?,
+        change: SFTPHostKeyChange
+    ) {
+        let target = SFTPKnownHosts.removalTarget(host: location.host, port: location.port)
+        let file = change.knownHostsFile
+        Task {
+            let removed = await Task.detached(priority: .userInitiated) {
+                SFTPKnownHostsRepair.removeKey(target: target, knownHostsFile: file)
+            }.value
+            guard removed else {
+                presentOperationFailure(
+                    message: "Couldn’t update the known hosts for “\(location.host)”.",
+                    detail: "The old host key couldn’t be removed automatically. Remove it from "
+                        + "\(file.isEmpty ? "~/.ssh/known_hosts" : file) and try connecting again."
+                )
+                return
+            }
+            connectSFTP(
+                location: location,
+                authentication: authentication,
+                password: password,
+                saveName: saveName
+            )
         }
     }
 

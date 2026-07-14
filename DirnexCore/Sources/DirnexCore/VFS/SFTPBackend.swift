@@ -224,7 +224,9 @@ public struct SFTPBackend: VFSBackend {
             switch error {
             case .notFound: throw VFSError.notFound(path)
             case .permissionDenied: throw VFSError.permissionDenied(path)
-            case .failure: throw VFSError.io(path: path, code: EIO)
+            // A changed host key surfaces on the connect probe (handled by the app's re-trust flow),
+            // not here; if one ever reaches a deeper op it maps to a generic I/O error like .failure.
+            case .hostKeyChanged, .failure: throw VFSError.io(path: path, code: EIO)
             }
         }
     }

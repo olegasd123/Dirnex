@@ -98,6 +98,63 @@ struct SFTPTransportTests {
         }
     }
 
+    // MARK: - SFTPHostKeyChange
+
+    /// A real OpenSSH changed-key refusal (the shape the app hits when a different daemon answers on
+    /// an address whose key was pinned before).
+    private static let hostKeyChangedStderr = """
+    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    @    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+    @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+    IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+    Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+    It is also possible that a host key has just been changed.
+    The fingerprint for the ED25519 key sent by the remote host is
+    SHA256:HAuuHf4xDIbPUeNs69A107K3NlgjlZlfHQR7+haPNgY.
+    Please contact your system administrator.
+    Add correct host key in /Users/oleg/.ssh/known_hosts to get rid of this message.
+    Offending ED25519 key in /Users/oleg/.ssh/known_hosts:7
+    Host key for 192.168.1.50 has changed and you have requested strict checking.
+    Host key verification failed.
+    Connection closed
+    """
+
+    @Test(
+        "a changed host key classifies as hostKeyChanged with the parsed fingerprint and stale pin"
+    )
+    func classifyHostKeyChanged() {
+        let expected = SFTPHostKeyChange(
+            host: "192.168.1.50",
+            keyType: "ED25519",
+            fingerprint: "SHA256:HAuuHf4xDIbPUeNs69A107K3NlgjlZlfHQR7+haPNgY",
+            knownHostsFile: "/Users/oleg/.ssh/known_hosts",
+            line: 7
+        )
+        #expect(
+            SFTPTransportError.classify(stderr: Self.hostKeyChangedStderr) == .hostKeyChanged(
+                expected
+            )
+        )
+    }
+
+    @Test("a benign or unrelated stderr is not mistaken for a host-key change")
+    func parseIgnoresUnrelatedStderr() {
+        #expect(SFTPHostKeyChange.parse(stderr: Self.hostKeyChangedStderr) != nil)
+        #expect(
+            SFTPHostKeyChange.parse(stderr: "kex_exchange_identification: Connection reset") == nil
+        )
+        #expect(SFTPHostKeyChange.parse(stderr: "Permission denied (publickey,password).") == nil)
+        #expect(SFTPHostKeyChange.parse(stderr: "") == nil)
+    }
+
+    @Test("known-hosts removal target is bare on the default port and bracketed otherwise")
+    func knownHostsRemovalTarget() {
+        #expect(SFTPKnownHosts.removalTarget(host: "192.168.1.50", port: 22) == "192.168.1.50")
+        #expect(
+            SFTPKnownHosts.removalTarget(host: "example.com", port: 2222) == "[example.com]:2222"
+        )
+    }
+
     // MARK: - SFTPProcessArguments
 
     private let location = SFTPLocation(host: "mac", port: 2222, username: "oleg")
