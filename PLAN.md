@@ -775,7 +775,12 @@ both taken deliberately over the tidier-looking alternative:
   right-click → Connect / Edit… / Remove; live connected/mounted indicator); and a generalized prompt
   (rename `SFTPConnectPrompt` → `ConnectServerPrompt`, `PanelViewController+SFTP` → `+Connect`) with a
   protocol segmented control (SFTP | SMB) above the existing Auth control and a "Save connection" name
-  field. This **subsumes** the deferred "saved SFTP connections in the sidebar" polish item. The app
+  field. **Address entry is Finder-⌘K-style**: a primary `smb://user@host/share` URL field (type or
+  paste, exactly the form Finder's Connect to Server takes) that **parses into editable host / share /
+  user fields shown below it**, so paste-a-URL and guided entry both work and the two stay in sync;
+  a bare `smb://host` (share omitted) mounts-on-connect / offers a share picker. Under the hood this is
+  the same NetFS mount as above — the URL is just what the user sees and what the sidebar stores. This
+  **subsumes** the deferred "saved SFTP connections in the sidebar" polish item. The app
   stays non-sandboxed (a plan non-goal), so `mount_smbfs` / NetFS needs no special entitlement.
 Nothing built yet — this is the scoped design; core-first as always (`ServerConnection(s)` + tests,
 then `SMBMounter` / store / sidebar / prompt), verified live against a LAN SMB share.
