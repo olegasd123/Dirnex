@@ -236,14 +236,14 @@ _Shipped over 11 passes (2026-07-09 → 07-12); 341 core tests. Per-pass detail 
 
 ### M5 — Network and sync (M)
 
-- [~] `SFTPBackend`: connection manager, **key auth + password auth**; **browse + byte transfer
-      DONE and verified live** (via the system `sftp` CLI, not swift-nio-ssh/libssh2 — the same
-      sidestep M4 made with `bsdtar`). Copy-out (`get`) / copy-in (`put`), remote mkdir / rename /
-      recursive-delete all run through the standard queue; an SFTP pane is writable
-      (`[.read, .write, .rename]`) so the pass-5 grey-out + Trash-less confirmed-permanent-delete
-      light up. **Password auth DONE (pass 9, verified live)** via `SSH_ASKPASS` (no PTY needed) +
-      Keychain storage. Only remaining item: mid-file **resume** (`get -a`/`put -a`) — optional
-      polish, not in the M5 exit criteria
+- [x] `SFTPBackend`: connection manager, **key auth + password auth**; **browse + byte transfer +
+      mid-file resume** all DONE and verified live (via the system `sftp` CLI, not
+      swift-nio-ssh/libssh2 — the same sidestep M4 made with `bsdtar`). Copy-out (`get`) / copy-in
+      (`put`), remote mkdir / rename / recursive-delete all run through the standard queue; an SFTP
+      pane is writable (`[.read, .write, .rename]`) so the pass-5 grey-out + Trash-less
+      confirmed-permanent-delete light up. **Password auth** (pass 9) via `SSH_ASKPASS` (no PTY
+      needed) + Keychain storage. **Mid-file resume** (pass 10) — `copyFile` picks up a partial
+      destination via `get -a`/`put -a` instead of restarting; verified live against a real server
 - [x] Capability degradation: panels grey out unsupported ops per backend ✅ (per-path
       `capabilities(for:)`; no Trash → explicit permanent-delete confirm ✅; no clone →
       always chunked ✅) — driven off the owning backend's caps, ready for SFTP to plug into
@@ -670,6 +670,63 @@ fail fast). Core→app as always:
   `NSSecureTextField` + a 6-field form tripped swiftlint `function_parameter_count` → grouped the
   controls into a `Fields` struct. **NEXT (finishes `SFTPBackend` → `[x]`):** mid-file **resume**
   (`get -a`/`put -a`) — optional polish, not in the M5 exit criteria; then **M6**.
+
+Progress (2026-07-14, M5 pass 10): **mid-file resume** (`get -a`/`put -a`) — the last remaining
+`SFTPBackend` item, **now `[x]`, so the whole SFTP box closes and M5 is DONE**. A copy that finds a
+nonzero *proper prefix* of the source already at the destination (a partial from an interrupted
+transfer) picks up where it left off instead of re-sending the whole file; `sftp` computes the byte
+offset itself from the existing length. User supplied a new test appliance at **192.168.1.50** (SFTP
+:22, FTP :21, FTPS :990; `sa`/`123`) — a **ServeSense "Brute Force Protection"** box, the same kind
+as pass 9's password server. Chose "finish SFTP first" over adding FTP/FTPS (not in the plan). Core→
+app as always:
+- **Core** (pure, tested, +5 → **451**): `SFTPTransport.download`/`upload` grew a `resume: Bool`
+  parameter; `SFTPBatchCommand.download`/`upload` emit `get -a`/`put -a` when set (default `false`
+  keeps every existing call site). `SFTPBackend.copyFile` reworked into `downloadFile`/`uploadFile`
+  helpers that **detect a resumable partial cheaply so the common fresh transfer pays nothing**: a
+  **download** reads the local partial's size (free `FileManager` stat) and only then asks the server
+  for the remote size — a fresh download (no local partial) skips the remote round trip entirely; an
+  **upload** only asks the server for the remote destination's size when the source exceeds
+  `resumeUploadThreshold` (1 MiB), since re-sending a small file costs less than the metadata round
+  trip that finding its partial would need. `progress` reports only the bytes actually moved (the
+  remainder when resuming), computed as `finalSize − preExistingSize`; the transport's return value
+  was redefined from "bytes transferred" to "the file's final total size" so the backend can derive
+  the delta. Tests: batch-command `-a` variants; `copyFile` resumes a download (local partial 120 <
+  remote 300 → `get -a`, reports 180), resumes a large upload (remote partial 1 MiB < 2 MiB source →
+  `put -a`, reports the 1 MiB remainder), **does not** resume a small upload (skips the stat), and
+  **does not** resume a fresh download. GOTCHA (recurring): the fake transport's recorded-transfer
+  tuple went to 3 members (`local`/`remote`/`resume`) → swiftlint `large_tuple` → extracted a
+  `RecordedTransfer` struct.
+- **App**: `SFTPProcessTransport.download`/`upload` thread `resume` through to the batch builder
+  (returning the local file's final size). +1 gated live test (`resumesPartialTransfer` in
+  `SFTPLiveIntegrationTests`): upload a 120-byte prefix, `put -a` the full 300, then `get -a` a local
+  120-byte partial back to 300 and byte-compare — runs green on a well-behaved key-auth server (skips
+  in CI / here, like the other live tests). App tests stay at **20** (the new one is gated).
+- **Live verification**: the resume *mechanic* was proven end-to-end against the user's 192.168.1.50
+  server via the actual `sftp` CLI the app shells out to — `put -a` grew a seeded 120-byte remote file
+  to 300 ("Resuming upload", byte-compare matched), and `get -a` grew a local 120-byte partial to 300
+  (byte-compare matched); mkdir/put/get/rm/rmdir were also all exercised and the remote left clean.
+- **Known limitation (the ServeSense appliance, documented not fixed):** 192.168.1.50 **authenticates**
+  (`sa`/`123`, verified live via the app's connect probe, which opts into `tolerateChannelHold`) but
+  **holds the SSH channel open after every command** (hangs even after `quit`), so the app's
+  one-shot-per-command transport **times out on browse/transfer** through it (only the single-line
+  connect probe tolerates the hold today — a multi-row listing must not be read partially). This is
+  the same appliance quirk pass 9 already noted; making the whole app work against channel-hold
+  appliances (tolerating the hold for transfers, whose size comes from the local file rather than
+  stdout) is a separate, considered enhancement, deliberately **not** bundled into this resume pass.
+  Because of it, resume was verified via raw `sftp` (above), not the app transport, against this
+  particular box; the app-transport path is covered by the gated live test on a normal server.
+- **Scope honesty:** resume is a correct, tested `copyFile` capability that activates whenever a
+  partial destination is handed in. The current in-app copy flow writes to **fresh temp destinations**
+  (the M2 overwrite path uses a per-attempt UUID temp; the direct `.proceed` path writes a fresh
+  target), so nothing hands `copyFile` a partial today — resume is inert in that flow by construction.
+  Wiring it to fire in-app means preserving a partial across a conflict/overwrite retry (a stable temp
+  name), which touches the M2 atomic-swap/undo guarantees — left as a deliberate future step, not done
+  here. `swift test` (451) + app `xcodebuild test` (20) green, swiftformat/swiftlint-strict clean.
+  **M5 network+sync is now fully `[x]`; M6 (Mac-native power features) is next.** Optional polish
+  still open across M5: SSH ControlMaster connection reuse (would also make the resume upload-stat and
+  browse cheap, and could sidestep the ServeSense per-command hang), saved SFTP connections in the
+  sidebar, a Settings picker for the preferred diff tool; and the user's FTP/FTPS servers remain
+  available if FTP(S) backends are ever added (a plan expansion beyond M5's SFTP-only scope).
 
 ### M6 — Mac-native power features (M)
 

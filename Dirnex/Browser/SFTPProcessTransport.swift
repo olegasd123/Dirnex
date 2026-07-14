@@ -69,17 +69,18 @@ struct SFTPProcessTransport: SFTPTransport {
     }
 
     @discardableResult
-    func download(_ remotePath: String, to localPath: String) throws -> Int64 {
-        _ = try run(batch: SFTPBatchCommand.download(remotePath, to: localPath))
-        // `sftp get` writes the whole file, so its final on-disk size is the bytes transferred.
+    func download(_ remotePath: String, to localPath: String, resume: Bool) throws -> Int64 {
+        _ = try run(batch: SFTPBatchCommand.download(remotePath, to: localPath, resume: resume))
+        // `sftp get`/`get -a` leaves the whole file on disk, so its final size is the total
+        // transferred; the backend derives the resumed remainder from the pre-existing length.
         return localFileSize(localPath)
     }
 
     @discardableResult
-    func upload(_ localPath: String, to remotePath: String) throws -> Int64 {
-        _ = try run(batch: SFTPBatchCommand.upload(localPath, to: remotePath))
-        // The local source's size is what `put` sent — cheaper and safer than re-statting the
-        // remote (which would cost another round trip).
+    func upload(_ localPath: String, to remotePath: String, resume: Bool) throws -> Int64 {
+        _ = try run(batch: SFTPBatchCommand.upload(localPath, to: remotePath, resume: resume))
+        // The local source's size is the remote file's total size after `put`/`put -a` — cheaper
+        // and safer than re-statting the remote (which would cost another round trip).
         return localFileSize(localPath)
     }
 

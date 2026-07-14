@@ -122,6 +122,44 @@ struct SFTPLiveIntegrationTests {
         }
     }
 
+    @Test("resumes a partial transfer both ways: put -a then get -a reconstruct the whole file")
+    func resumesPartialTransfer() throws {
+        let (_, config) = try makeBackend()
+        let transport = SFTPProcessTransport(
+            location: config.location,
+            authentication: .key(identityFile: config.identityFile)
+        )
+        let base = VFSPath(backend: .sftp(config.location), path: config.remotePath)
+        let remote = base.appending("dirnex_resume_test_\(UUID().uuidString).bin").path
+
+        let fileManager = FileManager.default
+        let scratch = fileManager.temporaryDirectory
+            .appendingPathComponent("dirnex_resume_\(UUID().uuidString)")
+        try fileManager.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer {
+            try? fileManager.removeItem(at: scratch)
+            try? transport.removeFile(remote)
+        }
+
+        // A known 300-byte payload, and a 120-byte prefix standing in for an interrupted transfer.
+        let full = Data((0..<300).map { UInt8($0 % 256) })
+        let prefix = full.prefix(120)
+        let localFull = scratch.appendingPathComponent("full.bin")
+        let localPrefix = scratch.appendingPathComponent("prefix.bin")
+        try full.write(to: localFull)
+        try Data(prefix).write(to: localPrefix)
+
+        // Upload the prefix, then resume with the full file: `put -a` sends only bytes 120…300.
+        try transport.upload(localPrefix.path, to: remote, resume: false)
+        try transport.upload(localFull.path, to: remote, resume: true)
+
+        // Download resume: a local 120-byte partial is filled to 300 by `get -a`.
+        let localDownload = scratch.appendingPathComponent("download.bin")
+        try Data(prefix).write(to: localDownload)
+        try transport.download(remote, to: localDownload.path, resume: true)
+        #expect(try Data(contentsOf: localDownload) == full)
+    }
+
     @Test("maps a missing remote path to VFSError.notFound")
     func missingPathIsNotFound() throws {
         let (backend, config) = try makeBackend()

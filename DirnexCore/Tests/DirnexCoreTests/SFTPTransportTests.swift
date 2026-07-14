@@ -42,6 +42,20 @@ struct SFTPTransportTests {
         #expect(SFTPBatchCommand.upload("/tmp/f", to: "/remote/f") == "put \"/tmp/f\" \"/remote/f\"")
     }
 
+    @Test("resume adds -a to get/put so a partial transfer picks up instead of restarting")
+    func transferVerbsResumeWithDashA() {
+        #expect(
+            SFTPBatchCommand.download("/remote/f", to: "/tmp/f", resume: true) == "get -a \"/remote/f\" \"/tmp/f\""
+        )
+        #expect(
+            SFTPBatchCommand.upload("/tmp/f", to: "/remote/f", resume: true) == "put -a \"/tmp/f\" \"/remote/f\""
+        )
+        // Escaping still applies around the -a flag.
+        #expect(
+            SFTPBatchCommand.upload("/a b", to: "/c d", resume: true) == "put -a \"/a b\" \"/c d\""
+        )
+    }
+
     // MARK: - SFTPTransportError.classify
 
     @Test("a not-found stderr classifies as notFound")

@@ -45,15 +45,20 @@ public protocol SFTPTransport: Sendable {
     /// (`ln -s`) — used when a copied/mirrored tree contains a symlink.
     func createSymbolicLink(_ remotePath: String, target: String) throws
 
-    /// Download the remote file at `remotePath` to a local path (`get`), returning the number of
-    /// bytes transferred so the operation engine can advance its progress bar.
+    /// Download the remote file at `remotePath` to a local path (`get`, or `get -a` to **resume**),
+    /// returning the local file's total size once the transfer finishes. When `resume` is true the
+    /// download picks up from the local file's current length instead of restarting, so `sftp`
+    /// fetches only the bytes past that offset — the caller computes the transferred delta from the
+    /// pre-existing size (see `SFTPBackend.copyFile`).
     @discardableResult
-    func download(_ remotePath: String, to localPath: String) throws -> Int64
+    func download(_ remotePath: String, to localPath: String, resume: Bool) throws -> Int64
 
-    /// Upload the local file at `localPath` to a remote path (`put`), returning the number of bytes
-    /// transferred so the operation engine can advance its progress bar.
+    /// Upload the local file at `localPath` to a remote path (`put`, or `put -a` to **resume**),
+    /// returning the local source's size (which is the remote file's total size once the transfer
+    /// finishes). When `resume` is true the upload picks up from the remote file's current length,
+    /// so `sftp` sends only the bytes past that offset.
     @discardableResult
-    func upload(_ localPath: String, to remotePath: String) throws -> Int64
+    func upload(_ localPath: String, to remotePath: String, resume: Bool) throws -> Int64
 }
 
 /// A remote operation's failure, in the few shapes the backend needs to distinguish so it can map
@@ -146,14 +151,18 @@ public enum SFTPBatchCommand {
         "ln -s \(quote(target)) \(quote(remotePath))"
     }
 
-    /// The batch line that downloads a remote file to a local path: `get "remote" "local"`.
-    public static func download(_ remotePath: String, to localPath: String) -> String {
-        "get \(quote(remotePath)) \(quote(localPath))"
+    /// The batch line that downloads a remote file to a local path: `get "remote" "local"`, or
+    /// `get -a "remote" "local"` to **resume** — `sftp` seeks to the local file's current length and
+    /// fetches only the remainder, instead of restarting from zero.
+    public static func download(_ remotePath: String, to localPath: String, resume: Bool = false) -> String {
+        "get \(resume ? "-a " : "")\(quote(remotePath)) \(quote(localPath))"
     }
 
-    /// The batch line that uploads a local file to a remote path: `put "local" "remote"`.
-    public static func upload(_ localPath: String, to remotePath: String) -> String {
-        "put \(quote(localPath)) \(quote(remotePath))"
+    /// The batch line that uploads a local file to a remote path: `put "local" "remote"`, or
+    /// `put -a "local" "remote"` to **resume** — `sftp` seeks past the remote file's current length
+    /// and sends only the remainder.
+    public static func upload(_ localPath: String, to remotePath: String, resume: Bool = false) -> String {
+        "put \(resume ? "-a " : "")\(quote(localPath)) \(quote(remotePath))"
     }
 
     /// The batch line that prints the remote working directory (`pwd`), used to discover the home

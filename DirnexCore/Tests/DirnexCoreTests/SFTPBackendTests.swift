@@ -298,6 +298,106 @@ extension SFTPBackendTests {
     }
 }
 
+// Mid-file resume (`get -a`/`put -a`), split into its own extension to keep each type body under
+// SwiftLint's limit (a recurring gotcha in this project).
+extension SFTPBackendTests {
+    // MARK: - Resume
+
+    /// Write a temporary local file of `bytes` zero-filled bytes and return its path, so a test can
+    /// stage a "partial" (a local download-in-progress or an upload source) on real disk.
+    private func makeTempFile(bytes: Int) throws -> String {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dirnex_resume_\(UUID().uuidString).bin")
+        try Data(count: bytes).write(to: url)
+        return url.path
+    }
+
+    @Test("copyFile resumes a download when a local partial is a proper prefix (get -a)")
+    func copyFileResumesDownload() throws {
+        let transport = FakeSFTPTransport()
+        // Remote source is 300 bytes; a local partial of 120 already sits at the destination.
+        transport.listings["/home/oleg/big.bin"] =
+            "-rw-r--r--    ? oleg staff 300 Jul 14 00:00 /home/oleg/big.bin"
+        transport.downloadBytes = 300 // the total size a real `get -a` leaves on disk
+        let localDest = try makeTempFile(bytes: 120)
+        defer { try? FileManager.default.removeItem(atPath: localDest) }
+
+        var reported: Int64 = 0
+        try backend(transport).copyFile(
+            at: path("/home/oleg/big.bin"),
+            to: .local(localDest),
+            progress: { reported += $0 },
+            isCancelled: { false }
+        )
+        let download = try #require(transport.downloads.first)
+        #expect(download.resume) // resumed, not restarted
+        #expect(reported == 180) // only the remaining 300 - 120 bytes counted
+    }
+
+    @Test("copyFile resumes a large upload when a remote partial is a proper prefix (put -a)")
+    func copyFileResumesUpload() throws {
+        let transport = FakeSFTPTransport()
+        let partial = 1 << 20 // remote already holds a 1 MiB prefix
+        transport.listings["/home/oleg/big.bin"] =
+            "-rw-r--r--    ? oleg staff \(partial) Jul 14 00:00 /home/oleg/big.bin"
+        let sourceBytes = 2 << 20 // 2 MiB local source, over the resume-upload threshold
+        let localSource = try makeTempFile(bytes: sourceBytes)
+        defer { try? FileManager.default.removeItem(atPath: localSource) }
+        transport.uploadBytes = Int64(sourceBytes)
+
+        var reported: Int64 = 0
+        try backend(transport).copyFile(
+            at: .local(localSource),
+            to: path("/home/oleg/big.bin"),
+            progress: { reported += $0 },
+            isCancelled: { false }
+        )
+        let upload = try #require(transport.uploads.first)
+        #expect(upload.resume)
+        #expect(reported == Int64(sourceBytes - partial)) // only the remaining 1 MiB counted
+    }
+
+    @Test("copyFile does not resume a small upload even with a remote partial (skips the stat)")
+    func copyFileSmallUploadDoesNotResume() throws {
+        let transport = FakeSFTPTransport()
+        // A remote partial exists, but the source is tiny — resuming isn't worth a stat round trip.
+        transport.listings["/home/oleg/small.bin"] =
+            "-rw-r--r--    ? oleg staff 10 Jul 14 00:00 /home/oleg/small.bin"
+        let localSource = try makeTempFile(bytes: 40)
+        defer { try? FileManager.default.removeItem(atPath: localSource) }
+        transport.uploadBytes = 40
+
+        var reported: Int64 = 0
+        try backend(transport).copyFile(
+            at: .local(localSource),
+            to: path("/home/oleg/small.bin"),
+            progress: { reported += $0 },
+            isCancelled: { false }
+        )
+        let upload = try #require(transport.uploads.first)
+        #expect(!upload.resume) // full re-put, not a resume
+        #expect(reported == 40) // whole file counted
+    }
+
+    @Test("copyFile does not resume a fresh download (no local partial, no remote stat)")
+    func copyFileFreshDownloadDoesNotResume() throws {
+        let transport = FakeSFTPTransport()
+        transport.downloadBytes = 128
+        let localDest = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dirnex_fresh_\(UUID().uuidString).bin").path
+        var reported: Int64 = 0
+        try backend(transport).copyFile(
+            at: path("/home/oleg/notes.txt"),
+            to: .local(localDest),
+            progress: { reported += $0 },
+            isCancelled: { false }
+        )
+        let download = try #require(transport.downloads.first)
+        #expect(!download.resume)
+        #expect(reported == 128)
+    }
+}
+
 /// A canned `SFTPTransport`: returns per-path `ls -la` text and records every write call (or throws
 /// a configured error), so the backend's browse *and* write logic is exercised without a live
 /// server (PLAN.md §2 "the app is a thin client").
@@ -311,8 +411,16 @@ private final class FakeSFTPTransport: SFTPTransport, @unchecked Sendable {
     private(set) var removedFiles: [String] = []
     private(set) var removedDirectories: [String] = []
     private(set) var symlinks: [(link: String, target: String)] = []
-    private(set) var downloads: [(remote: String, local: String)] = []
-    private(set) var uploads: [(local: String, remote: String)] = []
+    private(set) var downloads: [RecordedTransfer] = []
+    private(set) var uploads: [RecordedTransfer] = []
+
+    /// One recorded `get`/`put`, carrying both endpoints and the resume flag (a struct rather than a
+    /// tuple to stay under SwiftLint's two-member `large_tuple` limit).
+    struct RecordedTransfer {
+        let local: String
+        let remote: String
+        let resume: Bool
+    }
 
     // Byte counts the transfer methods report back for progress accounting.
     var downloadBytes: Int64 = 0
@@ -348,15 +456,15 @@ private final class FakeSFTPTransport: SFTPTransport, @unchecked Sendable {
         symlinks.append((remotePath, target))
     }
 
-    func download(_ remotePath: String, to localPath: String) throws -> Int64 {
+    func download(_ remotePath: String, to localPath: String, resume: Bool) throws -> Int64 {
         if let error { throw error }
-        downloads.append((remotePath, localPath))
+        downloads.append(RecordedTransfer(local: localPath, remote: remotePath, resume: resume))
         return downloadBytes
     }
 
-    func upload(_ localPath: String, to remotePath: String) throws -> Int64 {
+    func upload(_ localPath: String, to remotePath: String, resume: Bool) throws -> Int64 {
         if let error { throw error }
-        uploads.append((localPath, remotePath))
+        uploads.append(RecordedTransfer(local: localPath, remote: remotePath, resume: resume))
         return uploadBytes
     }
 }
