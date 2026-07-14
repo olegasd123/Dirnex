@@ -123,6 +123,15 @@ public struct VFSPath: Sendable, Hashable, CustomStringConvertible {
         return chain[index + 1]
     }
 
+    /// Whether this path *is* `ancestor` or lies strictly beneath it, within the same backend.
+    /// Used to recover a pane when the volume it was browsing is unmounted: a pane whose path is
+    /// at or under the vanished mount point (`/Volumes/Temp` itself, or `/Volumes/Temp/sub`) is
+    /// sent home, while a pane at `/Volumes` — merely alongside it — is left alone.
+    public func isSelfOrDescendant(of ancestor: VFSPath) -> Bool {
+        guard backend == ancestor.backend else { return false }
+        return self == ancestor || ancestor.child(towards: self) != nil
+    }
+
     public var description: String { "\(backend):\(path)" }
 
     /// Collapse duplicate slashes, drop a trailing slash, and force an absolute

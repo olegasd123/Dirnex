@@ -189,6 +189,7 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         queueBar.onPreferredHeightChanged = { [weak self] in self?.updateQueueBarHeight() }
         startObservingQueue()
         installEscapeMonitor()
+        observeVolumeUnmount()
     }
 
     /// Esc closes Quick View from anywhere in this window. A window-scoped local monitor sees the
@@ -251,6 +252,7 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     deinit {
         queueObservation?.cancel()
         NotificationCenter.default.removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
     }
 

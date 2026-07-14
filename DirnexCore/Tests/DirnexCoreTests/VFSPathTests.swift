@@ -68,4 +68,29 @@ struct VFSPathTests {
         // Different backend never matches.
         #expect(VFSPath(backend: VFSBackendID("zip"), path: "/Users").child(towards: deep) == nil)
     }
+
+    // MARK: - isSelfOrDescendant(of:)
+
+    @Test("isSelfOrDescendant(of:) matches the mount point itself and everything beneath it")
+    func selfOrDescendantWithinVolume() {
+        let mount = VFSPath.local("/Volumes/Temp")
+        // The pane parked at the mount point itself must be recovered.
+        #expect(mount.isSelfOrDescendant(of: mount))
+        // Anything nested inside the ejected volume, at any depth, must be recovered.
+        #expect(VFSPath.local("/Volumes/Temp/sub").isSelfOrDescendant(of: mount))
+        #expect(VFSPath.local("/Volumes/Temp/a/b/c").isSelfOrDescendant(of: mount))
+    }
+
+    @Test("isSelfOrDescendant(of:) leaves paths outside the mount point alone")
+    func selfOrDescendantOutsideVolume() {
+        let mount = VFSPath.local("/Volumes/Temp")
+        // The parent /Volumes is alongside the mount, not under it — keep it.
+        #expect(!VFSPath.local("/Volumes").isSelfOrDescendant(of: mount))
+        // A sibling volume whose name merely shares a prefix must not match.
+        #expect(!VFSPath.local("/Volumes/Temp2").isSelfOrDescendant(of: mount))
+        // An unrelated branch, and a different backend, never match.
+        #expect(!VFSPath.local("/Users/oleg").isSelfOrDescendant(of: mount))
+        #expect(!VFSPath(backend: VFSBackendID("zip"), path: "/Volumes/Temp/x")
+            .isSelfOrDescendant(of: mount))
+    }
 }

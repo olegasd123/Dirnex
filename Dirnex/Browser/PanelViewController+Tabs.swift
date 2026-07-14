@@ -124,6 +124,54 @@ extension PanelViewController {
         persistState()
     }
 
+    // MARK: - Volume recovery
+
+    /// A volume was unmounted (ejected from the sidebar, in Finder, or via `diskutil`). Any tab
+    /// still pointing inside it now shows a stale, unusable listing, so redirect it to Home. The
+    /// active tab re-navigates (re-listing Home and refreshing the chrome); a background tab is
+    /// reset to a fresh, not-yet-loaded Home so it loads cleanly the next time it's shown.
+    /// Reports whether any tab was affected.
+    @discardableResult
+    func recoverIfBrowsing(unmountedVolumeAt mountPoint: VFSPath) -> Bool {
+        let home = VFSPath.local(NSHomeDirectory())
+        var activeNavigated = false
+        var changed = false
+        for (index, tab) in tabs.enumerated()
+            where tab.panel.path.isSelfOrDescendant(of: mountPoint) {
+            changed = true
+            if index == activeTabIndex {
+                navigate(to: home)
+                activeNavigated = true
+            } else {
+                reset(tab, to: home)
+            }
+        }
+        guard changed else { return false }
+        // `navigate` refreshes the tab strip and persists on its own; only do it here when the
+        // active tab stayed put and merely background tabs were reset.
+        if !activeNavigated {
+            refreshTabBar()
+            persistState()
+        }
+        return true
+    }
+
+    /// Point a background tab back at `path`, discarding the state it held for the vanished
+    /// directory so it loads afresh the next time it's activated.
+    private func reset(_ tab: PanelTab, to path: VFSPath) {
+        tab.panel = Panel(
+            path: path,
+            sort: tab.panel.model.sort,
+            showHidden: tab.panel.model.showHidden
+        )
+        tab.history = NavigationHistory(initialPath: path)
+        tab.hasLoaded = false
+        tab.cursorOnParentRow = false
+        tab.searchQuery = nil
+        tab.searchScope = nil
+        tab.customTitle = nil
+    }
+
     func selectNextTab() {
         guard tabs.count > 1 else { return }
         selectTab(at: (activeTabIndex + 1) % tabs.count)
