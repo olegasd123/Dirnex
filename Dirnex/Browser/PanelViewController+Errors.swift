@@ -11,6 +11,7 @@ extension PanelViewController {
         alert.informativeText = describe(error)
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
+        alert.enableEscapeToCancel()
         if let window = view.window {
             alert.beginSheetModal(for: window)
         } else {

@@ -96,6 +96,7 @@ extension BrowserWindowController {
         // Reuse the pane's error phrasing (pure — it only switches on the error).
         alert.informativeText = leftPanel.describe(report.failures[0].error)
         alert.addButton(withTitle: "OK")
+        alert.enableEscapeToCancel()
         if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
     }
 

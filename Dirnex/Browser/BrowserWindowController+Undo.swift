@@ -50,6 +50,7 @@ extension BrowserWindowController {
         alert.messageText = "Undo \(record.label) finished with issues"
         alert.informativeText = lines.joined(separator: "\n")
         alert.addButton(withTitle: "OK")
+        alert.enableEscapeToCancel()
         if let window { alert.beginSheetModal(for: window) } else { alert.runModal() }
     }
 }

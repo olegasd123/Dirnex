@@ -31,15 +31,29 @@ final class EscapeDismissingView: NSView {
 
 extension NSAlert {
     /// Ensure the Escape key dismisses this alert. `NSAlert` already binds Escape to a button titled
-    /// "Cancel"; where an alert offers none (e.g. Retry/Skip/Abort, Remove/Keep), bind it to the
-    /// alert's safest choice so the user can always back out with the key. Call after adding every
-    /// button and before running the alert. A single-button alert already answers Escape as well as
-    /// Return, so it is left untouched.
+    /// "Cancel"; this fills the gaps. A multi-button alert with no Cancel (Retry/Skip/Abort,
+    /// Remove/Keep) gets Escape bound to its safest choice. A lone "OK" alert keeps Return as its
+    /// button's default and answers Escape through a zero-size accessory that clicks the button —
+    /// the button can't carry two key equivalents at once. Call after adding every button and before
+    /// running the alert.
     func enableEscapeToCancel() {
-        guard buttons.count > 1,
-              !buttons.contains(where: { $0.keyEquivalent == "\u{1b}" }) else { return }
-        let safeTitles: Set<String> = ["Cancel", "Keep", "Abort", "No", "Don't Save", "Don’t Save"]
-        let target = buttons.first { safeTitles.contains($0.title) } ?? buttons.last
-        target?.keyEquivalent = "\u{1b}"
+        // A button already answers Escape (an NSAlert "Cancel") — nothing to add.
+        guard !buttons.contains(where: { $0.keyEquivalent == "\u{1b}" }) else { return }
+        if buttons.count > 1 {
+            let safeTitles: Set<String> = [
+                "Cancel",
+                "Keep",
+                "Abort",
+                "No",
+                "Don't Save",
+                "Don’t Save"
+            ]
+            let target = buttons.first { safeTitles.contains($0.title) } ?? buttons.last
+            target?.keyEquivalent = "\u{1b}"
+        } else if let only = buttons.first, accessoryView == nil {
+            let catcher = EscapeDismissingView()
+            catcher.onEscape = { [weak only] in only?.performClick(nil) }
+            accessoryView = catcher
+        }
     }
 }
