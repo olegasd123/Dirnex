@@ -8,6 +8,11 @@ protocol SidebarViewControllerDelegate: AnyObject {
     /// A saved-search row was picked — re-run its query in the active pane and show the hits in
     /// a virtual results panel (PLAN.md §M4 "Saved searches … in the places strip").
     func sidebar(_ sidebar: SidebarViewController, didActivateSavedSearch savedSearch: SavedSearch)
+    /// A saved-server row was picked — connect (SFTP) or mount (SMB) it and browse it in the active
+    /// pane (PLAN.md §M5 "click → connect/mount + navigate").
+    func sidebar(_ sidebar: SidebarViewController, didActivateServer server: ServerConnection)
+    /// A saved-server's "Edit…" was chosen — re-open the connect prompt prefilled from it.
+    func sidebar(_ sidebar: SidebarViewController, didEditServer server: ServerConnection)
     /// A click landed on the sidebar's empty space or a non-selectable header. Keep keyboard
     /// focus on the active file pane rather than letting the source list steal it — the pane's
     /// file commands (F5/F6/F8) are dispatched through the responder chain and go dead the moment
@@ -25,24 +30,27 @@ protocol SidebarViewControllerDelegate: AnyObject {
 /// actual navigation is delegated to the window controller, keeping this a thin view.
 @MainActor
 final class SidebarViewController: NSViewController {
-    /// A rendered sidebar row: a section header or a navigable destination.
-    private enum Row {
+    /// A rendered sidebar row: a section header or a navigable destination. `internal` (not
+    /// `private`) so the saved-search and server management extensions in companion files can read
+    /// the clicked row.
+    enum Row {
         case header(String)
         case place(FavoritePlace)
         case volume(MountedVolume)
         case savedSearch(SavedSearch)
+        case server(ServerConnection)
 
         var isHeader: Bool {
             if case .header = self { return true }
             return false
         }
 
-        /// The path a click navigates to, when the row is a real location. `nil` for headers and
-        /// saved searches — a saved search runs a query rather than pointing at a directory, so
-        /// it's dispatched through its own delegate call instead.
+        /// The path a click navigates to, when the row is a real location. `nil` for headers, saved
+        /// searches, and servers — a saved search runs a query and a server connects/mounts, so each
+        /// is dispatched through its own delegate call instead of pointing at a directory.
         var path: VFSPath? {
             switch self {
-            case .header, .savedSearch: return nil
+            case .header, .savedSearch, .server: return nil
             case let .place(place): return place.path
             case let .volume(volume): return volume.path
             }
@@ -52,15 +60,22 @@ final class SidebarViewController: NSViewController {
             if case let .savedSearch(search) = self { return search }
             return nil
         }
+
+        var server: ServerConnection? {
+            if case let .server(connection) = self { return connection }
+            return nil
+        }
     }
 
     weak var delegate: SidebarViewControllerDelegate?
 
     // A focus-preserving subclass: empty-space / header clicks don't steal keyboard focus from
-    // the active file pane (which would disable the responder-chain file commands).
-    private let tableView = SidebarTableView()
+    // the active file pane (which would disable the responder-chain file commands). `tableView` and
+    // `rows` are `internal` (not `private`) so the companion management extensions can read the
+    // clicked row (Swift `private` doesn't cross files).
+    let tableView = SidebarTableView()
     private let scrollView = NSScrollView()
-    private var rows: [Row] = []
+    var rows: [Row] = []
 
     // MARK: - View setup
 
@@ -116,6 +131,7 @@ final class SidebarViewController: NSViewController {
         super.viewDidLoad()
         observeVolumeChanges()
         observeSavedSearchChanges()
+        observeServerConnectionChanges()
         rebuild()
     }
 
@@ -147,6 +163,13 @@ final class SidebarViewController: NSViewController {
         if !volumes.isEmpty {
             rows.append(.header("Volumes"))
             rows.append(contentsOf: volumes.map(Row.volume))
+        }
+        // Saved servers close the sidebar, grouped with the local volumes as the "places you browse"
+        // (PLAN.md §M5 "a Servers sidebar section mirroring Searches").
+        let servers = ServerConnectionStore.load().connections
+        if !servers.isEmpty {
+            rows.append(.header("Servers"))
+            rows.append(contentsOf: servers.map(Row.server))
         }
         self.rows = rows
         tableView.reloadData()
@@ -194,6 +217,21 @@ final class SidebarViewController: NSViewController {
         rebuild()
     }
 
+    /// Rebuild when the shared server list changes — a Save/Edit/Remove here or in another window
+    /// shows up live in the Servers section.
+    private func observeServerConnectionChanges() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(serverConnectionsChanged),
+            name: ServerConnectionStore.didChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func serverConnectionsChanged() {
+        rebuild()
+    }
+
     // MARK: - Actions
 
     @objc private func rowClicked() {
@@ -201,6 +239,8 @@ final class SidebarViewController: NSViewController {
         guard rows.indices.contains(index) else { return }
         if let savedSearch = rows[index].savedSearch {
             delegate?.sidebar(self, didActivateSavedSearch: savedSearch)
+        } else if let server = rows[index].server {
+            delegate?.sidebar(self, didActivateServer: server)
         } else if let path = rows[index].path {
             delegate?.sidebar(self, didActivate: path)
         }
@@ -266,7 +306,30 @@ extension SidebarViewController: NSTableViewDelegate {
             cell.onEject = nil
             cell.onDelete = { [weak self] in self?.confirmDeleteSavedSearch(named: search.name) }
             return cell
+        case let .server(connection):
+            let cell = reuse(SidebarCellView.identifier) as? SidebarCellView ?? SidebarCellView()
+            cell.configure(
+                name: connection.name,
+                image: Self.serverIcon(for: connection.kind),
+                canEject: false,
+                tooltip: connection.address
+            )
+            cell.onEject = nil
+            cell.onDelete = { [weak self] in self?.confirmRemoveServer(named: connection.name) }
+            return cell
         }
+    }
+
+    /// A per-protocol SF Symbol so a saved server reads as remote at a glance: a globe-ish network
+    /// glyph for SFTP, a connected-drive glyph for an SMB share. Template so the source list tints
+    /// it with the row's text color like the other sidebar glyphs.
+    private static func serverIcon(for kind: ServerKind) -> NSImage {
+        let symbol = kind == .smb ? "externaldrive.connected.to.line.below" : "network"
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Server")?
+            .withSymbolConfiguration(config)
+        image?.isTemplate = true
+        return image ?? NSImage()
     }
 
     /// A magnifying-glass SF Symbol so a saved search reads as a query, not a folder. Template
@@ -348,111 +411,20 @@ extension SidebarViewController: NSTableViewDelegate {
     }
 }
 
-// MARK: - Saved-search context menu
+// MARK: - Right-click context menu
 
 extension SidebarViewController: NSMenuDelegate {
-    /// Build the right-click menu lazily from the clicked row. A right-click on any row that
-    /// isn't a saved search leaves the menu empty, so AppKit shows nothing — the menu is
-    /// exclusively the saved-search management surface (Run / Rename / Delete).
+    /// Build the right-click menu lazily from the clicked row, dispatching to the saved-search or
+    /// server management builder (in companion files). Any other row — a header, place, or volume —
+    /// leaves the menu empty, so AppKit shows nothing.
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let row = tableView.clickedRow
-        guard rows.indices.contains(row), let search = rows[row].savedSearch else { return }
-
-        menu.addItem(
-            savedSearchMenuItem("Run Search", #selector(runSavedSearchItem(_:)), search.name)
-        )
-        menu.addItem(.separator())
-        menu.addItem(
-            savedSearchMenuItem("Rename…", #selector(renameSavedSearchItem(_:)), search.name)
-        )
-        menu.addItem(
-            savedSearchMenuItem("Delete", #selector(deleteSavedSearchItem(_:)), search.name)
-        )
-    }
-
-    /// One management item, carrying the search's *name* so a mid-open store change can't act
-    /// on the wrong (index-shifted) search — mirroring the hotlist/workspace popups.
-    private func savedSearchMenuItem(_ title: String, _ action: Selector, _ name: String) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        item.target = self
-        item.representedObject = name
-        return item
-    }
-
-    @objc private func runSavedSearchItem(_ sender: NSMenuItem) {
-        guard let name = sender.representedObject as? String,
-              let search = SavedSearchStore.load().search(named: name) else { return }
-        delegate?.sidebar(self, didActivateSavedSearch: search)
-    }
-
-    @objc private func renameSavedSearchItem(_ sender: NSMenuItem) {
-        guard let name = sender.representedObject as? String,
-              let newName = promptForSavedSearchRename(current: name), newName != name else { return }
-        var store = SavedSearchStore.load()
-        if store.rename(name: name, to: newName) {
-            SavedSearchStore.save(store)
-        } else {
-            presentSavedSearchRenameCollision(newName)
-        }
-    }
-
-    @objc private func deleteSavedSearchItem(_ sender: NSMenuItem) {
-        guard let name = sender.representedObject as? String else { return }
-        confirmDeleteSavedSearch(named: name)
-    }
-
-    /// Confirm before removing a saved search — the shared path for both the row's trailing delete
-    /// button and the context-menu Delete. Presented as a window sheet when possible.
-    func confirmDeleteSavedSearch(named name: String) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Delete “\(name)”?"
-        alert.informativeText = "This removes the saved search from the sidebar. No files are deleted."
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
-
-        let commit = { [weak self] (response: NSApplication.ModalResponse) in
-            guard response == .alertFirstButtonReturn else { return }
-            var store = SavedSearchStore.load()
-            if store.remove(name: name) { SavedSearchStore.save(store) }
-            _ = self
-        }
-        if let window = view.window {
-            alert.beginSheetModal(for: window, completionHandler: commit)
-        } else {
-            commit(alert.runModal())
-        }
-    }
-
-    /// Ask for a new name, prefilled with the current one; `nil` on cancel or an empty name.
-    private func promptForSavedSearchRename(current: String) -> String? {
-        let alert = NSAlert()
-        alert.messageText = "Rename Saved Search"
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
-        field.stringValue = current
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? nil : name
-    }
-
-    /// A rename that collides with a *different* saved search is refused by the model; tell the
-    /// user rather than silently dropping it.
-    private func presentSavedSearchRenameCollision(_ name: String) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "“\(name)” is already taken"
-        alert.informativeText = "Another saved search already uses that name. Pick a different one."
-        if let window = view.window {
-            alert.beginSheetModal(for: window)
-        } else {
-            alert.runModal()
+        guard rows.indices.contains(row) else { return }
+        if let search = rows[row].savedSearch {
+            buildSavedSearchMenu(menu, for: search)
+        } else if let server = rows[row].server {
+            buildServerMenu(menu, for: server)
         }
     }
 }

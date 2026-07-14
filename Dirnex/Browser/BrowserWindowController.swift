@@ -420,6 +420,17 @@ extension BrowserWindowController: SidebarViewControllerDelegate {
         target.focusTable()
     }
 
+    /// A saved server connects (SFTP) or mounts (SMB) in the active pane and browses it. Focus
+    /// isn't grabbed here — the connect/mount is async and navigates the pane on completion.
+    func sidebar(_ sidebar: SidebarViewController, didActivateServer server: ServerConnection) {
+        (activePanel ?? leftPanel).connect(to: server)
+    }
+
+    /// "Edit…" on a saved server re-opens the connect prompt prefilled from it, in the active pane.
+    func sidebar(_ sidebar: SidebarViewController, didEditServer server: ServerConnection) {
+        (activePanel ?? leftPanel).editServer(server)
+    }
+
     /// An empty-space / header click in the sidebar re-focuses the active pane so its keyboard
     /// focus — and the responder-chain file commands (F5/F6/F8) — survive the click.
     func sidebarDidClickEmptyArea(_ sidebar: SidebarViewController) {

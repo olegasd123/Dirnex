@@ -248,7 +248,10 @@ extension CommandCatalog {
             id: "go.connectServer",
             title: "Connect to Server…",
             category: .navigation,
-            keywords: ["sftp", "ssh", "remote", "network", "server", "connect", "host"]
+            keywords: [
+                "sftp", "ssh", "smb", "share", "mount", "nas", "remote", "network",
+                "server", "connect", "host"
+            ]
         ),
         Command(
             id: "go.parent",

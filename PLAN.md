@@ -821,6 +821,55 @@ existing type (one additive conformance):
   **Searches**), and the generalized `ConnectServerPrompt` (rename `SFTPConnectPrompt`; protocol picker
   SFTP | SMB + Save + the URL-expands-to-fields entry) — verified live against a LAN SMB share.
 
+Progress (2026-07-14, M5 SMB pass 2 — the app layer, CODE-COMPLETE; live-mount check pending): all
+four pass-2 surfaces built, app builds + `swift test` (481 core) + 24 app tests green, swiftformat +
+swiftlint-strict clean. Nothing touched `CompositeBackend` routing — SMB never becomes a `VFSBackendID`;
+it rides the OS mounter and browses `/Volumes/…` as `.local`, exactly as designed.
+- **`SMBMounter.swift`** — the mount lifecycle (the one non-hermetic surface, like `ArchiveMounter`).
+  `@MainActor final class` with a `shared` app-wide registry of the `/Volumes/…` paths *we* created.
+  `mount(_:username:password:) async` snapshots `FileManager.mountedVolumeURLs` before mounting, runs
+  the blocking `NetFSMountURLSync` on a `Task.detached` (so the four static helpers are
+  `nonisolated static`), and records the mount as ours only if the path wasn't already mounted — so a
+  Finder-mounted share is never adopted. Guest mount = `kNetFSUseGuestKey` + nil user (blank username);
+  auth mount passes user/pass separately. **The mount URL is built user-less** (`smb://host[:port]/share`,
+  default 445 elided) — the username goes to NetFS as a separate arg, never in both (the one unit-tested
+  invariant). `kNAUIOptionKey = kNAUIOptionNoUI` so a bad password errors instead of blocking on a
+  dialog. `disconnect(mountPoint:)`/`unmountOwnedMounts()` (called from `AppDelegate.applicationWill
+  Terminate`) eject only our mounts via `NSWorkspace.unmountAndEjectDevice`. `SMBMountError:
+  LocalizedError` maps `EAUTH`/`ENOENT`/`EHOSTDOWN`/… to human reasons. Needed `import NetFS` (auto-links;
+  typechecked green against the SDK). `SMBKeychain` = an `SFTPKeychain` clone keyed by
+  `SMBLocation.keychainService`.
+- **`ServerConnectionStore.swift`** — a `SavedSearchStore` clone verbatim (UserDefaults JSON under
+  `Dirnex.serverConnections` + `didChangeNotification`); no secret ever serialized.
+- **Servers sidebar section** — mirrors Searches. `SidebarViewController.Row` gained `.server`, a
+  **Servers** header trails the Volumes section, per-kind SF Symbol (`network` SFTP /
+  `externaldrive.connected.to.line.below` SMB), click → `didActivateServer`, trailing delete +
+  right-click **Connect / Edit… / Remove** (Remove also clears the Keychain secret). Split the
+  saved-search **and** new server management into companion files (`SidebarViewController+Searches.swift`,
+  `+Servers.swift`) to stay under file_length 500 — which forced widening `Row`/`tableView`/`rows` to
+  internal (Swift `private` doesn't cross files, the recurring gotcha); `menuNeedsUpdate` stays in the
+  main file as a dispatcher. Two new delegate methods (`didActivateServer`/`didEditServer`).
+- **`ConnectServerPrompt` + `ConnectServerForm`** (renamed from `SFTPConnectPrompt`;
+  `PanelViewController+SFTP`→`+Connect`, both via `git mv` — synchronized Xcode groups need no pbxproj
+  edit). Prompt returns a `Form(endpoint: ServerEndpoint, password:, saveName:)` reusing the pass-1 core
+  enum. The form is a protocol picker (SFTP | SMB) over **independent** per-protocol field sets (so no
+  cross-contamination / no SFTP `NSUserName()` default leaking into SMB); accessory sized once to the
+  taller (SFTP) layout so toggling rows never resizes the modal. **SMB entry is Finder-⌘K-style**: an
+  `smb://user@host/share` address field two-way-synced with editable host/share/user fields via the pure
+  `SMBLocation` url⇄init round-trip (`controlTextDidChange`, re-entrancy-guarded; port rides the URL).
+  Prefill (Edit…) loads coordinates + the Keychain secret. `type_body_length` >250 → view/value factories
+  moved to a file-scope `@MainActor private enum ConnectFormFactory`. `PanelViewController+Connect`:
+  `connectToServer` (prompt→apply), `connect(to:)` (saved-server, Keychain secret or fall back to the
+  prefilled prompt), `editServer` (rename removes-old-then-saves in place); SFTP path unchanged, SMB path
+  mounts then `navigate(to: .local(mountPoint))`, secrets filed only after success, saved only when named.
+  `CommandCatalog` `go.connectServer` keywords gained smb/share/mount/nas.
+CAPS NOTE: SMB browses as `.local` so it gets full local caps — but `clonefile` returns `ENOTSUP` on SMB
+→ `CopyEngine` falls back to chunked cleanly, and Trash either works (NAS `.Trashes`) or surfaces an
+error; explicit mount-point cap degradation ([.read,.write,.rename]) was deliberately NOT wired (would
+couple `CompositeBackend` to the mounter) — deferred. **NEXT: live-verify against a LAN SMB share**
+(mount guest + auth, browse/copy/rename/delete, disconnect-unmounts-only-ours, quit-cleanup); then the
+share-picker for a bare `smb://host`, Bonjour `_smb._tcp` discovery (M6-ish), and the deferred cap tweak.
+
 ### M6 — Mac-native power features (M)
 
 - [ ] Git awareness: branch in path bar, status column (M/A/?/ignored) via a debounced

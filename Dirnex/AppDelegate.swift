@@ -41,6 +41,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    /// Unmount only the SMB shares *we* mounted, leaving any Finder-mounted share as the user had it
+    /// (PLAN.md §M5 "unmount only what we mounted on disconnect/quit").
+    func applicationWillTerminate(_ notification: Notification) {
+        SMBMounter.shared.unmountOwnedMounts()
+    }
+
     @objc private func rebuildMainMenu() {
         NSApp.mainMenu = MainMenuBuilder.build()
     }
