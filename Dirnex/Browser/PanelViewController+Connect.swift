@@ -125,6 +125,9 @@ extension PanelViewController {
                     )
                 }
                 navigate(to: VFSPath(backend: .sftp(location), path: home))
+                // Hand keyboard focus to the pane so the freshly connected server is ready to
+                // work with immediately — no extra click to activate it first.
+                focusTable()
             case let .failure(error):
                 presentOperationFailure(
                     message: "Couldn’t connect to “\(location.host)”.",
@@ -168,6 +171,9 @@ extension PanelViewController {
                 }
                 if let saveName { saveServer(name: saveName, endpoint: .smb(location)) }
                 navigate(to: .local(result.mountPoint.path))
+                // Hand keyboard focus to the pane so the freshly mounted share is ready to work
+                // with immediately — no extra click to activate it first.
+                focusTable()
             } catch {
                 guard token == loadToken else { return }
                 let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

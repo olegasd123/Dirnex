@@ -422,8 +422,9 @@ extension BrowserWindowController: SidebarViewControllerDelegate {
         target.focusTable()
     }
 
-    /// A saved server connects (SFTP) or mounts (SMB) in the active pane and browses it. Focus
-    /// isn't grabbed here — the connect/mount is async and navigates the pane on completion.
+    /// A saved server connects (SFTP) or mounts (SMB) in the active pane and browses it. The
+    /// connect/mount is async and, on completion, both navigates *and* focuses the pane itself,
+    /// so grabbing focus here (before the connection resolves) would be premature.
     func sidebar(_ sidebar: SidebarViewController, didActivateServer server: ServerConnection) {
         (activePanel ?? leftPanel).connect(to: server)
     }
