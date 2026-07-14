@@ -19,7 +19,8 @@ final class HotlistOrganizerController: NSViewController {
     // MARK: - View setup
 
     override func loadView() {
-        let container = NSView()
+        let container = EscapeDismissingView()
+        container.onEscape = { [weak self] in self?.done(nil) }
 
         let title = NSTextField(labelWithString: "Organize Hotlist")
         title.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)

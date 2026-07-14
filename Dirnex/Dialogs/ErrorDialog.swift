@@ -30,6 +30,7 @@ enum ErrorDialog {
         alert.addButton(withTitle: "Retry")
         alert.addButton(withTitle: "Skip")
         alert.addButton(withTitle: "Abort")
+        alert.enableEscapeToCancel() // ⎋ → Abort (there is no "Cancel" button here)
 
         let response = await runAlert(alert, in: window)
         let applyToAll = alert.suppressionButton?.state == .on

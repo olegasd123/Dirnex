@@ -131,6 +131,7 @@ extension PanelViewController {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Remove")
         alert.addButton(withTitle: "Keep")
+        alert.enableEscapeToCancel() // ⎋ → Keep (there is no "Cancel" button here)
         let removeFromHotlist = { [weak self] in
             var hotlist = HotlistStore.load()
             if hotlist.remove(path: path) { HotlistStore.save(hotlist) }
