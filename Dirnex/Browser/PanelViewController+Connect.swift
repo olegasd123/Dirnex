@@ -30,19 +30,21 @@ extension PanelViewController {
                     editServer(server)
                     return
                 }
-                connectSFTP(
+                connectSFTP(SFTPConnectRequest(
                     location: location,
                     authentication: authentication,
                     password: stored,
-                    saveName: nil
-                )
+                    saveName: nil,
+                    activityName: server.name
+                ))
             } else {
-                connectSFTP(
+                connectSFTP(SFTPConnectRequest(
                     location: location,
                     authentication: authentication,
                     password: nil,
-                    saveName: nil
-                )
+                    saveName: nil,
+                    activityName: server.name
+                ))
             }
         case let .smb(location):
             if location.username != nil {
@@ -50,9 +52,14 @@ extension PanelViewController {
                     editServer(server)
                     return
                 }
-                mountSMB(location: location, password: stored, saveName: nil)
+                mountSMB(
+                    location: location,
+                    password: stored,
+                    saveName: nil,
+                    activityName: server.name
+                )
             } else {
-                mountSMB(location: location, password: nil, saveName: nil)
+                mountSMB(location: location, password: nil, saveName: nil, activityName: server.name)
             }
         }
     }
@@ -73,12 +80,13 @@ extension PanelViewController {
     private func apply(_ form: ConnectServerPrompt.Form) {
         switch form.endpoint {
         case let .sftp(location, authentication):
-            connectSFTP(
+            connectSFTP(SFTPConnectRequest(
                 location: location,
                 authentication: authentication,
                 password: form.password,
-                saveName: form.saveName
-            )
+                saveName: form.saveName,
+                activityName: nil
+            ))
         case let .smb(location):
             mountSMB(location: location, password: form.password, saveName: form.saveName)
         }
@@ -86,13 +94,25 @@ extension PanelViewController {
 
     // MARK: - SFTP
 
-    private func connectSFTP(
-        location: SFTPLocation,
-        authentication: SFTPAuthentication,
-        password: String?,
-        saveName: String?
-    ) {
+    /// Everything one SFTP connect attempt needs, bundled so the connect and its host-key-change
+    /// retry pass it around as a single value. `activityName` is the sidebar Servers row's name when
+    /// the connect was launched from that row (so its busy spinner can be started/stopped), and `nil`
+    /// for a one-off File ▸ Connect to Server… prompt, which has no row to spin.
+    private struct SFTPConnectRequest {
+        let location: SFTPLocation
+        let authentication: SFTPAuthentication
+        let password: String?
+        let saveName: String?
+        let activityName: String?
+    }
+
+    private func connectSFTP(_ request: SFTPConnectRequest) {
         guard let composite = backend as? CompositeBackend else { return }
+        let location = request.location
+        let authentication = request.authentication
+        let password = request.password
+        let saveName = request.saveName
+        let activityName = request.activityName
 
         let transport = SFTPProcessTransport(
             location: location,
@@ -100,7 +120,12 @@ extension PanelViewController {
             password: password
         )
         let token = loadToken
+        // A saved server clicked in the sidebar spins a busy indicator on its row until the probe
+        // resolves; `defer` clears it at every exit below (success, the pane moving on, a failure
+        // alert, or handing off to the host-key-change retry, which re-marks it).
+        if let activityName { ServerConnectionActivity.shared.begin(activityName) }
         Task {
+            defer { if let activityName { ServerConnectionActivity.shared.end(activityName) } }
             let result = await Task.detached(priority: .userInitiated) { () -> Result<String, Error> in
                 do { return .success(try transport.resolveHomeDirectory()) } catch { return .failure(
                     error
@@ -133,13 +158,7 @@ extension PanelViewController {
                 // preserving the auth and save name so the retry behaves exactly like the first try.
                 if case let .hostKeyChanged(change)? = error as? SFTPTransportError {
                     presentHostKeyChangeWarning(location: location, change: change) { [weak self] in
-                        self?.repairKnownHostsAndReconnect(
-                            location: location,
-                            authentication: authentication,
-                            password: password,
-                            saveName: saveName,
-                            change: change
-                        )
+                        self?.repairKnownHostsAndReconnect(request, change: change)
                     }
                     return
                 }
@@ -219,12 +238,10 @@ extension PanelViewController {
     /// verifies cleanly — and password auth, which OpenSSH disables to a *changed*-key host, works
     /// again. Preserves the original save name so a re-trusted connect still lands in the sidebar.
     private func repairKnownHostsAndReconnect(
-        location: SFTPLocation,
-        authentication: SFTPAuthentication,
-        password: String?,
-        saveName: String?,
+        _ request: SFTPConnectRequest,
         change: SFTPHostKeyChange
     ) {
+        let location = request.location
         let target = SFTPKnownHosts.removalTarget(host: location.host, port: location.port)
         let file = change.knownHostsFile
         Task {
@@ -239,20 +256,25 @@ extension PanelViewController {
                 )
                 return
             }
-            connectSFTP(
-                location: location,
-                authentication: authentication,
-                password: password,
-                saveName: saveName
-            )
+            connectSFTP(request)
         }
     }
 
     // MARK: - SMB
 
-    private func mountSMB(location: SMBLocation, password: String?, saveName: String?) {
+    private func mountSMB(
+        location: SMBLocation,
+        password: String?,
+        saveName: String?,
+        activityName: String? = nil
+    ) {
         let token = loadToken
+        // Mounting an SMB share is async and slow enough to look unresponsive; spin the sidebar row's
+        // busy indicator until the mount resolves. `defer` clears it on success, failure, or the pane
+        // moving on mid-mount.
+        if let activityName { ServerConnectionActivity.shared.begin(activityName) }
         Task {
+            defer { if let activityName { ServerConnectionActivity.shared.end(activityName) } }
             do {
                 let result = try await SMBMounter.shared.mount(
                     location,

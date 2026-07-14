@@ -132,6 +132,7 @@ final class SidebarViewController: NSViewController {
         observeVolumeChanges()
         observeSavedSearchChanges()
         observeServerConnectionChanges()
+        observeServerConnectionActivity()
         rebuild()
     }
 
@@ -232,6 +233,27 @@ final class SidebarViewController: NSViewController {
         rebuild()
     }
 
+    /// Refresh a server row's spinner when a connect starts or finishes — in this window or another.
+    /// Unlike a store change this needs no full rebuild (the rows themselves are unchanged), so it
+    /// reloads only the server rows in place, leaving the current selection untouched.
+    private func observeServerConnectionActivity() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(serverActivityChanged),
+            name: ServerConnectionActivity.didChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func serverActivityChanged() {
+        let serverRows = rows.indices.filter { rows[$0].server != nil }
+        guard !serverRows.isEmpty else { return }
+        tableView.reloadData(
+            forRowIndexes: IndexSet(serverRows),
+            columnIndexes: IndexSet(integer: 0)
+        )
+    }
+
     // MARK: - Actions
 
     @objc private func rowClicked() {
@@ -312,7 +334,8 @@ extension SidebarViewController: NSTableViewDelegate {
                 name: connection.name,
                 image: Self.serverIcon(for: connection.kind),
                 canEject: false,
-                tooltip: connection.address
+                tooltip: connection.address,
+                isBusy: ServerConnectionActivity.shared.isConnecting(connection.name)
             )
             cell.onEject = nil
             cell.onDelete = { [weak self] in self?.confirmRemoveServer(named: connection.name) }

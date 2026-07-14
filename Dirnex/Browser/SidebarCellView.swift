@@ -23,6 +23,9 @@ final class SidebarCellView: NSTableCellView {
     private let label = NSTextField(labelWithString: "")
     private let ejectButton = NSButton()
     private let deleteButton = NSButton()
+    /// Overlays the icon while a server row is connecting; a spinner replaces the leading glyph so
+    /// the row visibly reads as "working" without shifting its layout.
+    private let spinner = NSProgressIndicator()
 
     /// The label's trailing edge has three possible anchors, chosen per row by
     /// `updateTrailingLayout`: against the eject button, against the delete button, or close to
@@ -74,6 +77,13 @@ final class SidebarCellView: NSTableCellView {
         deleteButton.isHidden = true // shown by `updateTrailingLayout` only when `onDelete` is set
         addSubview(deleteButton)
 
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isDisplayedWhenStopped = false
+        spinner.isHidden = true // shown by `setBusy` only while a server row is connecting
+        addSubview(spinner)
+
         labelTrailingToEject = ejectButton.leadingAnchor.constraint(
             greaterThanOrEqualTo: label.trailingAnchor,
             constant: 4
@@ -103,7 +113,13 @@ final class SidebarCellView: NSTableCellView {
             // The delete button shares the eject slot — a row is never both ejectable and deletable.
             deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             deleteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            deleteButton.widthAnchor.constraint(equalToConstant: 16)
+            deleteButton.widthAnchor.constraint(equalToConstant: 16),
+
+            // The spinner sits exactly over the icon so swapping the two doesn't nudge the label.
+            spinner.centerXAnchor.constraint(equalTo: icon.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: icon.centerYAnchor),
+            spinner.widthAnchor.constraint(equalToConstant: 16),
+            spinner.heightAnchor.constraint(equalToConstant: 16)
         ])
     }
 
@@ -115,12 +131,28 @@ final class SidebarCellView: NSTableCellView {
     /// The image arrives already sized by the caller (a fixed square for volume icons, an
     /// SF Symbol's natural aspect for favorites); the 18×18 image view + proportional scaling
     /// keeps it in bounds without squashing non-square symbols.
-    func configure(name: String, image: NSImage, canEject: Bool, tooltip: String?) {
+    func configure(
+        name: String,
+        image: NSImage,
+        canEject: Bool,
+        tooltip: String?,
+        isBusy: Bool = false
+    ) {
         label.stringValue = name
         icon.image = image
         ejectButton.isHidden = !canEject
         toolTip = tooltip
+        setBusy(isBusy)
         updateTrailingLayout()
+    }
+
+    /// Swap the leading icon for a spinning indicator while a server row connects — the icon is hidden
+    /// (not removed) so the layout holds. Reset on every `configure` so a reused cell never inherits a
+    /// stale spinner from the server row it last rendered.
+    private func setBusy(_ busy: Bool) {
+        icon.isHidden = busy
+        spinner.isHidden = !busy
+        if busy { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
     }
 
     /// Show the trailing button this row needs (eject for a volume, delete for a saved search —
