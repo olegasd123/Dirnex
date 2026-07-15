@@ -97,26 +97,46 @@ public struct SpotlightQuery: Sendable, Equatable, Codable {
     public var minSizeBytes: Int64?
     /// Only items changed within this rolling window. `nil` = any date.
     public var modifiedWithin: SearchAge?
+    /// Finder tag chips, matched by name. An item must carry **every** selected tag (they AND
+    /// together, unlike the kind chips) — narrowing is what a second chip is for; a user adding
+    /// "Urgent" to "Work" is asking for the overlap, not for more results. Empty = any tags.
+    ///
+    /// Only names are matched, because only names are indexed: Spotlight reports
+    /// `kMDItemUserTags = (Red)` with no colour, for a tag written either way. That suits the chip
+    /// — tags are identified by name anyway (`FinderTag`), and the colour is the swatch the chip
+    /// draws itself with, not part of the question.
+    public var tags: Set<String>
 
     public init(
         nameContains: String = "",
         contentContains: String = "",
         kinds: Set<SearchKind> = [],
         minSizeBytes: Int64? = nil,
-        modifiedWithin: SearchAge? = nil
+        modifiedWithin: SearchAge? = nil,
+        tags: Set<String> = []
     ) {
         self.nameContains = nameContains
         self.contentContains = contentContains
         self.kinds = kinds
         self.minSizeBytes = minSizeBytes
         self.modifiedWithin = modifiedWithin
+        self.tags = tags
     }
 
     /// Nothing to search for — every field is at its neutral default. The search UI treats this
     /// as "Find" disabled, and `metadataPredicate()` returns `nil`.
     public var isEmpty: Bool {
         trimmedName.isEmpty && trimmedContent.isEmpty
-            && kinds.isEmpty && minSizeBytes == nil && modifiedWithin == nil
+            && kinds.isEmpty && minSizeBytes == nil && modifiedWithin == nil && trimmedTags.isEmpty
+    }
+
+    /// Tag names with the empties and stray whitespace dropped, in a stable order so a predicate
+    /// built from a `Set` is deterministic and testable.
+    private var trimmedTags: [String] {
+        tags
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
     }
 
     private var trimmedName: String {
@@ -150,6 +170,13 @@ public struct SpotlightQuery: Sendable, Equatable, Codable {
         }
         if let modifiedWithin {
             clauses.append("kMDItemFSContentChangeDate >= $time.now(-\(modifiedWithin.seconds))")
+        }
+        // One clause per tag rather than one OR group: each must match, and Spotlight compares a
+        // multi-valued attribute member-wise, so `kMDItemUserTags == "Work"` is already "carries
+        // Work among its tags". Case-insensitive (`c`) to match how the system identifies a tag,
+        // but *not* diacritic-insensitive: `Café` and `Cafe` are two different tags to macOS.
+        for tag in trimmedTags {
+            clauses.append(#"kMDItemUserTags == "\#(Self.escape(tag))"c"#)
         }
 
         return clauses.isEmpty ? nil : clauses.joined(separator: " && ")
@@ -198,7 +225,28 @@ public struct SpotlightQuery: Sendable, Equatable, Codable {
         let content = trimmedContent
         if !content.isEmpty { return content }
         if kinds.count == 1, let only = kinds.first { return only.title }
+        if let onlyTag = trimmedTags.first, trimmedTags.count == 1 { return onlyTag }
         return "Search results"
+    }
+
+    // MARK: - Codable
+
+    // Hand-rolled purely so `tags` can arrive absent. A saved search persisted before this field
+    // existed has no `tags` key, and the synthesized decoder throws on that — which would not fail
+    // loudly, it would make every search the user had already saved disappear from the sidebar on
+    // upgrade. New fields on a persisted value are a compatibility question, not a syntax one.
+    private enum CodingKeys: String, CodingKey {
+        case nameContains, contentContains, kinds, minSizeBytes, modifiedWithin, tags
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        nameContains = try container.decode(String.self, forKey: .nameContains)
+        contentContains = try container.decode(String.self, forKey: .contentContains)
+        kinds = try container.decode(Set<SearchKind>.self, forKey: .kinds)
+        minSizeBytes = try container.decodeIfPresent(Int64.self, forKey: .minSizeBytes)
+        modifiedWithin = try container.decodeIfPresent(SearchAge.self, forKey: .modifiedWithin)
+        tags = try container.decodeIfPresent(Set<String>.self, forKey: .tags) ?? []
     }
 
     /// Escape the characters that are special inside an `mdfind` double-quoted string literal —

@@ -1094,6 +1094,82 @@ new `?` row appears beneath it.
 **NEXT (M6 pass 3):** Finder tags (column, edit from panel, filter chips in search), then the
 terminal drawer / size-visualization mode.
 
+Progress (2026-07-15, M6 pass 3 — the Finder-tags core): the pure, tested foundation of the tags
+item, the same core-first opener every M4/M5/M6 slice used. Box stays `[ ]` (no column, no editor, no
+chip UI — this is the value/parse/read-write half). **Two new `DirnexCore/Services/` files plus one
+additive field on `SpotlightQuery`.** Method note, and it paid for itself repeatedly: **the stored
+format was probed against real tagged files before any Swift was written** (the pass-1 `git` lesson,
+and the pass-7 `SFTPListingParser` rework that came of *assuming* a format). Every claim below was
+observed, and the first draft of nearly all of them would have been wrong:
+- **`FinderTag.swift`** — `FinderTagColor` (the 8 indices) + `FinderTag` (name + colour, parse/
+  serialize) + `FinderTagPayload` (the attribute's binary-plist array). The format is
+  `com.apple.metadata:_kMDItemUserTags` = a **binary plist array of `name\ncolourIndex` strings**.
+  Traps found by probing: **(a) the colour indices are not Finder's display order** — `FavoriteTagNames`
+  reads Red, Orange, Yellow, Green, Blue, Purple, Grey, which looks like the enumeration and is not
+  it; the real mapping (0 none · 1 Grey · 2 Green · 3 Purple · 4 Blue · 5 Yellow · 6 Red · 7 Orange)
+  was established by letting the system assign each colour itself from a bare name. `Grey` resolves,
+  `Gray` does not. **(b) A third field exists in the wild**: passing an already-suffixed `Red\n6` to
+  `URLResourceValues.tagNames` makes the system treat the *whole string* as the name and append its
+  own lookup, storing `Red\n6\n0` — my own first probe wrote corrupt tags this way and they looked
+  right. The system reads such rows back as plain `Red`, so fields past the colour are ignored here
+  too. **(c) The colour field is optional** (a bare `Plainname` round-trips), and the system always
+  *emits* it, `\n0` included — so we emit what it emits. Identity is the **name, case-insensitively**,
+  which is the system's own rule (writing `red` stores `red` but resolves to Red's 6), and matches the
+  `SavedSearch`/`ServerConnection` name-as-identity precedent. Malformed rows are skipped and a
+  nonsense colour degrades to `.none` rather than dropping the tag — the `GitStatusParser` call: one
+  bad row must not blank the cell. Duplicates collapse (the system does **not** dedupe on write).
+- **`FinderTagStorage.swift`** — the local xattr read/write, in core beside `ByteComparator` per §2.
+  **Why it writes the attribute by hand rather than calling `URLResourceValues.tagNames`, the
+  documented API — two independent reasons, either sufficient: (1) its setter is macOS 26+ and
+  Dirnex targets 14** (caught by the compiler, not by me); **(2) it cannot express a colour** — it
+  takes bare names and looks each up in a global database that a write of ours never registers into,
+  so expressing an edit through it strips the colour off every custom tag on the file (probed: after
+  storing a purple `Zebra`, `tagNames = ["Zebra"]` writes `Zebra\n0`). A data-loss bug wearing the
+  documented API's clothes. The getter is available on 14 but drops colours, so it is no use for a
+  column either. The one thing the API does that we then must do ourselves is **keep the legacy
+  `com.apple.FinderInfo` label byte in sync** — probed: `tagNames = ["Red"]` leaves Spotlight
+  reporting `kMDItemFSLabel = 6` where a raw write leaves 0, and the selection rule is **the last
+  *coloured* tag wins** (`[Green, Red]`→6, `[Red, Orange]`→7, `[Zebra, Blue]`→4 skipping the
+  colourless) — not first, not lowest. Read-modify-write, since the other 31 bytes are type/creator
+  codes belonging to whoever wrote them.
+- **`SpotlightQuery.tags`** — the chip's pure half; the file's own header comment had anticipated it
+  since M4. One `kMDItemUserTags == "Name"c` clause **per tag, ANDed** (kinds OR because a second kind
+  broadens; a second tag narrows — the overlap is what the user is asking for). Only names, because
+  only names are indexed. **BUG caught while adding it:** `SpotlightQuery` is `Codable` and persisted,
+  so a synthesized decoder would throw on the M4-era saved searches that have no `tags` key — which
+  would not fail loudly, it would **empty the user's Searches sidebar on upgrade**. Hand-rolled
+  `init(from:)` with `decodeIfPresent`, pinned by a test against a literal legacy payload.
+MEASURED, and it decides the app pass's architecture: **one `getxattr` costs ~10 µs, tagged or not →
+~1 s across a 100k-row directory**, against M1's 150 ms budget for opening one. So tags must **not**
+be folded into `LocalBackend.listDirectory`; the column gets the `GitStatusProvider` treatment — off
+main, cached, filled asynchronously. (Per *selection* it is nothing, so editing reads inline.)
++44 tests → **588 core tests** (was 544), the payload suite anchored on a **golden fixture of the
+exact bytes macOS wrote** for a real tagged file. `swift test` green, swiftformat + swiftlint-strict
+clean; app target untouched (new files + one additive field, so no rebuild needed).
+**VERIFIED LIVE** — a harness compiled against the real core wrote tags into a real folder, then
+**Finder itself** was the judge: the stock `Red` painted a red dot, a custom **purple `Zebra` + `Blue`
+rendered as Finder's two-tone split dot**, a colourless `Work` correctly drew **no** dot and left no
+FinderInfo record, an incremental add+remove (case-insensitive) preserved the custom purple, Get Info
+listed the names, `kMDItemFSLabel` read **6** where a naive raw write leaves 0, and **Spotlight
+indexed our tags** — the exact predicate `SpotlightQuery` builds, run verbatim through `mdfind`,
+found the file (the search chip, end-to-end). All artifacts removed after.
+**FINDING that shapes pass 4, and the reason to look rather than assume:** mid-verification Finder
+**silently rewrote our bytes on disk**, `Zebra\n3` → `Zebra`, stripping a colour. It is not
+reproducible on demand and a brand-new name (`Quokka\n7`) is adopted, honoured, and rendered orange
+in both the dot and the Get Info chip. The consistent explanation: **a colour belongs to the *name*,
+system-wide, not to the file** — the system's name → colour database is authoritative, and Finder
+reconciles a file's stored copy against it, so `Zebra`, which my own earlier probes had registered as
+colourless, got normalized back. Recorded in `FinderTag`'s doc comment: an editor may offer a colour
+when *introducing* a tag, but must not present per-file colour as the user's to own — re-colouring
+one file's `Work` is not a change macOS keeps. (Exact trigger not pinned down; it is Finder's
+business, and the engineering conclusion holds either way.)
+**NEXT (M6 pass 4, the app layer):** a `FinderTagProvider` mirroring `GitStatusProvider` (off-main,
+cached, FSEvents-refreshed — the ~10 µs/row measurement is why), the **tag column** (dots, and
+contextual-vs-always-on is the open question: unlike Git, tags aren't scoped to a repo, so a
+permanently-blank column for people who don't tag would be the Git gutter's mistake in reverse),
+**editing from the panel** (a tag menu over the selection, offering the seven stock tags + the names
+already in use), and the **filter chips** in the search sheet.
+
 ### M7 — Release readiness (M)
 
 - [ ] Sparkle 2 updates + appcast infrastructure; notarized DMG pipeline in CI

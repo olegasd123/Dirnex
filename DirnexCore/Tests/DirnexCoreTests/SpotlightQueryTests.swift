@@ -100,6 +100,82 @@ struct SpotlightQueryTests {
         )
     }
 
+    // MARK: - Tag chips
+
+    /// Spotlight compares a multi-valued attribute member-wise, so this reads "carries Work among
+    /// its tags". Case-insensitive (`c`) to match how macOS identifies a tag, but deliberately not
+    /// diacritic-insensitive: `Café` and `Cafe` are two different tags to the system.
+    @Test("a tag chip matches the multi-valued user-tags attribute by name")
+    func singleTagClause() {
+        let query = SpotlightQuery(tags: ["Work"])
+        #expect(query.metadataPredicate() == #"kMDItemUserTags == "Work"c"#)
+        #expect(!query.isEmpty)
+    }
+
+    /// Tags AND where kinds OR — a second kind chip broadens ("images *or* movies"), a second tag
+    /// chip narrows. Someone adding "Urgent" to "Work" is asking for the overlap.
+    @Test("tag chips AND together, sorted so a Set yields a deterministic predicate")
+    func tagChipsAnd() {
+        let query = SpotlightQuery(tags: ["Work", "Urgent"])
+        #expect(
+            query.metadataPredicate() == #"kMDItemUserTags == "Urgent"c && kMDItemUserTags == "Work"c"#
+        )
+        // Same set, built the other way round — the predicate must not depend on Set iteration order.
+        #expect(
+            SpotlightQuery(tags: ["Urgent", "Work"]).metadataPredicate() == query.metadataPredicate()
+        )
+    }
+
+    @Test("tag chips join the other clauses at the end of the fixed order")
+    func tagClausesComeLast() {
+        let query = SpotlightQuery(nameContains: "photo", kinds: [.image], tags: ["Trip"])
+        #expect(
+            query.metadataPredicate()
+                == #"kMDItemFSName == "*photo*"cd"#
+                + #" && (kMDItemContentTypeTree == "public.image"c)"#
+                + #" && kMDItemUserTags == "Trip"c"#
+        )
+    }
+
+    @Test("blank and whitespace-only tags are dropped rather than matching everything")
+    func blankTagsDropped() {
+        #expect(SpotlightQuery(tags: ["", "   "]).isEmpty)
+        #expect(SpotlightQuery(tags: ["", "   "]).metadataPredicate() == nil)
+        #expect(
+            SpotlightQuery(tags: [" Work "]).metadataPredicate() == #"kMDItemUserTags == "Work"c"#
+        )
+    }
+
+    /// A tag name is user text and can hold the characters that end an mdfind string literal.
+    @Test("a tag name's quotes are escaped like any other term")
+    func tagNameEscaped() {
+        #expect(
+            SpotlightQuery(tags: [#"a"b"#]).metadataPredicate() == #"kMDItemUserTags == "a\"b"c"#
+        )
+    }
+
+    @Test("a lone tag chip names the results panel")
+    func tagSummary() {
+        #expect(SpotlightQuery(tags: ["Work"]).summaryPlainName == "Work")
+        #expect(SpotlightQuery(tags: ["Work", "Urgent"]).summaryPlainName == "Search results")
+        // A name still outranks it — the more specific term wins.
+        #expect(SpotlightQuery(nameContains: "photo", tags: ["Work"]).summaryPlainName == "photo")
+    }
+
+    /// Saved searches persisted before tags existed have no `tags` key, and the synthesized decoder
+    /// throws on a missing one — which would not fail loudly, it would empty the user's Searches
+    /// sidebar on upgrade.
+    @Test("a query saved before tags existed still decodes")
+    func decodesLegacyPayloadWithoutTags() throws {
+        let legacy = #"{"nameContains":"photo","contentContains":"","kinds":["image"],"minSizeBytes":500}"#
+        let decoded = try JSONDecoder().decode(SpotlightQuery.self, from: Data(legacy.utf8))
+        #expect(decoded.tags.isEmpty)
+        #expect(decoded.nameContains == "photo")
+        #expect(decoded.kinds == [.image])
+        #expect(decoded.minSizeBytes == 500)
+        #expect(decoded.metadataPredicate() != nil)
+    }
+
     @Test("a term's quotes and backslashes are escaped so they can't break the literal")
     func escapesQuotesAndBackslashes() {
         let query = SpotlightQuery(nameContains: #"a"b\c"#)
@@ -144,13 +220,15 @@ struct SpotlightQueryTests {
             contentContains: "quarterly",
             kinds: [.document, .archive],
             minSizeBytes: 2048,
-            modifiedWithin: .month
+            modifiedWithin: .month,
+            tags: ["Work", "Urgent"]
         )
         let decoded = try JSONDecoder().decode(
             SpotlightQuery.self,
             from: try JSONEncoder().encode(query)
         )
         #expect(decoded == query)
+        #expect(decoded.tags == ["Work", "Urgent"])
         #expect(decoded.metadataPredicate() == query.metadataPredicate())
     }
 }
