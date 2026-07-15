@@ -1018,11 +1018,28 @@ change at all (pass 1's 544 tests stand untouched):
 - **The gutter is a *contextual* column** (`Column.isContextual`): a permanently blank "Git" column in
   every folder that isn't a repository — most of them — is clutter, so it exists only inside one,
   sits right after Name, fixed at 20 pt, unsortable (`sortKey` became optional), header "" plus a
-  `headerToolTip`. That is only safe because **it never enters a stored layout**: `defaultColumnLayout`
+  `headerToolTip`. It is **paid for out of the Name column**, never added on top of the table —
+  caught by the user on review of the first cut, which appended it and so shoved Size and Date
+  sideways on every step into a repository, moving columns they had placed deliberately for a reason
+  that has nothing to do with them. Name is the right column to charge because it is already the one
+  that absorbs slack (`firstColumnOnlyAutoresizingStyle`); a filename with less room is a truncation,
+  not a rearranged pane. (The alternative — drawing the status inside the name cell, VS Code-style —
+  was rejected: text colour there is already taken by the mark's bold red and the hidden-file dim,
+  and inline rename (F2) replaces that cell's text field with an editable box a badge would have to
+  dodge. It would reserve the same 20 pt anyway.) **GOTCHA, and the reason the first fix still
+  drifted ~17 pt: `intercellSpacing.width` is 17 pt at this table's `.plain` style, not the 2–3 pt
+  the name suggests.** A column costs `width + intercellSpacing`, so the carve must be 37, not 20 —
+  established by probing a throwaway `NSTableView` configured exactly like the pane (the same
+  measure-don't-assume move as pass 1's `git` probing; the frame returned to its baseline 541.5 only
+  once the spacing was included) and read live from the table rather than hardcoded. That is only
+  safe because **it never enters a stored layout**: `defaultColumnLayout`
   excludes it and `currentColumnLayout` filters it out, or else every step into a repository would
-  look like the user rearranging their columns — and be persisted as such. `applyColumnLayout` lifts
-  it out before the reorder pass and re-installs after: that pass moves each stored column to its
-  target index in turn, which drags an unlisted column to the far end one move at a time.
+  look like the user rearranging their columns — and be persisted as such. That same capture also
+  **adds the footprint back onto Name**, since while the gutter is installed Name is physically that
+  much narrower: storing the carved width would ratchet Name 37 pt smaller on every trip through a
+  repository. `applyColumnLayout` lifts the gutter out before the reorder pass and re-installs after:
+  that pass moves each stored column to its target index in turn, which drags an unlisted column to
+  the far end one move at a time.
   `FileCellView.accentColor` carries the status colour — it outranks the mark's red (a marked
   modified file still shows an orange `M`) and yields to the cursor's emphasized background.
 - **`GitBranchChipView.swift`** — glyph + name + `↑2 ↓1` only when drifted, with a tooltip spelling it
@@ -1056,8 +1073,11 @@ matching exactly what this pass had touched); leaving for `~/Downloads` took the
 the right pane never grew a column while the left had one; and the persisted layout after all of that
 was still `name`/`size`/`date` alone. Incidental confirmation of a pass-1 decision: this Mac has **no
 Homebrew git**, so the CLT candidate is what resolved — and `/usr/bin/git`, excluded as the `xcrun`
-shim, is exactly what a naive provider would have spawned. **NEXT (M6 pass 3):** Finder tags (column,
-edit from panel, filter chips in search), then the terminal drawer / size-visualization mode.
+shim, is exactly what a naive provider would have spawned. Re-verified after the Name-carve fix: the
+Size and Date headers sit at **identical** positions inside and outside a repository (only Name's
+sort indicator moves), and four crossings in a row left the stored width at exactly 250.5.
+**NEXT (M6 pass 3):** Finder tags (column, edit from panel, filter chips in search), then the
+terminal drawer / size-visualization mode.
 
 ### M7 — Release readiness (M)
 

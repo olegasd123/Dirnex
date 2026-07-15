@@ -108,16 +108,23 @@ extension PanelViewController {
         tabs[activeTabIndex].columnLayout = currentColumnLayout
     }
 
-    /// The table's live column geometry, in display order. A contextual column is left out — it
-    /// comes and goes with the directory, so recording it would make an otherwise identical layout
-    /// differ between a repository and a plain folder, and each crossing would rewrite the tab's
-    /// stored columns for no user-visible reason.
+    /// The table's live column geometry, in display order — recorded as it would be with **no**
+    /// contextual column present, which is the only form a stored layout ever takes.
+    ///
+    /// Two things follow from that. The gutter itself is left out: recording it would make an
+    /// otherwise identical layout differ between a repository and a plain folder, and each crossing
+    /// would rewrite the tab's stored columns for no user-visible reason. And the Name column gets
+    /// the gutter's footprint added back, because while the gutter is installed Name is physically
+    /// that much narrower (`setGitColumnInstalled` charges it there) — storing the carved width
+    /// would make Name ratchet narrower on every trip through a repository.
     private var currentColumnLayout: [ColumnLayout] {
-        tableView.tableColumns.compactMap {
+        let reclaimed = isGitColumnInstalled ? Double(gitColumnFootprint) : 0
+        return tableView.tableColumns.compactMap {
             guard let column = Column(rawValue: $0.identifier.rawValue), !column.isContextual else {
                 return nil
             }
-            return ColumnLayout(id: $0.identifier.rawValue, width: Double($0.width))
+            let width = Double($0.width) + (column == .name ? reclaimed : 0)
+            return ColumnLayout(id: $0.identifier.rawValue, width: width)
         }
     }
 
