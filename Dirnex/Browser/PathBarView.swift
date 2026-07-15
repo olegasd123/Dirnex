@@ -98,6 +98,10 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         crumbStack.orientation = .horizontal
         crumbStack.alignment = .centerY
         crumbStack.spacing = 1
+        // `.fill` (not the default `.gravityAreas`) is what lets the trailing spacer take up the
+        // slack: a gravity area packs its views against the leading edge and leaves the leftover as
+        // dead space at the far end, which parks the branch chip right next to the crumbs.
+        crumbStack.distribution = .fill
         crumbStack.translatesAutoresizingMaskIntoConstraints = false
 
         editField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -114,7 +118,14 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         addSubview(editField)
         NSLayoutConstraint.activate([
             crumbStack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            crumbStack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            // Pinned to *both* edges, not `lessThanOrEqualTo` the trailing one: the row has to span
+            // the whole bar for the trailing spacer to have any slack to hand the branch chip. With
+            // only a leading pin the stack's width is an underdetermined free variable, and the chip
+            // lands wherever that got solved — beside the path as often as at the end of the pane.
+            // Safe at required priority because everything in the row resists compression below the
+            // 250 the panes' split items hold at, so a full-width row still truncates rather than
+            // widening the pane past the user's divider.
+            crumbStack.trailingAnchor.constraint(equalTo: trailingAnchor),
             crumbStack.centerYAnchor.constraint(equalTo: centerYAnchor),
             editField.leadingAnchor.constraint(equalTo: leadingAnchor),
             editField.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -412,8 +423,14 @@ extension PathBarView {
     func appendTrailingAccessories() {
         let spacer = NSView()
         spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The one view in the row that wants to be stretched, and the one that yields first when
+        // the crumbs need the room back — lower on both counts than anything else here, so the
+        // full-width row's slack collects between the crumbs and the chip and nowhere else.
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        spacer.setContentCompressionResistancePriority(
+            NSLayoutConstraint.Priority(1),
+            for: .horizontal
+        )
         crumbStack.addArrangedSubview(spacer)
         crumbStack.addArrangedSubview(branchChip)
     }
