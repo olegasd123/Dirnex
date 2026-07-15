@@ -26,12 +26,11 @@ enum SpotlightSearchRunner {
         scope: VFSPath?,
         backend: any VFSBackend
     ) async -> Results {
-        let arguments = query.mdfindArguments(scopePath: scope?.path)
-        guard !arguments.isEmpty else { return Results(entries: [], truncated: false) }
+        let paths = await paths(query, scope: scope)
+        let kept = paths.prefix(resultLimit)
+        guard !kept.isEmpty else { return Results(entries: [], truncated: false) }
 
         return await Task.detached(priority: .userInitiated) {
-            let paths = runMdfind(arguments: arguments)
-            let kept = paths.prefix(resultLimit)
             var entries: [FileEntry] = []
             entries.reserveCapacity(kept.count)
             for path in kept {
@@ -40,6 +39,25 @@ enum SpotlightSearchRunner {
                 }
             }
             return Results(entries: entries, truncated: paths.count > kept.count)
+        }.value
+    }
+
+    /// The paths matching `query`, as `mdfind` reports them — unstatted and **uncapped**.
+    ///
+    /// The cap `run` applies is a rendering budget, and it belongs to rendering: a caller that means
+    /// to *act* on every match — stripping a tag from the files carrying it — has to see all of
+    /// them, because a half-applied edit here would leave the tag alive on the files past the limit
+    /// and the deletion silently incomplete. Statting is likewise `run`'s business; this answers the
+    /// question "which paths?" and nothing more.
+    ///
+    /// Empty for an empty query, and empty on any `mdfind` failure — callers cannot distinguish
+    /// "no matches" from "the search didn't run", so this must not be the last word before something
+    /// destructive. It isn't: nothing is deleted from a file that doesn't come back as a match.
+    static func paths(_ query: SpotlightQuery, scope: VFSPath? = nil) async -> [String] {
+        let arguments = query.mdfindArguments(scopePath: scope?.path)
+        guard !arguments.isEmpty else { return [] }
+        return await Task.detached(priority: .userInitiated) {
+            runMdfind(arguments: arguments)
         }.value
     }
 

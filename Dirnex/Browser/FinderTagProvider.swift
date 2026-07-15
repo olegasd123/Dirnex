@@ -171,6 +171,51 @@ final class FinderTagProvider {
         }
     }
 
+    /// Drop a tag from everything the app holds in memory: the list it offers, and any cached
+    /// snapshot still painting its dot. The in-memory half of deleting a tag — the caller
+    /// (`SidebarViewController+Tags`) has already stripped it from the files on disk.
+    ///
+    /// **Snapshots are edited, not evicted.** Eviction would be simpler, but it would blank every
+    /// visible dot in the pane until a fresh scan landed — a folder full of tags flickering because
+    /// one of them was deleted. Removing just this tag leaves every other one on screen untouched,
+    /// which is the only thing that actually changed.
+    ///
+    /// A stock tag is refused: `FinderTag.isSystem` explains why there is nothing there to forget —
+    /// `known` is seeded with the seven at launch, so removing one would only make it reappear.
+    func forget(_ tag: FinderTag) {
+        guard !tag.isSystem else { return }
+        known.removeValue(forKey: tag.name.lowercased())
+
+        // Collect, then mutate, then post — rather than posting inside the walk. An observer runs
+        // synchronously on `post` and is free to call straight back in here (a pane re-reads its
+        // snapshot), and it should not be able to see a half-purged cache.
+        var touched: [VFSPath] = []
+        for (directory, snapshot) in snapshots {
+            let carriers = snapshot.tagsByPath.filter { $0.value.contains(tag) }
+            guard !carriers.isEmpty else { continue }
+            var updated = snapshot
+            for (path, tags) in carriers {
+                let remaining = tags.filter { $0 != tag }
+                // A file whose only tag this was leaves the snapshot entirely: it holds tagged
+                // files, so an empty list would be a row claiming tags it no longer has.
+                if remaining.isEmpty {
+                    updated.tagsByPath.removeValue(forKey: path)
+                } else {
+                    updated.tagsByPath[path] = remaining
+                }
+            }
+            snapshots[directory] = updated
+            touched.append(directory)
+        }
+        for directory in touched {
+            NotificationCenter.default.post(
+                name: Self.didChangeNotification,
+                object: self,
+                userInfo: [Self.directoryKey: directory]
+            )
+        }
+    }
+
     private func store(_ snapshot: FinderTagSnapshot, for directory: VFSPath) {
         snapshots[directory] = snapshot
         usage.removeAll { $0 == directory }

@@ -70,6 +70,24 @@ struct FinderTagTests {
         }
     }
 
+    /// The gate on Delete Tag: a custom tag can be deleted (strip it off its carriers and it is
+    /// gone), a stock one cannot (`systemTags` is a constant — it would be back on the next
+    /// rebuild). It rides on `==`, so it folds case and ignores colour like every other identity
+    /// question here.
+    @Test("the stock seven are system tags, by name, whatever their case or colour")
+    func systemTagMembership() {
+        for tag in FinderTag.systemTags {
+            #expect(tag.isSystem)
+        }
+        #expect(FinderTag(name: "red").isSystem)
+        #expect(FinderTag(name: "RED", color: .blue).isSystem)
+        #expect(!FinderTag(name: "Urgent", color: .red).isSystem)
+        #expect(!FinderTag(name: "Work").isSystem)
+        // `Grey` is a stock name and `Gray` is not — the same spelling trap `systemTagName` carries.
+        #expect(FinderTag(name: "Grey").isSystem)
+        #expect(!FinderTag(name: "Gray").isSystem)
+    }
+
     // MARK: - Identity
 
     /// macOS folds case to identify a tag while storing the user's spelling: writing `red` stores

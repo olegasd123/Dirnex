@@ -116,6 +116,21 @@ public struct FinderTag: Sendable, Hashable, Codable {
         color.systemTagName.map { FinderTag(name: $0, color: color) }
     }
 
+    /// Whether this is one of the seven macOS ships with — by name, case-insensitively, since that
+    /// is the identity rule `==` already applies.
+    ///
+    /// The distinction is what makes *deleting* a tag a coherent operation for one kind and not the
+    /// other. A custom tag exists only because files carry it, so stripping it from all of them is
+    /// deletion. A stock tag exists whether or not anything wears it (`systemTags` is a constant),
+    /// so there is nothing there to delete: untag every file on the volume and Red is still offered.
+    ///
+    /// Carries the same localization caveat as `FinderTagColor.systemTagName` — these are the
+    /// English names, so on a localized system a stock tag stored under its localized spelling reads
+    /// as custom here.
+    public var isSystem: Bool {
+        Self.systemTags.contains(self)
+    }
+
     // Name-as-identity, case-insensitive: the colour is deliberately excluded. Two tags spelled
     // the same *are* the same tag — a file holding one twice in different colours is malformed,
     // not two tags — so a `Set<FinderTag>` and `contains` dedupe the way the user expects.

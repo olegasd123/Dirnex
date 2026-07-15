@@ -103,6 +103,154 @@ extension SidebarViewController {
         rebuild()
     }
 
+    // MARK: - The right-click menu
+
+    /// Populate `menu` for a tag row — find the files carrying it, and, for a custom tag, delete it.
+    ///
+    /// **Deleting lives here and not in the ⌃T menu**, which is the other place tags are edited. That
+    /// menu acts on the selected *files*: every item there answers "which tags does this file wear?",
+    /// and "Remove All Tags" strips the selection, not the tag. The tag *list* is what the sidebar
+    /// shows, so the tag list is what the sidebar edits — the same split Finder draws.
+    func buildTagMenu(_ menu: NSMenu, for tag: FinderTag) {
+        menu.addItem(tagMenuItem("Find Tagged Files", #selector(findTaggedFilesItem(_:)), tag))
+        // No Delete for the stock seven: `FinderTag.isSystem` covers why it could not do anything.
+        // They are a constant, not a sighting, so the row would be back on the next rebuild.
+        guard !tag.isSystem else { return }
+        menu.addItem(.separator())
+        menu.addItem(tagMenuItem("Delete Tag", #selector(deleteTagItem(_:)), tag))
+    }
+
+    /// One management item, carrying the tag itself. The saved-search menu carries a *name* so a
+    /// store change under an open menu can't act on the wrong (index-shifted) search; a `FinderTag`
+    /// already **is** its name — identity is the name, case-insensitively — so passing the value is
+    /// that same protection, not a shortcut around it.
+    private func tagMenuItem(_ title: String, _ action: Selector, _ tag: FinderTag) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.representedObject = tag
+        return item
+    }
+
+    @objc private func findTaggedFilesItem(_ sender: NSMenuItem) {
+        guard let tag = sender.representedObject as? FinderTag else { return }
+        delegate?.sidebar(self, didActivateTag: tag)
+    }
+
+    @objc private func deleteTagItem(_ sender: NSMenuItem) {
+        guard let tag = sender.representedObject as? FinderTag, !tag.isSystem else { return }
+        Task { await deleteTag(tag) }
+    }
+
+    // MARK: - Deleting a tag
+
+    /// Delete a custom tag: strip it off every file carrying it, then forget the name.
+    ///
+    /// **Deletion has to be a search**, because a tag is not stored anywhere we could edit. It
+    /// exists precisely because files carry it — `FinderTagProvider.known` accumulates tags by
+    /// sighting, for want of any API for "the user's tags" — so the only way to make one stop
+    /// existing is to take it off all of them. macOS does keep a list, in Finder's synced
+    /// preferences, but that is Finder's business and not a contract; Spotlight is what we can ask.
+    ///
+    /// **So it is only ever as complete as the index.** A carrier on an unindexed volume keeps its
+    /// tag, and browsing to it later brings the name back into the sidebar with no explanation.
+    /// That hole is real, and it is the one Finder's own tag deletion has; closing it would mean
+    /// walking every mounted filesystem on the off chance, which is not a trade worth making here.
+    private func deleteTag(_ tag: FinderTag) async {
+        let carriers = await SpotlightSearchRunner.paths(SpotlightQuery(tags: [tag.name]))
+        // Nothing to rewrite, so nothing to confirm — the only effect is a name leaving a list, and
+        // a sheet asking permission for that is asking about nothing. This is the *common* case, not
+        // an edge: the tag list never forgets within a session (`FinderTagProvider.record`), so a
+        // tag whose last file was just untagged sits in the menu carried by nothing at all, which is
+        // exactly the state someone reaches for Delete Tag to tidy away.
+        guard !carriers.isEmpty else {
+            FinderTagProvider.shared.forget(tag)
+            rebuild()
+            return
+        }
+        guard await confirmDeleteTag(tag, carriers: carriers.count) else { return }
+
+        let outcome = await strip(tag, from: carriers)
+        guard outcome.failed == 0 else {
+            // Forget nothing: a file still wearing the tag means the tag still exists, and dropping
+            // it from the sidebar would be the list telling a lie that the next scan of that folder
+            // would silently correct — the row reappearing on its own. The dots on the files that
+            // *did* let go are fixed by their directory watcher; an xattr write is an FSEvent like
+            // any other, which is why this doesn't have to reach into the panes itself.
+            presentTagDeleteFailure(tag, outcome: outcome, carriers: carriers.count)
+            return
+        }
+        FinderTagProvider.shared.forget(tag)
+        rebuild()
+    }
+
+    /// Strip `tag` from every carrier off the main thread, and **keep going past a failure** —
+    /// unlike the panel's `applyTagEdit`, which stops at the first one.
+    ///
+    /// The opposite rule, for the opposite situation. There, the targets are one selection in one
+    /// folder: a failure on the first is almost certainly the same read-only volume the other 200
+    /// will hit, so stopping is kind and a sheet per file would be unusable. Here the carriers are
+    /// scattered across the disk and share nothing — one locked file says nothing about the rest —
+    /// so stopping would abandon the deletion partway for the sake of the one file that was never
+    /// going to work, and leave the tag alive on files that would have let it go.
+    private func strip(_ tag: FinderTag, from carriers: [String]) async -> TagStripOutcome {
+        await Task.detached(priority: .userInitiated) {
+            var outcome = TagStripOutcome()
+            for path in carriers {
+                do {
+                    try FinderTagStorage.remove(tag, from: .local(path))
+                } catch {
+                    outcome.failed += 1
+                    outcome.firstError = outcome.firstError ?? VFSErrorText.sentence(for: error)
+                }
+            }
+            return outcome
+        }.value
+    }
+
+    /// Confirm before rewriting files, naming how many — so that deleting a tag can't quietly turn
+    /// out to have been an edit of two hundred files the user never pictured.
+    ///
+    /// The count is why the search runs *before* this sheet rather than after it: a confirmation
+    /// that can't say what it is about to do isn't much of a confirmation. One tag clause through
+    /// `mdfind` answers in milliseconds, which is what makes that ordering affordable — no spinner,
+    /// no progress, just a sheet that knows the number.
+    private func confirmDeleteTag(_ tag: FinderTag, carriers: Int) async -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete the tag “\(tag.name)”?"
+        alert.informativeText = """
+        It will be removed from \(carriers == 1 ? "1 file" : "\(carriers) files"), \
+        everywhere Spotlight has indexed. The files themselves aren’t deleted.
+        """
+        alert.addButton(withTitle: "Delete Tag")
+        alert.addButton(withTitle: "Cancel")
+
+        return await runTagAlert(alert) == .alertFirstButtonReturn
+    }
+
+    /// Some files kept the tag. Say so with the count, rather than leaving the row in the sidebar
+    /// looking like the delete simply did nothing.
+    private func presentTagDeleteFailure(_ tag: FinderTag, outcome: TagStripOutcome, carriers: Int) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Couldn’t fully delete “\(tag.name)”"
+        let removed = carriers - outcome.failed
+        alert.informativeText = """
+        Removed from \(removed) of \(carriers) files. \(outcome.firstError ?? "")
+        The tag stays in the sidebar because files still carry it.
+        """
+        Task { _ = await runTagAlert(alert) }
+    }
+
+    /// Sheet on the window, app-modal when there is none — `ErrorDialog.runAlert`'s shape, for the
+    /// same reason it has one.
+    private func runTagAlert(_ alert: NSAlert) async -> NSApplication.ModalResponse {
+        guard let window = view.window else { return alert.runModal() }
+        return await withCheckedContinuation { continuation in
+            alert.beginSheetModal(for: window) { continuation.resume(returning: $0) }
+        }
+    }
+
     // MARK: - Live updates
 
     func observeTagChanges() {
@@ -137,4 +285,18 @@ extension SidebarViewController {
               FinderTagProvider.shared.knownTagNames != renderedTagNames else { return }
         rebuild()
     }
+}
+
+// MARK: - Strip outcome
+
+/// What one pass of `strip(_:from:)` did: how many files refused to give the tag up, and what the
+/// first of them said. Counted rather than collected — the point is to tell the user the deletion
+/// was partial, and a list of two hundred paths tells them that no better than the number does.
+///
+/// Declared at file scope, not nested in the controller, so it is plainly `Sendable`: it is returned
+/// out of a detached task, and a type nested in a `@MainActor` class is a worse place to have to
+/// reason about that from.
+private struct TagStripOutcome: Sendable {
+    var failed = 0
+    var firstError: String?
 }

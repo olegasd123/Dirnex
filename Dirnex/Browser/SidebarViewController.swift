@@ -472,9 +472,9 @@ extension SidebarViewController: NSTableViewDelegate {
 // MARK: - Right-click context menu
 
 extension SidebarViewController: NSMenuDelegate {
-    /// Build the right-click menu lazily from the clicked row, dispatching to the saved-search or
-    /// server management builder (in companion files). Any other row — a header, place, or volume —
-    /// leaves the menu empty, so AppKit shows nothing.
+    /// Build the right-click menu lazily from the clicked row, dispatching to the saved-search,
+    /// server or tag management builder (in companion files). Any other row — a header, place, or
+    /// volume — leaves the menu empty, so AppKit shows nothing.
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let row = tableView.clickedRow
@@ -483,6 +483,8 @@ extension SidebarViewController: NSMenuDelegate {
             buildSavedSearchMenu(menu, for: search)
         } else if let server = rows[row].server {
             buildServerMenu(menu, for: server)
+        } else if let tag = rows[row].tag {
+            buildTagMenu(menu, for: tag)
         }
     }
 }
