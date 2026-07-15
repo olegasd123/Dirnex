@@ -1042,6 +1042,17 @@ change at all (pass 1's 544 tests stand untouched):
   the far end one move at a time.
   `FileCellView.accentColor` carries the status colour — it outranks the mark's red (a marked
   modified file still shows an orange `M`) and yields to the cursor's emphasized background.
+- **BUG the user caught, and the reason the pane has `renderRefresh` at all:** the snapshot-arrived
+  path hand-rolled `tableView.reloadData()`, which drops the table's selection — so **crossing a
+  repository boundary silently deselected the row**, `..` included. It only ever showed at a
+  crossing, because that is the only time the snapshot *changes* (nil ⇄ snapshot); walking around
+  inside one repository re-uses it and never reloads. The fix is to stop hand-rolling: an arriving
+  snapshot is a live background change like FSEvents or a directory-size total, so it goes through
+  `renderRefresh()`, which re-anchors the cursor from the model (the `..` row lives only in
+  `cursorOnParentRow`, which the model cannot restore for you) and pointedly does *not* scroll.
+  Sobering detail: this was **visible in the pass's own verification screenshots** — every repo pane
+  had no highlighted row while the home folder did — and went unnoticed until the user pointed at it.
+  A screenshot only verifies what you actually look at.
 - **`GitBranchChipView.swift`** — glyph + name + `↑2 ↓1` only when drifted, with a tooltip spelling it
   out. Deliberately **inert**: a click here would be an offer to switch branches, and the only thing
   worse than no Git operations in a file manager is Git operations where a misclick rewrites the
@@ -1075,7 +1086,11 @@ was still `name`/`size`/`date` alone. Incidental confirmation of a pass-1 decisi
 Homebrew git**, so the CLT candidate is what resolved — and `/usr/bin/git`, excluded as the `xcrun`
 shim, is exactly what a naive provider would have spawned. Re-verified after the Name-carve fix: the
 Size and Date headers sit at **identical** positions inside and outside a repository (only Name's
-sort indicator moves), and four crossings in a row left the stored width at exactly 250.5.
+sort indicator moves), and four crossings in a row left the stored width at exactly 250.5. Re-verified
+after the cursor fix, all four crossings: Cmd+L into a repo keeps the cursor on the first row, Enter
+on `..` out of one lands on the folder you came from, and a snapshot landing *on top of* a cursor
+parked on `..` (forced by creating an untracked file from a terminal) leaves `..` selected while the
+new `?` row appears beneath it.
 **NEXT (M6 pass 3):** Finder tags (column, edit from panel, filter chips in search), then the
 terminal drawer / size-visualization mode.
 

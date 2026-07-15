@@ -97,8 +97,12 @@ extension PanelViewController {
         // A rename in progress owns the table; the end-editing handler replays what it skipped.
         if deferRefreshIfRenaming() { return }
         updateGitColumn()
-        tableView.reloadData()
-        updateChrome()
+        // `renderRefresh`, never a bare `reloadData`: a reload drops the table's selection, and the
+        // cursor has to be re-applied from the model afterwards — including the `..` row, which the
+        // model doesn't know about and only `cursorOnParentRow` remembers. This is a live background
+        // change like any other (FSEvents, a directory-size total), so it re-anchors the cursor
+        // without scrolling: arriving Git status must not yank the user's reading position.
+        renderRefresh()
     }
 
     /// Drop everything Git — leaving a repository (or a directory that stopped being one) must take
@@ -109,9 +113,11 @@ extension PanelViewController {
         guard gitRepositoryRoot != nil || gitSnapshot != nil else { return }
         gitRepositoryRoot = nil
         gitSnapshot = nil
+        if deferRefreshIfRenaming() { return }
         updateGitColumn()
-        tableView.reloadData()
-        updateChrome()
+        // Re-anchors the cursor after the reload, as in `applyGitSnapshot` — leaving a repository
+        // must not cost the user their place any more than entering one does.
+        renderRefresh()
     }
 
     /// Watch the working tree so the column follows the user's own `git` commands. Replaced only
