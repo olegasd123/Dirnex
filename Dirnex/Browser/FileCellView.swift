@@ -1,4 +1,5 @@
 import AppKit
+import DirnexCore
 
 /// One cell in a file pane.
 ///
@@ -20,6 +21,19 @@ final class FileCellView: NSTableCellView {
     /// the cursor's emphasized background, which needs its own contrast. `nil` for ordinary cells.
     var accentColor: NSColor?
 
+    /// The Finder-tag dots at the right edge of the name (PLAN.md §M6), or `nil` on the cells that
+    /// aren't the name. Where Finder puts them, and — unlike the Git letter, which needs a gutter of
+    /// its own because it is *text* competing with the mark's red and the hidden-file dim — dots are
+    /// their own view, so they can sit in the name cell without fighting anything in it.
+    private(set) var tagDots: TagDotsView?
+
+    /// The row's tags. The name column truncates before them, so a long name gives way to its dots
+    /// rather than running underneath them.
+    var tags: [FinderTag] {
+        get { tagDots?.tags ?? [] }
+        set { tagDots?.tags = newValue }
+    }
+
     init(showsImage: Bool, identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
         self.identifier = identifier
@@ -31,28 +45,44 @@ final class FileCellView: NSTableCellView {
         addSubview(text)
         textField = text
 
-        if showsImage {
-            let image = NSImageView()
-            image.translatesAutoresizingMaskIntoConstraints = false
-            image.imageScaling = .scaleProportionallyDown
-            addSubview(image)
-            imageView = image
-            NSLayoutConstraint.activate([
-                image.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 3),
-                image.centerYAnchor.constraint(equalTo: centerYAnchor),
-                image.widthAnchor.constraint(equalToConstant: 16),
-                image.heightAnchor.constraint(equalToConstant: 16),
-                text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 5),
-                text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-                text.centerYAnchor.constraint(equalTo: centerYAnchor)
-            ])
-        } else {
+        guard showsImage else {
             NSLayoutConstraint.activate([
                 text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
                 text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
                 text.centerYAnchor.constraint(equalTo: centerYAnchor)
             ])
+            return
         }
+
+        let image = NSImageView()
+        image.translatesAutoresizingMaskIntoConstraints = false
+        image.imageScaling = .scaleProportionallyDown
+        addSubview(image)
+        imageView = image
+
+        // Only the name cell carries dots — it is the one column they belong to.
+        let dots = TagDotsView()
+        dots.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(dots)
+        tagDots = dots
+
+        // The name yields to the dots, never the reverse: the text is allowed to compress and
+        // truncate (it already does), while the cluster holds its intrinsic width. An untagged row
+        // — nearly all of them — has a zero-width cluster, so the name gets the full cell.
+        text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        dots.setContentCompressionResistancePriority(.required, for: .horizontal)
+        dots.setContentHuggingPriority(.required, for: .horizontal)
+        NSLayoutConstraint.activate([
+            image.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 3),
+            image.centerYAnchor.constraint(equalTo: centerYAnchor),
+            image.widthAnchor.constraint(equalToConstant: 16),
+            image.heightAnchor.constraint(equalToConstant: 16),
+            text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 5),
+            text.centerYAnchor.constraint(equalTo: centerYAnchor),
+            text.trailingAnchor.constraint(lessThanOrEqualTo: dots.leadingAnchor, constant: -6),
+            dots.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            dots.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
     }
 
     @available(*, unavailable)
@@ -94,6 +124,12 @@ final class FileCellView: NSTableCellView {
         // Editing a hidden file — show the field at full opacity so the text stays legible;
         // the next render pass reapplies the dim once editing ends.
         alphaValue = 1
+        // Give the editor the whole cell: the name field stops short of the dots, so a tagged file
+        // would otherwise be renamed through a box narrower than every other row's. Clearing the
+        // tags (rather than hiding the view) is what actually returns the space — a hidden view
+        // still holds its Auto Layout width. Nothing to restore: the next render sets `tags` again
+        // from the model, as it does for every other property on a recycled cell.
+        tagDots?.tags = []
         textField.isEditable = true
         textField.isSelectable = true
         textField.isBordered = true

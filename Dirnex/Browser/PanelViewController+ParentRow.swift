@@ -49,9 +49,8 @@ extension PanelViewController {
             cell.textField?.stringValue = ".."
             cell.textField?.alignment = .natural
         // `..` is a way out, not a file: it has no size, no date, and no Git status — the folder it
-        // points at may not even be in this repository. `.tags` never reaches here (the gutter has
-        // its own cell type and takes the `..` row itself), but the switch is exhaustive.
-        case .size, .date, .git, .tags:
+        // points at may not even be in this repository.
+        case .size, .date, .git:
             cell.textField?.stringValue = ""
         }
         cell.applyStyle()

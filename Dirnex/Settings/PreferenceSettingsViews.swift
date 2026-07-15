@@ -40,8 +40,9 @@ struct PanelsSettingsView: View {
                 Toggle("Show Finder tags", isOn: $preferences.showTags)
             } footer: {
                 Text(
-                    "Adds a column of tag dots beside the names. Also in the View menu. Archives and "
-                        + "remote volumes have no tags, so it stays hidden there."
+                    "Shows each file's tag colours at the right edge of its name, as Finder does. "
+                        + "Also in the View menu. Archives and remote volumes have no tags, so "
+                        + "nothing is drawn there."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

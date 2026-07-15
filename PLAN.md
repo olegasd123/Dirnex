@@ -1257,7 +1257,63 @@ stored layout. 588 core + 33 app tests green, swiftformat + swiftlint-strict cle
 removed. Gotcha, recurring: the 4-line hookup tipped `PanelViewController.swift` to **501/500 lines**
 (`file_length`) — paid for by tightening my own comment rather than widening a `private` across a
 file split, which is the trap that costs more than it saves.
-**NEXT (M6 pass 5):** the terminal drawer, or size-visualization mode — the next two `[ ]` items.
+
+Progress (2026-07-15, M6 pass 5 — tags in the name cell, and the missing right-click menu): user
+review of pass 4 killed the tag *column* outright and asked for Finder's actual arrangement, plus the
+context menu the app had never had. Both done, VERIFIED LIVE.
+
+**The column is gone; the dots ride at the right edge of the name.** This is the better design and the
+user was right to ask for it, but note what it retires: the whole preference question pass 4 agonized
+over (contextual vs always-on vs a toggle) was an artefact of the dots *being a column* — a column
+must be present or absent for the whole pane, so it had to be blank for non-taggers or jitter. Inside
+the name cell the question dissolves: an untagged row draws nothing and gives its name the full width,
+so tags cost exactly the rows that have them. `showTags` survives as a plain on/off (the dots are
+still someone's clutter to refuse) and `areTagsVisible` still ANDs in "could these rows carry tags",
+but the elaborate justification is gone with the column. **Pass 4's generalization of the contextual-
+column machinery went with it** — it existed only to host a second gutter, so `+ContextualColumns` was
+deleted and `+Git`/`+Columns` restored verbatim from 42e88f2. A generalization with one client is just
+a longer way to write the client. **The Git gutter keeps its column and should**: it is *text*,
+competing for the name field's colour with the mark's red and the hidden-file dim, and F2 swaps that
+field for an editor — none of which applies to a view that draws its own dots.
+- **`TagDotsView`** (was `TagCellView`) — an `NSView` inside `FileCellView`, right-aligned, sized by
+  `intrinsicContentSize` so Auto Layout hands the name whatever the dots don't need. The name's
+  compression resistance is lowered so a long filename truncates *before* the cluster instead of
+  running under it. F2 clears `tags` for the row being renamed (a *hidden* view still holds its
+  width, so hiding is not enough) — nothing to restore, since the next render sets them like every
+  other recycled-cell property.
+- **The layout is Finder's, measured not guessed** — a file tagged `Red, Green, Blue, Yellow` was
+  written by the system, opened in Finder and zoomed into, and both findings contradict the obvious
+  draft: **the dots run in reverse** (the *last* tag is leftmost and whole, each earlier one peeking
+  out behind it to the right — the same last-wins precedence the core found in the legacy label byte),
+  and they **overlap by ~two thirds**, so five tags stay a compact cluster. The thin gap between dots
+  is punched with `.destinationOut` on the view's **own layer** (hence `wantsLayer`): it erases only
+  our dots, so the row's real background shows through — a stroke in a fixed colour cannot work,
+  because the background is alternating-or-blue and not ours to know.
+- **The context menu** (`PanelViewController+ContextMenu`) — the app had none at all. Built from
+  `CommandCatalog` via `MainMenuBuilder.commandItem` (made internal), so a right-click item and its
+  menu-bar twin cannot drift; nil targets mean `validateMenuItem` greys them out for free (Paste with
+  an empty clipboard, everything mutating inside an archive). Two menus: one over an entry, one over
+  the empty space (folder-scoped: New Folder, Paste, Add to Hotlist, Synchronize). **Tags is a
+  submenu**, rebuilt on open via `NSMenuDelegate` and sharing ⌃T's item builder (`tagMenuItems`) so
+  there is one definition of what the tag menu contains. Right-click **takes focus first** — items
+  dispatch through the responder chain, so without it a right-click in the inactive pane would run
+  against the other one.
+- **Retargeting, and the bug in it (found live).** Marks outrank the cursor here, so right-clicking a
+  row *inside* the marked set acts on the set, while right-clicking *outside* it collapses onto that
+  one row — else you point at one file and operate on others. My first cut called `syncCursorToTable`
+  + `updateChrome`, which updated the footer and the cursor but **not the rows**: the footer said
+  "7 items" while five rows still rendered bold red, a menu about to act on one file over a pane
+  drawing five as chosen. `renderRefresh` fixes it. Third time this pass has been the same lesson —
+  *the model changed, and the table is only a renderer.*
+
+**VERIFIED LIVE:** dots identical to Finder's for 1/2/5-tag files (`report.pdf` [Red, Blue] → whole
+blue leading, red sliver behind, exactly like the probe's `two.txt`); a long name truncating with an
+ellipsis before its dots; untagged rows drawing nothing; the hollow ring for colourless `Quokka`;
+adding Green from the right-click **submenu** and watching it become the new lead dot; the entry menu,
+the background menu, Paste correctly greyed; right-click inside the marked set keeping all 7; and
+right-click outside it collapsing to the clicked row with **every red mark cleared**. 588 core + 33
+app tests, swiftformat + swiftlint-strict clean, artifacts removed.
+**NEXT (M6 pass 6):** the terminal drawer, or size-visualization mode — the next two `[ ]` items.
 
 ### M7 — Release readiness (M)
 

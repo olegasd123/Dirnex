@@ -57,16 +57,25 @@ extension PanelViewController {
 
     private func buildTagsMenu(for targets: [FileEntry]) -> NSMenu {
         let menu = NSMenu()
-        // Read the targets' own tags inline rather than from the column's snapshot: a selection is
-        // a handful of files (~10 µs each), the snapshot may not have landed yet, and it is the
-        // wrong source anyway — the menu must reflect the file, not the last render.
+        for item in tagMenuItems(for: targets) {
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    /// The tag items for the current targets — the stock tags, the names already in use, New Tag…
+    /// and Remove All Tags. Handed out as items rather than a menu so ⌃T can pop them standalone
+    /// while the right-click menu nests the same list as a submenu, with no second definition of
+    /// what the tag menu contains.
+    func tagMenuItems(for targets: [FileEntry]? = nil) -> [NSMenuItem] {
+        let targets = targets ?? tagTargets()
+        // Read the targets' own tags inline rather than from the render snapshot: a selection is a
+        // handful of files (~10 µs each), the snapshot may not have landed yet, and it is the wrong
+        // source anyway — the menu must reflect the file, not the last render.
         let current = currentTags(of: targets)
         let offered = offeredTags(including: current)
-
-        for tag in offered {
-            menu.addItem(tagItem(for: tag, current: current, targetCount: targets.count))
-        }
-        if !offered.isEmpty { menu.addItem(.separator()) }
+        var items = offered.map { tagItem(for: $0, current: current, targetCount: targets.count) }
+        if !offered.isEmpty { items.append(.separator()) }
 
         let newTag = NSMenuItem(
             title: "New Tag…",
@@ -74,7 +83,7 @@ extension PanelViewController {
             keyEquivalent: ""
         )
         newTag.target = self
-        menu.addItem(newTag)
+        items.append(newTag)
 
         let clear = NSMenuItem(
             title: "Remove All Tags",
@@ -83,8 +92,8 @@ extension PanelViewController {
         )
         clear.target = self
         clear.isEnabled = !current.isEmpty
-        menu.addItem(clear)
-        return menu
+        items.append(clear)
+        return items
     }
 
     /// One tag item: a dot in its colour, checked when **every** target carries it and mixed when

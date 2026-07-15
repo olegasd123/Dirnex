@@ -43,17 +43,10 @@ final class AppPreferences: ObservableObject {
         showHidden.toggle()
     }
 
-    /// Panels ▸ show the Finder-tags column (PLAN.md §M6 "Finder tags: column…"). Default **on**,
-    /// so someone who tags files sees them without having to find a setting first.
-    ///
-    /// This is a preference rather than the Git gutter's contextual rule ("install it only where it
-    /// has something to say"), because that rule's justification does not transfer. A repository is
-    /// a coarse, stable property of a whole subtree, so the gutter appears once on the way in and
-    /// stays; tagged files are *scattered*, so the same rule would install and remove the column —
-    /// and re-truncate every filename, since the column is paid for out of Name — on nearly every
-    /// step between sibling folders. A stable column with an off switch trades a blank 36 pt for
-    /// people who don't tag against constant jitter for everyone, which is the better bargain: the
-    /// non-tagger turns it off once, and it stays off.
+    /// Panels ▸ show Finder tags as dots at the right edge of each name, where Finder puts them
+    /// (PLAN.md §M6 "Finder tags: column…"). Default **on**: someone who tags files sees them
+    /// without having to find a setting first, and someone who doesn't pays nothing for it — an
+    /// untagged row draws no dots and gives its name the full width.
     @Published var showTags: Bool {
         didSet {
             guard showTags != oldValue else { return }

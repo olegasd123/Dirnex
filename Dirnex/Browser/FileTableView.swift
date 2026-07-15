@@ -40,6 +40,9 @@ protocol FileTableViewInput: AnyObject {
     func fileTableDeletePermanently(_ tableView: FileTableView)
     /// The table became first responder — its pane should become the active one.
     func fileTableDidBecomeFirstResponder(_ tableView: FileTableView)
+    /// A right-click (or Ctrl-click) landed on `row`, or `-1` in the empty space below the rows —
+    /// the pane's context menu for it.
+    func fileTable(_ tableView: FileTableView, menuForRow row: Int) -> NSMenu?
     /// A mouse button went down on `row` (or `-1` in empty space) with `modifiers`
     /// held — the Finder-style click selection (plain / Cmd-toggle / Shift-range).
     /// Returns `true` when the controller consumed it as a modifier selection and the
@@ -115,6 +118,19 @@ final class FileTableView: NSTableView {
             return
         }
         super.mouseDown(with: event)
+    }
+
+    /// Right-click / Ctrl-click — hand the controller the row under the pointer and show what it
+    /// builds. Overridden rather than setting a static `menu`, because the menu depends on *where*
+    /// the click landed (a row, or the empty space below the list) and on what is marked, so it can
+    /// only be assembled once the event is in hand.
+    ///
+    /// `NSTableView` does have `menu(for:)` on its own path, but its default also fiddles with the
+    /// row selection to match the click; this pane has its own selection model (marks independent of
+    /// the cursor), so the retargeting is the controller's to do.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        return inputDelegate?.fileTable(self, menuForRow: row(at: point))
     }
 
     override func keyDown(with event: NSEvent) {

@@ -15,16 +15,6 @@ extension PanelViewController: NSTableViewDelegate {
         guard let tableColumn,
               let column = Column(rawValue: tableColumn.identifier.rawValue) else { return nil }
 
-        // The tags gutter draws dots rather than text, so it has its own cell type — and takes
-        // every row, `..` included: `makeView` keys its reuse queue by identifier alone, so letting
-        // the parent row answer with a `FileCellView` here would put two unrelated view classes in
-        // one queue and each would spend its life failing the other's cast.
-        if column == .tags {
-            return tagCell(
-                for: isParentRow(row) ? nil : entryIndex(forRow: row).map { panel.model[$0] },
-                in: tableView
-            )
-        }
         if isParentRow(row) { return parentRowCell(for: column, in: tableView) }
         guard let index = entryIndex(forRow: row) else { return nil }
 
@@ -40,6 +30,8 @@ extension PanelViewController: NSTableViewDelegate {
             cell.imageView?.image = FileIconProvider.icon(for: entry)
             cell.textField?.stringValue = entry.name
             cell.textField?.alignment = .natural
+            // Finder tags ride at the name's right edge (PLAN.md §M6) — no column of their own.
+            cell.tags = tags(for: entry)
         case .size:
             cell.textField?.stringValue = FileFormatting.sizeString(
                 for: entry, computedSize: panel.model.computedSize(of: entry)
@@ -54,9 +46,6 @@ extension PanelViewController: NSTableViewDelegate {
             cell.textField?.stringValue = status?.code ?? ""
             cell.textField?.alignment = .center
             cell.accentColor = status.map(GitStatusStyle.color(for:))
-        case .tags:
-            // Intercepted above — it is a `TagCellView`, not a `FileCellView`.
-            break
         }
         cell.applyStyle()
         // Inline rename (F2): the name cell for the entry being renamed becomes an

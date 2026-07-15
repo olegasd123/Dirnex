@@ -20,6 +20,10 @@ extension PanelViewController: FileTableViewInput {
         goToParent()
     }
 
+    func fileTable(_ tableView: FileTableView, menuForRow row: Int) -> NSMenu? {
+        contextMenu(forRow: row)
+    }
+
     func fileTableBackspace(_ tableView: FileTableView) {
         if panel.model.filter.isEmpty {
             goToParent()

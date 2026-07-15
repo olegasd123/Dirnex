@@ -104,7 +104,10 @@ enum MainMenuBuilder {
     /// One menu item, fully described by the registry: title from `CommandCatalog`, effective
     /// shortcut from `KeyBindingStore`, action from `CommandBinding` (dispatched through the
     /// responder chain via a nil target).
-    private static func commandItem(for id: String, bindings: KeyBindingStore) -> NSMenuItem? {
+    ///
+    /// Internal so the pane's context menu is built from this same one place — a right-click item
+    /// and its menu-bar twin must never be able to disagree about a title or a shortcut.
+    static func commandItem(for id: String, bindings: KeyBindingStore = .shared) -> NSMenuItem? {
         guard let command = CommandCatalog.command(for: id),
               let selector = CommandBinding.selector(for: id) else { return nil }
         let shortcut = bindings.shortcut(for: id)

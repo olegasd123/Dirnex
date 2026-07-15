@@ -1,10 +1,18 @@
 import AppKit
 import DirnexCore
 
-/// Finder tags in a file pane: the dots beside the file names (PLAN.md §M6 "Finder tags: column,
-/// edit from panel…"; the editing half is `PanelViewController+TagEditing`). The pane owns *when*
-/// to look, `FinderTagProvider` owns the looking, and `DirnexCore`'s `FinderTag` owns what the
-/// bytes mean — so all this file does is keep the snapshot in step with the directory on screen.
+/// Finder tags in a file pane: the dots at the right edge of each name (PLAN.md §M6 "Finder tags:
+/// column, edit from panel…"; the editing half is `PanelViewController+TagEditing`, the drawing is
+/// `TagDotsView`). The pane owns *when* to look, `FinderTagProvider` owns the looking, and
+/// `DirnexCore`'s `FinderTag` owns what the bytes mean — so all this file does is keep the snapshot
+/// in step with the directory on screen.
+///
+/// **The dots live inside the name cell, not in a column of their own** — where Finder puts them,
+/// and what the plan's word "column" turned out to mean in practice. The Git gutter needs its own
+/// column because it is *text*, competing for the name field's colour with the mark's red and the
+/// hidden-file dim, and F2 swaps that field for an editor. Dots are their own view, so none of that
+/// applies: they cost a tagged row a few points of name width and an untagged row nothing at all,
+/// which is a better bargain than a column that is blank for most people in most folders.
 ///
 /// **Why there is no second watcher here, unlike Git.** The Git side had to watch the *repository
 /// root*, because `git add` in a terminal changes what a pane's rows should say while touching
@@ -22,15 +30,14 @@ extension PanelViewController {
         set { tabs[activeTabIndex].tagSnapshot = newValue }
     }
 
-    /// Whether the tags gutter belongs on screen: the user wants it, **and** these rows could carry
-    /// tags at all.
+    /// Whether dots belong on these rows: the user wants them, **and** these rows could carry tags
+    /// at all.
     ///
-    /// The second half is not the preference being second-guessed — it is that only local files
-    /// have extended attributes. Inside an archive or on an SFTP volume the column could never be
-    /// anything but blank, and a blank column is exactly what the preference exists to avoid.
-    /// Search results *do* qualify: the pane is virtual but every row in it is a real local file,
-    /// so its dots are as real as any folder's.
-    var isTagColumnVisible: Bool {
+    /// The second half is not the preference being second-guessed — it is that only local files have
+    /// extended attributes, so inside an archive or on an SFTP volume there is nothing to scan for.
+    /// Search results *do* qualify: the pane is virtual but every row in it is a real local file, so
+    /// its dots are as real as any folder's.
+    var areTagsVisible: Bool {
         guard AppPreferences.shared.showTags else { return false }
         return panel.path.backend == .local || isSearchResults
     }
@@ -69,8 +76,9 @@ extension PanelViewController {
         applyTagSnapshot(FinderTagProvider.shared.cachedSnapshot(for: directory))
     }
 
-    /// The View-menu toggle flipped. Every pane installs or drops the column live, without waiting
-    /// for a navigation — a toggle you have to walk somewhere to see the effect of reads as broken.
+    /// The View-menu toggle flipped. Every pane picks the dots up or drops them live, without
+    /// waiting for a navigation — a toggle you have to walk somewhere to see the effect of reads as
+    /// broken.
     @objc private func showTagsPreferenceDidChange(_ notification: Notification) {
         updateTagStatus()
     }
@@ -78,14 +86,10 @@ extension PanelViewController {
     /// Re-derive the active tab's tags for the directory now on screen. Called on navigation, on a
     /// tab switch, on every live refresh, and when the preference flips.
     func updateTagStatus() {
-        guard isTagColumnVisible else {
+        guard areTagsVisible else {
             clearTagStatus()
             return
         }
-        // The column goes up *now*, before the scan lands, so the folder arrives at its final
-        // geometry: filling an existing column a few milliseconds later is invisible, whereas
-        // installing one afterwards would re-truncate every name the user is already reading.
-        updateTagColumn()
         let directory = panel.path
         // The whole listing, not the visible rows: `requestRefresh` explains why a filtered pane
         // must not narrow what the shared cache holds.
@@ -101,7 +105,7 @@ extension PanelViewController {
     /// Ask for a re-scan of the directory on screen — what the tag editor calls after writing, so
     /// the dots follow the edit without waiting for FSEvents to come back around.
     func refreshTagsAfterEdit() {
-        guard isTagColumnVisible else { return }
+        guard areTagsVisible else { return }
         FinderTagProvider.shared.requestRefresh(
             for: panel.path,
             entries: panel.model.listing.entries.map(\.path)
@@ -124,41 +128,22 @@ extension PanelViewController {
         renderRefresh()
     }
 
-    /// Drop the tags — leaving for an archive, or switching the column off, must take the gutter
-    /// with it rather than leave the last folder's dots painted on.
+    /// Drop the tags — leaving for an archive, or switching them off, must take the dots with it
+    /// rather than leave the last folder's painted on.
     private func clearTagStatus() {
-        updateTagColumn()
         guard tagSnapshot != nil else { return }
         tagSnapshot = nil
         if deferRefreshIfRenaming() { return }
         renderRefresh()
     }
 
-    // MARK: - The gutter
-
-    /// Install or remove the gutter to match the pane's state. The mechanics of a contextual column
-    /// are shared with the Git gutter — see `PanelViewController+ContextualColumns`.
-    func updateTagColumn() {
-        setContextualColumn(.tags, installed: isTagColumnVisible)
-    }
-
     // MARK: - Rendering
 
-    /// The tags on one row, `[]` when it has none or the scan hasn't landed yet.
+    /// The tags on one row — `[]` when it has none, when the scan hasn't landed yet, or when the
+    /// pane isn't showing tags at all. That last case is what makes the preference work with no
+    /// column to install: the cells simply render no dots, and the names take back the width.
     func tags(for entry: FileEntry) -> [FinderTag] {
-        tagSnapshot?.tags(for: entry.path) ?? []
-    }
-
-    /// The gutter cell for one row. A `nil` entry is the synthetic `..` row — a way out rather than
-    /// a file, so it draws nothing, but it must still come from this cell type (see the reuse-queue
-    /// note in `PanelViewController+Table`).
-    func tagCell(for entry: FileEntry?, in tableView: NSTableView) -> NSView {
-        let identifier = NSUserInterfaceItemIdentifier(Column.tags.rawValue)
-        let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? TagCellView
-            ?? TagCellView(frame: .zero)
-        cell.identifier = identifier
-        cell.dimmed = entry?.isHidden ?? false
-        cell.tags = entry.map { tags(for: $0) } ?? []
-        return cell
+        guard areTagsVisible else { return [] }
+        return tagSnapshot?.tags(for: entry.path) ?? []
     }
 }
