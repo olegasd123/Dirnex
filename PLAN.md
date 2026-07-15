@@ -909,6 +909,81 @@ remain, all deferrable to M6-ish polish.
 Exit: git repo browsing shows live status; a user-defined "convert to webp" script on
 selection runs from the palette.
 
+Progress (2026-07-15, M6 pass 1 — the Git-awareness core): the pure, tested foundation of the Git
+item landed, the same core-first opener every M4/M5 slice used. Box stays `[ ]` (no provider, no
+column, no path-bar branch, no app wiring yet) — this is the parse/lookup half. **Four new
+`DirnexCore/Services/` files, purely additive** (no existing-API changes, so the app is untouched and
+needs no rebuild). Method note: `git`'s real output was **probed live before any Swift was written**
+(the pass-7 lesson — `SFTPListingParser` had to be reworked because its format was assumed, not
+observed), which caught three things a from-memory parser gets wrong:
+- **`GitStatus.swift`** — `GitFileStatus` (`unmodified/modified/added/deleted/renamed/untracked/
+  ignored/conflicted`, each with Git's own one-letter `code` — the app picks the colour, this picks
+  the character) + `GitStatusEntry` (one porcelain record: `relativePath` + **both** of Git's axes,
+  `indexStatus`/`worktreeStatus`, kept verbatim so a later tooltip can say "staged edit plus unstaged
+  edits on top" without re-parsing) + `GitBranch` (name/upstream/ahead/behind/isDetached/
+  hasNoCommits, for the path bar). `entry.status` collapses the two axes into the one value a column
+  renders: untracked/ignored/unmerged are whole-entry verdicts and answer first; otherwise the
+  **index column wins when set** (`AM` — staged new, then edited — reads "added", which is more use
+  to someone browsing a folder than "modified"), else the worktree column (the common ` M`/` D`).
+  Every unmerged shape (`UU`/`AU`/`UA`/`DU`/`UD`/`AA`/`DD`) is one `.conflicted`.
+- **`GitStatusSnapshot.swift`** — the per-row lookup a panel does while rendering, so `status(for:)`
+  is O(1) and all the work happens once at construction. **(1) Directory roll-up**: Git reports files,
+  panels also show the folders holding them → every entry's ancestors are pre-merged by
+  `rollupPrecedence` (conflict > modified > added > deleted > renamed > untracked > ignored), so a
+  folder advertises the loudest thing inside it. **`.ignored` deliberately does NOT roll up** — a
+  source folder holding one ignored `debug.log` is not itself ignored, and painting it `!` would say
+  exactly that. **(2) Collapsed-directory inheritance**: Git emits `build/` and says *nothing* about
+  the files inside, so a lookup that misses falls back to the nearest untracked/ignored ancestor and
+  the contents still read as ignored once you navigate in. **(3)** The repo root itself is never
+  painted (its roll-up would mark the `..` row of every dirty repo).
+- **`GitStatusParser.swift`** — `-z` output → snapshot. **`-z` is the whole point**: without it Git
+  *quotes* any path with a space or a non-ASCII byte (`"caf\303\251.txt"`) and the parser would have
+  to reimplement C-string unquoting; with it every field is raw bytes. The cost is two traps, both
+  found by probing: **(a) the rename pair** — `-z` emits `R  <new>` NUL `<old>` NUL, i.e. the *reverse*
+  of the printed `old -> new`, so reading them in the printed order names every renamed row after the
+  file that no longer exists; **(b) the branch header** is NUL-terminated like any entry, not a line.
+  Four header shapes captured live and pinned: `main` · `main...origin/main [ahead 1, behind 1]` ·
+  `HEAD (no branch)` · `No commits yet on main` (splitting on `...` is unambiguous — refname rules
+  forbid `..` in a branch). Malformed fields are skipped, never thrown on: a snapshot missing one
+  exotic row still renders a useful panel, whereas throwing blanks the whole column.
+- **`GitRepository.swift`** — `repositoryRoot(for:exists:)` walks up for `.git`, **nearest first** (a
+  submodule/nested repo wins, matching what `git` itself reports from there), with the filesystem
+  reduced to an injected `exists` probe (`ExternalDiffTool`'s shape) so discovery is tested without a
+  repository. The probe must be a **plain existence check**: `.git` is a regular *file* in a linked
+  worktree or submodule, and a directory check would silently drop Git awareness exactly where people
+  use worktrees. `GitCommand` pins the argv (like `SFTPProcessArguments`): **`--no-optional-locks`**
+  (a plain `git status` opportunistically rewrites the index under `index.lock`; a poller doing that
+  behind the user's back races their own git commands and can fail *their* rebase — this makes the
+  read side-effect-free, the same reason editors pass it), `--porcelain=v1 --branch -z`, and
+  **`--ignored=traditional`** (one collapsed row for `node_modules/` instead of a hundred thousand).
+  **`/usr/bin/git` is deliberately NOT a candidate executable**: it is Apple's `xcrun` shim, and
+  spawning it without the Command Line Tools installed pops a modal "install developer tools?" dialog
+  — a background poller must never be able to do that to someone who just opened a folder. Candidates
+  are Homebrew → CLT → Xcode; none installed ⇒ Git awareness stays off and the column stays blank
+  (the same graceful degradation as no diff tool installed).
+FINDING (documented, changed the code): the anticipated **unicode trap is a non-issue in Swift** —
+macOS hands back decomposed names (`e`+U+0301) while Git, with `core.precomposeunicode` (on by
+default), reports the precomposed form, so the two spell one file with different bytes (verified:
+their UTF-8 differs). But Swift's `String` compares *and hashes* by **canonical equivalence**, so the
+keys are interchangeable in the dictionary for free. The first draft normalized every key with
+`precomposedStringWithCanonicalMapping` — which was not just redundant but a **fresh allocation on
+every row lookup** in a 100k-row panel's hot path. Removed; a test pins the property instead, since
+it is load-bearing and would break in any byte-keyed language.
++63 tests → **544 core tests** (was 481): the parser suite is anchored on a **golden fixture of the
+exact bytes captured from git 2.50.1** against a scratch repo built to hold every shape at once.
+`swift test` green, swiftformat + swiftlint-strict clean. **VERIFIED LIVE against real repositories**
+(a throwaway harness compiled against the core, driving the real `git` binary through `GitCommand`):
+the scratch repo parsed every shape incl. the rename-source pairing; the four branch shapes each
+confirmed on a purpose-built repo (fresh → `noCommits`, a clone → `ahead=1 behind=1`, detached →
+detached); and **Dirnex's own repo** reported branch `Dev` / upstream `origin/Dev` (matching
+`git rev-parse`) with the roll-up painting the top-level `DirnexCore` row `?` from files nested four
+levels deep, and `.claude`/`build` collapsed to single ignored rows. The NFD-vs-NFC match was proven
+live too — the on-disk decomposed name resolved against Git's precomposed key through the real
+filesystem. **NEXT (M6 pass 2, the app layer):** a `GitStatusProvider` (`Process`-driven, **debounced**,
+off-main, cached per repo root, refreshed on FSEvents + directory change — mirroring
+`SpotlightSearchRunner`/`ArchiveMounter`), the **status column** in the panel (per-tab, like the other
+columns) and the **branch in the path bar**; then the optional `.gitignore`-aware folder sizes.
+
 ### M7 — Release readiness (M)
 
 - [ ] Sparkle 2 updates + appcast infrastructure; notarized DMG pipeline in CI
