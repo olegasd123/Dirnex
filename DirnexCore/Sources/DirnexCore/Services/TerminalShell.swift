@@ -103,6 +103,39 @@ public struct TerminalShell: Sendable, Hashable {
         return environment
     }
 
+    /// The locale identifier to build `LANG` from: `preferred` when this system actually has that
+    /// locale, otherwise the language-neutral `C`, otherwise nothing.
+    ///
+    /// **A preference is not a locale.** macOS lets the user pick language and region
+    /// independently, so a perfectly ordinary Mac reports `en_UA` (English, in Ukraine) — a pair
+    /// for which *no locale exists*, because Apple ships `en_US`, `en_GB`, `uk_UA`, and 81 others,
+    /// but not that one. Handing `LANG=en_UA.UTF-8` to a shell is what makes `perl` open every
+    /// session with "Setting locale failed", and it is exactly what Terminal.app's "Set locale
+    /// environment variables on startup" is famous for doing. Verified against the real thing: the
+    /// account this was written on is `en_UA`, and the drawer greeted it with that warning.
+    ///
+    /// `C.UTF-8` is the fallback rather than a guessed region (`en_US`) because the point of
+    /// setting `LANG` at all is the *codeset* — without one the shell's tools fall back to C's
+    /// ASCII and mangle every non-ASCII filename — and `C.UTF-8` buys exactly that while claiming
+    /// nothing about where the user lives. Inventing `en_US` for a Ukrainian user would be a guess
+    /// about their conventions; `C` is an honest absence of one.
+    ///
+    /// `isLocaleAvailable` is injected — the app answers it with `newlocale(3)`, which asks the
+    /// same database the child's `setlocale` will consult, in 208 ns and without touching the
+    /// process's own locale — so the policy stays pure and testable on a machine with any set of
+    /// locales installed.
+    public static func usableLocaleIdentifier(
+        preferred: String?,
+        isLocaleAvailable: (String) -> Bool
+    ) -> String? {
+        if let preferred, isLocaleAvailable("\(preferred).UTF-8") { return preferred }
+        if isLocaleAvailable("\(neutralLocaleIdentifier).UTF-8") { return neutralLocaleIdentifier }
+        return nil
+    }
+
+    /// The POSIX locale, whose `.UTF-8` form every macOS since well before our floor ships.
+    private static let neutralLocaleIdentifier = "C"
+
     /// The identity of whichever terminal launched *us*, which must not be handed to our child.
     private static let strippedVariables = [
         "TERM_SESSION_ID",

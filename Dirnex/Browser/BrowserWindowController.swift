@@ -15,16 +15,37 @@ final class BrowserWindowController: NSWindowController, PanelHost {
     /// Inner split: `[leftPanel, rightPanel]`. Kept separate so the sidebar toggle can't
     /// steal width from just the adjacent pane — the two panes redistribute proportionally in
     /// both directions here, holding their ratio across any number of sidebar toggles.
-    private let panesSplitViewController = NSSplitViewController()
-    private weak var activePanel: PanelViewController?
+    /// Internal (not private) so `BrowserWindowController+Terminal` can stack it over the
+    /// drawer — Swift's `private` is per-file.
+    let panesSplitViewController = NSSplitViewController()
+    /// Middle split: `[panes, terminal drawer]`, stacked vertically. Sits between the outer
+    /// sidebar split and the panes split so the drawer spans the two panes and *not* the
+    /// sidebar — Xcode's debug area, not a full-width strip — and so the sidebar stays full
+    /// height beside it. Internal for `BrowserWindowController+Terminal` (Swift's `private` is
+    /// per-file).
+    let paneStackSplitViewController = NSSplitViewController()
+    /// The shell drawer under the panes (PLAN.md §M6), and its split item so ⌃` can collapse
+    /// and expand it. The view controller is built with the window but its shell isn't spawned
+    /// until the drawer is first opened — see `TerminalDrawerViewController`.
+    let terminalDrawer = TerminalDrawerViewController()
+    var terminalDrawerItem: NSSplitViewItem!
+    /// Set at launch when no drawer geometry is saved; consumed on the first open to give the
+    /// drawer a usable height rather than AppKit's fallback (its minimum thickness — a four-line
+    /// sliver). Same shape as `shouldCenterPanesDivider`, and for the same reason: a fresh install
+    /// has no autosave entry, and that absence is the only signal that this is the first time.
+    var shouldSizeTerminalDrawer = false
+    /// Internal (not private) so `BrowserWindowController+QuickView` can tell which pane shows
+    /// the list and which the preview.
+    weak var activePanel: PanelViewController?
     /// The pane commands and the titlebar Back/Forward buttons act on: the focused one, falling
     /// back to the left pane before either has taken focus.
     var focusedPanel: PanelViewController { activePanel ?? leftPanel }
 
     /// Quick View (⌃Q) on/off for this window. When on, the inactive pane shows a live Quick
     /// Look preview of the file under the active pane's cursor (PLAN.md §M4). Owned here
-    /// because the mode spans both panes and follows whichever is active.
-    private var isQuickViewOn = false
+    /// because the mode spans both panes and follows whichever is active; driven from
+    /// `BrowserWindowController+QuickView`.
+    var isQuickViewOn = false
 
     /// Archive members extracted for preview (Quick Look ⌘Y / Quick View ⌃Q inside a browsed
     /// archive), shared across both panes and both surfaces (PLAN.md §M4 "Quick Look inside").
@@ -165,7 +186,8 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         sidebarItem.canCollapse = true
         splitViewController.addSplitViewItem(sidebarItem)
 
-        let panesItem = NSSplitViewItem(viewController: panesSplitViewController)
+        installTerminalDrawer()
+        let panesItem = NSSplitViewItem(viewController: paneStackSplitViewController)
         panesItem.canCollapse = false
         splitViewController.addSplitViewItem(panesItem)
 
@@ -210,6 +232,10 @@ final class BrowserWindowController: NSWindowController, PanelHost {
             let responder = window?.firstResponder
             // A file table or a text edit owns Esc for its own purpose — let the event through.
             if responder is FileTableView || responder is NSText { return event }
+            // So does the terminal drawer, far more so: Esc is `vim`'s entire modal interface, and
+            // a monitor that swallowed it to close a preview would make the drawer useless for the
+            // editor most likely to be running in it.
+            if isTerminalFocused { return event }
             toggleQuickView()
             return nil
         }
@@ -311,6 +337,9 @@ final class BrowserWindowController: NSWindowController, PanelHost {
             shouldCenterPanesDivider = false
             centerPanesDivider()
         }
+        // A drawer the autosave restored open is one the user left open, so its shell starts with
+        // the window. A fresh install opens collapsed and spawns nothing.
+        startTerminalShellIfDrawerIsOpen()
         setActive(leftPanel)
         leftPanel.focusTable()
     }
@@ -339,54 +368,16 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         counterpart(of: panel)
     }
 
-    var isQuickViewEnabled: Bool { isQuickViewOn }
-
-    func toggleQuickView() {
-        isQuickViewOn.toggle()
-        updateQuickView()
-        // Keep focus on a real pane. Matters most when closing: Esc may arrive while the preview
-        // (a `PDFView` the user clicked into) is first responder, and that view is about to hide.
-        (activePanel ?? leftPanel).focusTable()
-    }
-
-    func panelCursorDidChange(_ panel: PanelViewController) {
-        guard isQuickViewOn, panel === (activePanel ?? leftPanel) else { return }
-        showActivePreview(from: panel)
-    }
-
     func panelDidNavigate(_ panel: PanelViewController) {
         updateNavigationButtons()
+        // The drawer follows the *active* pane; the other one moving (a background refresh, a
+        // completed copy re-listing it) is none of the shell's business.
+        if panel === focusedPanel { syncTerminalToActivePanel() }
     }
 
-    /// Reconcile both panes with the current Quick View state: the active pane shows its file
-    /// list, the inactive pane previews the file under the active cursor. With the mode off,
-    /// both panes drop any preview. Run on every toggle and whenever the active pane changes,
-    /// so the preview always sits opposite the focused pane.
-    private func updateQuickView() {
-        guard isQuickViewOn else {
-            leftPanel.hideQuickViewPreview()
-            rightPanel.hideQuickViewPreview()
-            return
-        }
-        let active = activePanel ?? leftPanel
-        active.hideQuickViewPreview()
-        showActivePreview(from: active)
-    }
-
-    /// Point the inactive pane's preview at the file under `active`'s cursor. A local file (or an
-    /// already-extracted archive member) shows at once; an archive member not yet on disk is
-    /// extracted on demand and shown when it lands — provided Quick View is still on and the
-    /// cursor hasn't moved on in the meantime.
-    private func showActivePreview(from active: PanelViewController) {
-        counterpart(of: active).showQuickViewPreview(of: active.quickViewSourceURL)
-        active.prepareArchivePreview { [weak self, weak active] in
-            guard let self, let active, isQuickViewOn,
-                  active === (activePanel ?? leftPanel) else { return }
-            counterpart(of: active).showQuickViewPreview(of: active.quickViewSourceURL)
-        }
-    }
-
-    private func counterpart(of panel: PanelViewController) -> PanelViewController {
+    /// The other pane — the one a copy/move lands in, and the one Quick View previews into.
+    /// Internal (not private) so `BrowserWindowController+QuickView` can reach it.
+    func counterpart(of panel: PanelViewController) -> PanelViewController {
         panel === leftPanel ? rightPanel : leftPanel
     }
 
@@ -397,6 +388,9 @@ final class BrowserWindowController: NSWindowController, PanelHost {
         activePanel = panel
         // The titlebar Back/Forward buttons follow whichever pane is focused (⌘[ / ⌘] do too).
         updateNavigationButtons()
+        // Tab-ing to the other pane moves the shell too: the drawer tracks the active pane, not
+        // the pane it happened to be spawned from.
+        syncTerminalToActivePanel()
         // The preview always sits opposite the active pane, so a focus switch swaps which pane
         // shows its list and which shows the preview.
         if isQuickViewOn { updateQuickView() }

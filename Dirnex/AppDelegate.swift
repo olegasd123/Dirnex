@@ -42,9 +42,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Unmount only the SMB shares *we* mounted, leaving any Finder-mounted share as the user had it
-    /// (PLAN.md §M5 "unmount only what we mounted on disconnect/quit").
+    /// (PLAN.md §M5 "unmount only what we mounted on disconnect/quit"), and hang up the terminal
+    /// drawer's shell (PLAN.md §M6) rather than leave it reparented to launchd.
     func applicationWillTerminate(_ notification: Notification) {
         SMBMounter.shared.unmountOwnedMounts()
+        browserWindowController?.terminateTerminalShell()
     }
 
     @objc private func rebuildMainMenu() {

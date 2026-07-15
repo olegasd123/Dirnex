@@ -899,8 +899,9 @@ remain, all deferrable to M6-ish polish.
       `git status --porcelain` provider; optional .gitignore-aware folder sizes (the one
       optional slice, still deferred)
 - [x] Finder tags: column, edit from panel, filter chips in search
-- [ ] Terminal drawer: bottom pane following active panel's cwd; "cd sync back" via
-      shell integration snippet; open in iTerm/Terminal/WezTerm as alternative
+- [x] Terminal drawer: bottom pane following active panel's cwd; "cd sync back" via
+      ~~shell integration snippet~~ `proc_pidinfo` (no snippet exists, and none should — see
+      pass 7); open in iTerm/Terminal/WezTerm as alternative
 - [ ] Size visualization mode: toggle panel to ncdu-style bars, computed async, cached
 - [ ] Share sheet, "Open With" submenu, Services integration
 - [ ] Automation: AppleScript/Shortcuts verbs (reveal, copy, run-op); user actions —
@@ -1451,6 +1452,93 @@ exist. `URL.resolvingSymlinksInPath` normalizes that pair by *stripping* `/priva
 `currentDirectory:` at the active pane so opening it types nothing), cwd-follow both ways off
 `shellPid`/`childfd` on output-settle, and the `ExternalTerminal` menu items; then the
 size-visualization mode.
+
+Progress (2026-07-15, M6 pass 8 — the terminal-drawer app layer; **the box closes `[x]`, VERIFIED
+LIVE**): the drawer is real — a login shell in a real pty under the panes, following them both ways.
+**Dirnex's first third-party dependency landed** (SwiftTerm v1.14.0, `exactVersion`, MIT), whose
+resolved revision was checked against the tag's own hash from `git ls-remote`. That exposed a
+`.gitignore` rule that had been harmless until this pass: **`Package.resolved` was blanket-ignored**
+— correct while the only package was local `DirnexCore` (a library resolves at its checkout), wrong
+the moment the app gained a remote dep, because `exactVersion` pins the *tag* and a tag can be
+moved; the resolution file is the only thing pinning the **revision**. Now un-ignored for the app's
+copy only (Apple's own rule: apps commit their resolution, libraries don't). Pass 7's four
+core files needed **no changes to be used** — the app only supplies the two things a pure core
+can't: SwiftTerm's API surface and the OS's answers. Both were **probed before any Swift was
+written** (the pass-1 method), and both the plan's own shape and my own first design were corrected
+by what the probe said:
+- **THE BLOCKER, and a real cost the plan didn't foresee: SwiftTerm needs Xcode 26's Metal
+  toolchain.** v1.12.0 added a Metal renderer with `resources: [.process("Apple/Metal/Shaders.metal")]`,
+  so Xcode compiles that shader on **every build regardless of whether we ever use it** (we don't —
+  `setUseMetal` is opt-in and defaults off; the toolchain is a pure build-time tax). Xcode 26 no
+  longer bundles the compiler, so the first build died on `cannot execute tool 'metal'`. The escape
+  hatch was v1.11.2, the last release before the renderer — measured, not guessed, at **2,742 added
+  lines** across the emulator core, the Mac view and `LocalProcess` since (PTY backpressure, an
+  `EV_VANISHED` crash fix, macOS 26 tracking), i.e. a year-old emulator to dodge a download. User
+  chose the toolchain: `xcodebuild -downloadComponent MetalToolchain`, **688 MB**, one-time per
+  machine — **and a one-line step M7's notarized-DMG CI now needs.** Resolving SwiftTerm also pulls
+  `swift-argument-parser` (its `Termcast` demo's dep); it is pinned but never linked.
+- **`@preconcurrency` on the SwiftTerm delegate, earned rather than sprinkled.** SwiftTerm is a
+  Swift 5 module whose delegate protocol carries no isolation, so a `@MainActor` conformance turns
+  the guarantee into a *runtime assertion* — worth checking, not hoping. Read the library: every
+  delivery runs on the queue `LocalProcess` is built with, which `LocalProcessTerminalView` leaves
+  nil and the library resolves to `DispatchQueue.main` (`dataReceived` via `drainReceivedData`,
+  `processTerminated` via a `DispatchSource` on that same queue); the one background-queue call site
+  is commented out upstream. The annotation is sound because the code says so.
+- **THE BUG LIVE VERIFICATION CAUGHT, on the first run, on this very machine: `LANG=en_UA.UTF-8`,
+  and `perl: warning: Setting locale failed.`** macOS lets you pick language and region separately,
+  and this account is English-in-Ukraine — a pair for which **no locale exists** (Apple ships
+  `en_US`, `uk_UA`, and 81 others; not that one). Pass 7's `localeIdentifier` was honest and the app
+  fed it a preference, not a locale. `TerminalShell.usableLocaleIdentifier` now runs it past an
+  injected probe (app-side: `newlocale(3)`, **208 ns**, asks the same database the child's
+  `setlocale` will, and unlike `setlocale` doesn't touch our own process-global locale) and falls
+  back to **`C.UTF-8`** — neutral, because the point of `LANG` is the *codeset*, and inventing
+  `en_US` for a Ukrainian user would be a guess about their conventions where `C` is an honest
+  absence of one. Verified after: `LANG=[C.UTF-8]`, perl silent, and `Ünïcodé-Хостинг-日本語.txt`
+  round-trips intact — Latin, Cyrillic and CJK, all 39 bytes. **This is what the plan's "shell
+  integration snippet" would never have found: it is Terminal.app's own famous bug, reproduced
+  because we set the same variable.**
+- **`TerminalDrawerViewController`** — the thin client. `$SHELL` asked (this account really is
+  `/bin/bash` — the login banner proved it live), `execName` with its dash (the process table shows
+  `-bash`), `currentDirectory:` at the active pane so **opening the drawer types nothing**, and the
+  shell **spawned lazily on first open**, never at window load. `dataReceived` is overridden to ask
+  the kernel where the shell is **on every chunk of output — no timer, and an idle app is asked
+  nothing**; at 0.75 µs (pass 7) that beats a debounce, since the expensive half (navigating a pane)
+  is gated behind an actual change and a `cd` is rare where echoed keystrokes are not.
+- **⌃`, and the responder chain doing the work.** User picked it over the ⌃-letter layer the app's
+  own popups live on (⌃T/⌃D/⌃Q) — every one of those letters is the shell's (⌃D is EOF, ⌃Q is XON),
+  and the drawer is the one surface whose keystrokes belong to somebody else. No stand-aside code
+  was needed: a focused terminal leaves **no pane in the responder chain**, so the pane commands
+  find no target and disable themselves — *visible in the live Go menu, entirely greyed* — and their
+  keys fall through. ⌃D really did reach the shell as EOF. The one place that needed a hand was the
+  window's Esc monitor, which would have eaten `vim`'s entire modal interface to close a preview.
+- **`ExternalTerminalLauncher`** — `ExternalDiffLauncher` verbatim over the pure model; `Open in
+  Terminal` (Go menu, no shortcut, generic title so the registry keeps one title for menu and
+  palette alike) opened Terminal.app at the pane's directory, iTerm/WezTerm being absent here.
++6 tests → **632 core tests** (was 626) + 33 app; `swift test` green, swiftformat + swiftlint-strict
+clean. Two recurring gotchas re-fired and were paid down rather than suppressed: `validateMenuItem`'s
+cyclomatic limit (Go's items moved to `validateNavigationItem`) and `BrowserWindowController`'s
+250-line body (Quick View moved to `+QuickView`, mirroring the pane's own split).
+**VERIFIED LIVE**, the built app driven end to end: the drawer opened at `~` with **no `cd` typed**;
+`cd /usr/local` in the shell walked the pane there **without stealing the keyboard**; clicking the
+other pane typed exactly ` cd -- '/Users/oleg/Dev/Common'` (leading space, `--`, POSIX quotes); a
+directory named ``it's a "test" $(touch /tmp/PWNED) `touch /tmp/PWNED2` ;rm -rf boom; & |x`` was
+typed **verbatim with neither canary created**; the **ping-pong guard held against the real `/tmp`
+symlink** (pane stayed on `/tmp`, one `cd`, no second); `isAtPrompt` **typed nothing at all while
+`sleep 15` held the foreground**, and nothing retroactively after; `exit` closed the drawer and the
+next ⌃` gave a clean screen and a fresh shell **in the active pane's directory**; and ⌘Q left **no
+orphaned shell**. GOTCHAS: (1) **a notification banner (`UserNotificationCenter`) taking front makes
+Dirnex's window non-key, which greys out *every* pane menu item and swallows ⌘L** — this looked
+exactly like a focus bug I had introduced, and I nearly "fixed" a non-bug; re-tested with the banner
+gone, clicking a pane row takes focus back correctly. Verify twice before believing a UI symptom.
+(2) The drawer's first open was a **four-line sliver** — AppKit gives an item with no saved geometry
+its `minimumThickness` — and it was sitting in my own verification screenshots for several passes
+before I read them; `shouldSizeTerminalDrawer` now seeds 200 pt on the first open only, the same
+first-launch-has-no-autosave trick `shouldCenterPanesDivider` uses. The drawer's height *and* its
+open/closed state persist via `NSSplitView` autosave, so a drawer left open reopens with the window
+(and spawns its shell then) exactly as the sidebar behaves.
+**NEXT (M6 pass 9):** size-visualization mode (ncdu-style bars, async, cached) — the next `[ ]`
+item; then Share sheet / "Open With" / Services, and the automation slice that M6's exit criteria
+name ("a user-defined convert-to-webp script runs from the palette").
 
 ### M7 — Release readiness (M)
 

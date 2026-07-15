@@ -294,6 +294,7 @@ extension PanelViewController: NSMenuItemValidation {
         if let toggle = validateToggleItem(menuItem) { return toggle }
         if let mutating = validateMutatingItem(menuItem) { return mutating }
         if let archive = validateArchiveItem(menuItem) { return archive }
+        if let navigation = validateNavigationItem(menuItem) { return navigation }
         switch menuItem.action {
         case #selector(copyToOtherPane(_:)):
             // Copy to the other pane works from a results panel (real paths) and from an archive,
@@ -320,6 +321,16 @@ extension PanelViewController: NSMenuItemValidation {
             return canEditTags && !(view.window?.firstResponder is NSText)
         case #selector(undoLastOperation(_:)):
             return validateUndoItem(menuItem)
+        default:
+            return true
+        }
+    }
+
+    /// Validate the Go menu's items. Returns `nil` for any other selector so the main switch
+    /// handles it. Split out for the same reason as its siblings below: `validateMenuItem` has to
+    /// stay under SwiftLint's cyclomatic-complexity limit (a recurring gotcha).
+    private func validateNavigationItem(_ menuItem: NSMenuItem) -> Bool? {
+        switch menuItem.action {
         case #selector(goToParentDirectory(_:)):
             // "Go Up" walks out of an archive too, but is meaningless at a backend root or on a
             // virtual search-results pane.
@@ -336,8 +347,13 @@ extension PanelViewController: NSMenuItemValidation {
             // While a name/path field is being edited, let ⌃D fall through to the field
             // editor's delete-forward instead of stealing it to open the hotlist.
             return !(view.window?.firstResponder is NSText)
+        case #selector(openInTerminal(_:)):
+            // Needs a real directory on disk (never an archive, an SFTP server, or a results tab)
+            // and a terminal to open it in — Terminal.app ships with macOS, so in practice this
+            // only turns on the first half.
+            return canOpenInTerminal
         default:
-            return true
+            return nil
         }
     }
 

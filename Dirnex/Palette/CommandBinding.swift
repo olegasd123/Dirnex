@@ -43,6 +43,11 @@ enum CommandBinding {
         "view.toggleTags": #selector(PanelViewController.toggleShowTags(_:)),
         "view.quickLook": #selector(PanelViewController.toggleQuickLookPreview(_:)),
         "view.quickView": #selector(PanelViewController.toggleQuickViewPanel(_:)),
+        // The window controller, not a pane: the drawer spans both panes, and this is the one
+        // command that must also fire while the *terminal* holds focus — where no pane is in the
+        // responder chain, but the window controller still is.
+        "view.terminal": #selector(BrowserWindowController.toggleTerminalDrawer(_:)),
+        "go.openInTerminal": #selector(PanelViewController.openInTerminal(_:)),
         "go.connectServer": #selector(PanelViewController.connectToServer(_:)),
         "go.editLocation": #selector(PanelViewController.editLocation(_:)),
         "go.search": #selector(PanelViewController.findFiles(_:)),

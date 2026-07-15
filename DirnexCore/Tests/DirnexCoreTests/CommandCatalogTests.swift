@@ -132,6 +132,36 @@ struct CommandCatalogTests {
         #expect(KeyBindings().conflicts(for: "view.quickView").isEmpty)
     }
 
+    @Test("the M6 terminal drawer is a conflict-free View command on ⌃`")
+    func coversTerminalDrawer() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        let drawer = byID["view.terminal"]
+        #expect(drawer?.category == .view)
+        #expect(drawer?.shortcut == CommandShortcut(key: "`", modifiers: .control))
+        #expect(KeyBindings().conflicts(for: "view.terminal").isEmpty)
+    }
+
+    /// The drawer's shortcut must stay off the ⌃-letter layer the app's own popups live on: those
+    /// letters are the shell's (⌃D is EOF, ⌃Q is XON, ⌃T transposes), and the drawer is the one
+    /// surface whose keystrokes belong to somebody else.
+    @Test("the terminal drawer's shortcut is not a control key a shell would want")
+    func terminalDrawerAvoidsShellControlKeys() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        let drawer = byID["view.terminal"]
+        #expect(drawer?.shortcut?.modifiers == .control)
+        #expect(drawer?.shortcut?.key.first?.isLetter == false)
+    }
+
+    @Test("the M6 open-in-terminal command is a shortcut-free navigation command")
+    func coversOpenInTerminal() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        let open = byID["go.openInTerminal"]
+        #expect(open?.category == .navigation)
+        // No default shortcut (reached via menu/palette), so it can never collide.
+        #expect(open?.shortcut == nil)
+        #expect(KeyBindings().conflicts(for: "go.openInTerminal").isEmpty)
+    }
+
     @Test("Select All is a conflict-free Select command on ⌘A")
     func coversSelectAll() {
         let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })

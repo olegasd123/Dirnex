@@ -63,14 +63,15 @@ enum MainMenuBuilder {
             .command("view.commandPalette"), .separator,
             .command("view.toggleSidebar"), .command("view.toggleHidden"),
             .command("view.toggleTags"), .separator,
-            .command("view.quickLook"), .command("view.quickView")
+            .command("view.quickLook"), .command("view.quickView"), .separator,
+            .command("view.terminal")
         ]),
         MenuSpec(title: "Go", items: [
             .command("go.back"), .command("go.forward"), .command("go.history"), .separator,
             .command("go.editLocation"), .command("go.parent"), .command("go.search"),
             .command("go.saveSearch"), .separator,
             .command("go.hotlist"), .command("go.addToHotlist"), .separator,
-            .command("go.connectServer")
+            .command("go.connectServer"), .command("go.openInTerminal")
         ]),
         MenuSpec(title: "Workspace", items: [
             .command("workspace.list"), .command("workspace.save")

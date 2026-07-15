@@ -99,4 +99,51 @@ struct TerminalShellTests {
         // And with no locale to offer we invent nothing.
         #expect(shell.environment(inheriting: [:], appVersion: "1.0")["LANG"] == nil)
     }
+
+    /// The system this was written on reports `en_UA` — English, in Ukraine — a language/region
+    /// pair macOS lets you pick and then ships no locale for. The drawer's first live run greeted
+    /// it with `perl: warning: Setting locale failed.`, which is the bug this policy exists for.
+    @Test("a locale the system doesn't have falls back to neutral UTF-8, not a warning")
+    func unavailableLocaleFallsBackToNeutral() {
+        // A stock Mac's locale list: en_US and friends, uk_UA — but no en_UA.
+        let available: Set<String> = ["en_US.UTF-8", "uk_UA.UTF-8", "de_DE.UTF-8", "C.UTF-8"]
+        let probe: (String) -> Bool = { available.contains($0) }
+
+        #expect(
+            TerminalShell.usableLocaleIdentifier(preferred: "en_UA", isLocaleAvailable: probe) == "C"
+        )
+        #expect(
+            TerminalShell.usableLocaleIdentifier(preferred: "en_US", isLocaleAvailable: probe) == "en_US"
+        )
+        #expect(
+            TerminalShell.usableLocaleIdentifier(preferred: nil, isLocaleAvailable: probe) == "C"
+        )
+    }
+
+    @Test("with no usable locale at all we invent nothing rather than guess a region")
+    func noUsableLocaleYieldsNothing() {
+        #expect(
+            TerminalShell.usableLocaleIdentifier(
+                preferred: "en_UA",
+                isLocaleAvailable: { _ in false }
+            ) == nil
+        )
+    }
+
+    /// The whole point of `LANG` is the codeset: the fallback must still be UTF-8, or the shell's
+    /// tools drop to C's ASCII and mangle every non-ASCII filename — the thing this is here to stop.
+    @Test("the neutral fallback composes into a UTF-8 LANG")
+    func neutralFallbackIsUTF8() {
+        let shell = TerminalShell(executablePath: "/bin/zsh")
+        let identifier = TerminalShell.usableLocaleIdentifier(
+            preferred: "en_UA",
+            isLocaleAvailable: { $0 == "C.UTF-8" }
+        )
+        let environment = shell.environment(
+            inheriting: [:],
+            appVersion: "1.0",
+            localeIdentifier: identifier
+        )
+        #expect(environment["LANG"] == "C.UTF-8")
+    }
 }

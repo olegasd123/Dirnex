@@ -16,7 +16,12 @@ xcuserdata/
 # Swift Package Manager
 .build/
 .swiftpm/
+# DirnexCore is a library — its own resolution is nobody's business but its checkout's.
 Package.resolved
+# The app is not: it ships. Since M6 it has a real remote dependency (SwiftTerm), and this file
+# is the only thing that pins the exact *revision* — `exactVersion` in the project pins the tag,
+# and a tag can be moved. Apple's own rule: apps commit their resolution, libraries don't.
+!Dirnex.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
 # Notarization / signing artifacts
 *.dmg

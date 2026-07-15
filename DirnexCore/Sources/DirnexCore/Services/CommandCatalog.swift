@@ -223,6 +223,18 @@ public enum CommandCatalog {
             category: .view,
             keywords: ["preview", "peek", "pane", "inactive", "ctrl q"],
             shortcut: CommandShortcut(key: "q", modifiers: .control)
+        ),
+        Command(
+            id: "view.terminal",
+            title: "Terminal Drawer",
+            category: .view,
+            keywords: ["shell", "console", "command", "line", "zsh", "bash", "prompt", "drawer"],
+            // ⌃` rather than the ⌃-letter layer the app's own popups use (⌃T tags, ⌃D hotlist,
+            // ⌃Q quick view): every one of those letters means something to a shell — ⌃D is EOF,
+            // ⌃Q is XON — and the drawer is the one surface where the user's keystrokes are meant
+            // to belong to somebody else. ⌃` is VS Code's gesture for exactly this drawer, and no
+            // shell wants it.
+            shortcut: CommandShortcut(key: "`", modifiers: .control)
         )
     ]
 }
@@ -267,6 +279,19 @@ extension CommandCatalog {
                 "sftp", "ssh", "smb", "share", "mount", "nas", "remote", "network",
                 "server", "connect", "host"
             ]
+        ),
+        Command(
+            id: "go.openInTerminal",
+            title: "Open in Terminal",
+            category: .navigation,
+            keywords: [
+                "terminal", "shell", "iterm", "wezterm", "console", "command", "prompt",
+                "external", "app"
+            ]
+            // No shortcut: this is the *alternative* to the ⌃` drawer, for people who want their
+            // own terminal with their own tabs and profile, so it's a palette/menu action rather
+            // than a gesture. The title stays generic while `ExternalTerminal.preferred` picks the
+            // app, so the registry keeps its one title for the menu bar and the palette alike.
         ),
         Command(
             id: "go.parent",
