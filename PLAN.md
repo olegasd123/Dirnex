@@ -1593,6 +1593,110 @@ editor you do not control is the channel underneath it.
 item; then Share sheet / "Open With" / Services, and the automation slice that M6's exit criteria
 name ("a user-defined convert-to-webp script runs from the palette").
 
+Progress (2026-07-16, M6 pass 9 — the size-visualization core): the pure, tested half of the
+size-viz item, the same core-first opener every slice since M4 has used. Box stays `[ ]` (no toggle,
+no bar column, no provider, no app wiring) — this is the projection/cache half. **Two new
+`DirnexCore/VFS/` files plus one purely-additive method on `DirectoryModel`/`Panel`** (no existing
+API changed, so the app is untouched and needs no rebuild). Everything was **probed before any Swift
+was written** (the pass-1 method), and the probes corrected both the plan's framing and my own first
+design:
+- **ncdu's rule, read from its manual instead of from memory — and it is not either/or, it is
+  both.** *"Percentage is relative to the size of the current directory, graph is relative to the
+  largest item in the current directory."* The two answer different questions and one number cannot
+  do both, so `SizeBar` carries **`fraction`** (max-relative — the bar length, which is the only
+  reason a bar column is legible when one row dominates) *and* **`share`** (total-relative — the
+  label). I had been about to pick one.
+- **Logical bytes, deliberately against ncdu's default of allocated disk usage — and the gap is
+  real, measured, and runs BOTH ways.** `.git` (thousands of small files) allocates ~2x its logical
+  bytes in 4 KB block round-up (ratio 0.513); conversely one **64 MB sparse LMDB file** in
+  `DirnexCore/.build` allocates only 27 MB, pulling that whole tree to 1.082. So the choice matters
+  and is not cosmetic. It goes to logical anyway because **the bar must agree with the number
+  rendered beside it**: a row whose bar is twice its neighbour's while its own size column reads
+  smaller is incoherent. ncdu can default to disk usage because it is a disk-usage tool *with no
+  size column*; Dirnex is a file manager with one, already showing `FileEntry.byteSize`. Payoff: the
+  mode reuses `DirectorySizer` exactly, with no second byte source.
+- **Hard links: measured, then deliberately NOT de-duped** (ncdu does). Probed: **zero hardlinked
+  files across `/Applications`, `/usr/local`, `/opt/homebrew`**; the only 10 in `~/Dev` are npm's
+  `esbuild` binary, linked between `esbuild/bin/` and `@esbuild/darwin-arm64/bin/` *within the same
+  `node_modules`* — so a JS tree double-counts one ~10 MB binary, ≈3 % of a 300 MB `node_modules`.
+  (dev,ino) bookkeeping to correct a 3 % error that essentially never occurs is not worth it, and
+  `FileEntry` carries no device number to key it on.
+- **Walk cost tracks ENTRY COUNT, not bytes — the finding that shapes the whole mode.** The real
+  `DirectorySizer` walks 1 TB of `~/Movies` in **0.01 s** but 17 GB of `~/Dev` in **7.7 s** (it is
+  all `node_modules`); `/Applications` 8.5 s. And **`~` takes 41 s** once hidden rows are shown (68
+  directories, not the 17 visible ones — `.lmstudio`, `.android`, `.cache`, `.npm` are all there).
+  So bars *must* stream in progressively, and the cache is not a nicety.
+- **The brutal dynamic range is a text-mode artifact, not a fact about the data.** In `~`, Movies is
+  79 % of the total and at ncdu's 20 character cells **only 1 of 17 rows earns even one filled
+  cell** — which is precisely why ncdu grew `--graph-style eighth-block`. We draw in AppKit at
+  continuous width, ~8x finer than eighth-blocks, so pass 10 needs only a **minimum-ink rule** (a
+  real 17 GB folder must never render as literally nothing).
+- **`SizeVisualization`** — shaped like `GitStatusSnapshot`: every scan happens at construction so
+  `bar(for:)` is O(1), because a panel asks once per visible row per render. Three properties, each
+  pinned by a test. **(1) Unknown is not zero**: an unsized directory has *no* bar rather than a
+  zero-width one — collapsing the two paints an unwalked 40 GB folder as empty, and only
+  `computedSize` can tell them apart. **(2) Both denominators cover *visible* rows only** — hiding
+  dotfiles or typing a filter re-scales everything, because a bar drawn relative to a row you cannot
+  see is unexplainable, and shares that silently fail to reach 100 % are worse than shares of what is
+  on screen. **(3) It re-scales for free while walks land**: rebuilding the whole projection per
+  render needs no incremental bar-width bookkeeping, at the price (accepted, documented) that `share`
+  is a share of *what is known so far* and settles as results arrive. The total **saturates** and
+  negatives **clamp**, because `SFTPListingParser` builds sizes out of *text* and a panel must not
+  trap on a hostile server's arithmetic.
+- **`DirectorySizeCache`** — LRU, capacity **512, because the unit of caching here is one
+  directory's total** and a size-viz panel stores one per child row: capacity is counted in "several
+  panels' worth of children", not in `GitStatusProvider`'s "a few repositories" (8 snapshots), where
+  the unit is the repo. Reads are **non-mutating** (eviction ordered by last *store*): the intended
+  stale-while-revalidate re-stores on every visit so the orders coincide, and a mispredicted eviction
+  costs a re-walk, never a wrong number — worth more than mutating on the render path. The cache is
+  explicitly **a latency optimization and never an authority**: we watch only the *displayed*
+  directory, so a tree that changes while you look elsewhere is silently stale (ncdu has the same
+  property — its scan is a snapshot until `r` — but ncdu *looks* like a snapshot where a file panel
+  looks live).
+- **The invalidation rule is shaped by what an FSEvents ping actually proves.** Read
+  `DirectoryWatcher` rather than assuming: its callback **discards the event paths** and the stream
+  is recursive, so the only fact on offer is "something under the watched directory changed". Hence
+  `invalidate(under:)` drops every cached total on the same **root-to-leaf line**: the path *and its
+  descendants* (the ping does not say which one changed) *and its ancestors* (their totals sum it
+  in). **Siblings survive** — that is the whole value. It is the **mirror image of
+  `GitStatusSnapshot`'s roll-up**: that pushes a leaf's *status* up the line, this pushes a leaf's
+  *staleness* up the same one. Conservative by construction and correct for either caller (an exact
+  event path invalidates precisely; a watched root invalidates its whole line), because the trade is
+  not symmetric — over-invalidating costs a re-walk, under-invalidating shows a wrong number. It goes
+  through `VFSPath.isSelfOrDescendant` (backend-scoped, and right about `/a` vs `/ab`) rather than a
+  hand-rolled prefix test.
+FINDING (measured, and it added the one API change): **seeding a panel from the cache would have
+been slower than having no cache at all.** A seed arrives as a burst of N totals and
+`setDirectorySize` re-sorts the entire listing on *every* call — measured on the main actor at
+5.7 ms for 68 rows, **284 ms at 1,000, and 2.5 s at 3,000**, quadratic. The cache exists to make bars
+appear the instant a directory opens, and naively wired it would have frozen the panel for 2.5 s
+doing so. `setDirectorySizes` (bulk, one recompute) measures **4050x faster at 3,000 rows — 2.47 s →
+0.61 ms — with byte-identical ordering**, so it is the same answer, not a cheaper one.
++34 tests → **669 core tests** (was 635); `swift test` green, swiftformat + swiftlint-strict clean.
+The recurring type-body-length gotcha re-fired and was paid down rather than suppressed: `PanelTests`
+crossed its 250-line limit, so the computed-size tests moved to `PanelSizeTests` along the seam the
+suite's own `MARK` already drew (the `CopyEngine*Tests` precedent), collapsing a duplicated helper
+on the way. **VERIFIED LIVE** — a throwaway harness compiled against the real core, driving real
+listings and real walks: the Dirnex repo rendered `DirnexCore` 55.8 % / `build` 43.2 % / `.git`
+0.8 %, and `~` rendered Movies 79.2 % (1003.7 GB) / Library 10.3 % / Documents 3.0 %; on both,
+**shares summed to exactly 1.000000, exactly one row filled the bar, and it was the heaviest one** —
+with `du` agreeing inside the expected logical-vs-allocated gap (1.085 on the repo, 1.000 on Movies).
+The cache was driven against a **real filesystem change**: growing `.../a/b/file.bin` from 1 KB to
+9 KB and invalidating dropped `/a/b`, `/a` and the root — all three genuinely stale, truth having
+moved 1050 → 9050 — while the **sibling survived and was still correct**. GOTCHA (harness-only, but
+instructive): the probe **segfaulted on its first run**, in a program containing no unsafe code —
+`String(format: "%s", swiftString)`. `%s` expects a C string, and handing it a Swift `String` is
+undefined behaviour; `%@` or manual padding is the fix.
+**NEXT (M6 pass 10, the app layer):** the panel toggle and the bar column drawn at **continuous
+width** with the minimum-ink rule; a `DirectorySizeProvider` owning the cache (off-main walks via
+`DirectoryLoader.size`, serialized, streamed in and seeded in bulk through `setDirectorySizes`,
+FSEvents → `invalidate(under:)`), stale-while-revalidate on navigation, and no bar on the `..` row
+(app-synthesized, so the core projection never sees it). **One policy question the 41 s measurement
+forces and the user should settle: does toggling the mode auto-scan every child — ncdu's model,
+where you wait for the scan — or scan lazily/on-demand?** Extending `DirectoryWatcher` to deliver
+event paths would also keep invalidation surgical instead of dropping a whole line per ping. Then
+Share sheet / "Open With" / Services, and the automation slice.
+
 ### M7 — Release readiness (M)
 
 - [ ] Sparkle 2 updates + appcast infrastructure; notarized DMG pipeline in CI

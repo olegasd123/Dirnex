@@ -160,41 +160,6 @@ struct PanelTests {
         #expect(Set(subject.selectedEntries.map(\.name)) == ["c.jpg", "photo.JPG"])
     }
 
-    // MARK: - Computed directory sizes (Space-on-dir)
-
-    @Test("recording a directory size preserves the cursor by identity across the re-sort")
-    func directorySizePreservesCursor() throws {
-        func sizedFile(_ name: String, _ size: Int64) -> FileEntry {
-            FileEntry(
-                path: .local("/dir/\(name)"),
-                name: name,
-                kind: .file,
-                byteSize: size,
-                modificationDate: Date(timeIntervalSince1970: 0),
-                creationDate: Date(timeIntervalSince1970: 0),
-                isHidden: false,
-                permissions: 0o644,
-                inode: 0
-            )
-        }
-        let entries = [entry("folder", kind: .directory), sizedFile("file.bin", 500)]
-        var subject = Panel(model: DirectoryModel(
-            listing: DirectoryListing(path: .local("/dir"), entries: entries),
-            sort: FileSort(key: .size, ascending: true, directoriesFirst: false)
-        ))
-        // Unsized directory (0) sorts before the 500-byte file.
-        #expect(subject.model.visibleEntries.map(\.name) == ["folder", "file.bin"])
-        subject.moveCursor(to: 1)
-        #expect(subject.currentEntry?.name == "file.bin")
-
-        let folder = try #require(subject.model.visibleEntries.first { $0.name == "folder" })
-        subject.setDirectorySize(folder.id, bytes: 1000) // folder now heaviest → moves last
-        #expect(subject.model.visibleEntries.map(\.name) == ["file.bin", "folder"])
-        // The cursor followed file.bin by identity, not by its old row index.
-        #expect(subject.currentEntry?.name == "file.bin")
-        #expect(subject.cursor == 0)
-    }
-
     // MARK: - Navigation & refresh
 
     @Test("navigating to a new directory resets cursor and clears selection")

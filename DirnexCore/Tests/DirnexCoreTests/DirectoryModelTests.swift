@@ -162,6 +162,53 @@ struct DirectoryModelTests {
         #expect(subject.directorySizes[drop.id] == nil)
     }
 
+    @Test("setDirectorySizes records a whole burst at once — the cache-seeding path")
+    func bulkSizesRecorded() {
+        var subject = model([
+            entry("alpha", kind: .directory),
+            entry("beta", kind: .directory),
+            entry("gamma", kind: .directory)
+        ])
+        let alpha = subject.visibleEntries[0]
+        let beta = subject.visibleEntries[1]
+
+        subject.setDirectorySizes([alpha.id: 100, beta.id: 200])
+
+        #expect(subject.computedSize(of: alpha) == 100)
+        #expect(subject.computedSize(of: beta) == 200)
+        #expect(subject.computedSize(of: subject.visibleEntries[2]) == nil)
+    }
+
+    @Test("setDirectorySizes merges rather than replacing, with the new value winning")
+    func bulkSizesMerge() {
+        var subject = model([entry("alpha", kind: .directory), entry("beta", kind: .directory)])
+        let alpha = subject.visibleEntries[0]
+        let beta = subject.visibleEntries[1]
+        subject.setDirectorySize(alpha.id, bytes: 1)
+
+        subject.setDirectorySizes([beta.id: 2])
+        #expect(subject.computedSize(of: alpha) == 1) // untouched, not discarded
+        #expect(subject.computedSize(of: beta) == 2)
+
+        subject.setDirectorySizes([alpha.id: 9])
+        #expect(subject.computedSize(of: alpha) == 9) // a re-walk supersedes the cached total
+    }
+
+    @Test("setDirectorySizes re-sorts once, and an empty burst changes nothing")
+    func bulkSizesResortAndEmpty() {
+        var subject = model(
+            [entry("big", kind: .directory), entry("small.bin", size: 5)],
+            sort: FileSort(key: .size, ascending: true, directoriesFirst: false)
+        )
+        let big = subject.visibleEntries.first { $0.name == "big" }!
+
+        subject.setDirectorySizes([:])
+        #expect(subject.visibleEntries.map(\.name) == ["big", "small.bin"]) // no-op
+
+        subject.setDirectorySizes([big.id: 1000])
+        #expect(subject.visibleEntries.map(\.name) == ["small.bin", "big"]) // ordering applied
+    }
+
     // MARK: - Hidden
 
     @Test("hidden entries are excluded unless showHidden is on")

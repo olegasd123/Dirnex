@@ -105,6 +105,21 @@ public struct DirectoryModel: Sendable {
         recompute()
     }
 
+    /// Record many recursively-computed totals at once, re-materializing the visible list **once**
+    /// instead of once per entry. Existing totals for paths not mentioned are kept; a repeated path
+    /// takes the new value.
+    ///
+    /// This exists for one measured reason: seeding a panel from `DirectorySizeCache` arrives as a
+    /// burst of N totals, and `setDirectorySize` re-sorts the whole listing on every call. Measured
+    /// on this machine, seeding one-by-one costs 5.7 ms at 68 rows but **284 ms at 1,000 and 2.5 s
+    /// at 3,000** — on the main actor, and quadratic. That would make the cache *slower* than no
+    /// cache at the one job it has, which is making bars appear the instant a directory opens.
+    public mutating func setDirectorySizes(_ sizes: [VFSPath: Int64]) {
+        guard !sizes.isEmpty else { return }
+        directorySizes.merge(sizes) { _, new in new }
+        recompute()
+    }
+
     /// The computed recursive size recorded for `entry`, or `nil` if none — only
     /// directories ever carry one. The size column shows a dash until this is present.
     public func computedSize(of entry: FileEntry) -> Int64? {

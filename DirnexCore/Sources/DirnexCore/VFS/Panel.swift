@@ -110,6 +110,13 @@ public struct Panel: Sendable {
         mutatingPreservingCursor { $0.model.setDirectorySize(id, bytes: bytes) }
     }
 
+    /// Record many computed directory sizes at once — seeding size-visualization mode from the
+    /// `DirectorySizeCache` — with one re-sort rather than one per entry, and the cursor kept
+    /// anchored on its entry by identity since size-sorting reorders rows as the totals land.
+    public mutating func setDirectorySizes(_ sizes: [VFSPath: Int64]) {
+        mutatingPreservingCursor { $0.model.setDirectorySizes(sizes) }
+    }
+
     // MARK: - Cursor
 
     public mutating func moveCursor(to index: Int) {
