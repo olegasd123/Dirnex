@@ -9,6 +9,10 @@ extension PanelViewController {
         /// The Git status gutter (PLAN.md §M6). Unlike the others it is *contextual*: it exists
         /// only while the pane is inside a repository — see `PanelViewController+Git`.
         case git
+        /// The ncdu-style size bar (PLAN.md §M6). Contextual too, but on a different condition: the
+        /// Git gutter follows the *directory* (is it a repository), this one follows the *tab* (is
+        /// the mode switched on) — see `PanelViewController+SizeViz`.
+        case sizeBar
 
         var title: String {
             switch self {
@@ -18,14 +22,21 @@ extension PanelViewController {
             // One letter wide, so a header title could only ever be an ellipsis; the tooltip in
             // `installGitColumn` names it instead.
             case .git: return ""
+            // Deliberately blank as well: the column is a picture of the Size column beside it, and
+            // a second "Size" heading would read as a second quantity. Its tooltip names it.
+            case .sizeBar: return ""
             }
         }
 
-        /// Whether the column is only installed for certain directories rather than always present.
+        /// Whether the column is only installed under some condition rather than always present.
         /// A permanently blank "Git" column in every folder that isn't a repository — which is most
-        /// of them — would be pure clutter, so this one comes and goes with the repository.
+        /// of them — would be pure clutter, so it comes and goes with the repository; the size bar
+        /// comes and goes with its mode.
         var isContextual: Bool {
-            self == .git
+            switch self {
+            case .git, .sizeBar: return true
+            case .name, .size, .date: return false
+            }
         }
 
         /// The sort this column's header applies, or `nil` when it isn't sortable.
@@ -35,6 +46,9 @@ extension PanelViewController {
             case .size: return .size
             case .date: return .modified
             case .git: return nil
+            // Not `nil` for want of a meaning — the bar *is* size, and clicking it plainly means
+            // "sort by that". It routes to the same key the Size header does, so the two agree.
+            case .sizeBar: return .size
             }
         }
 
@@ -49,6 +63,10 @@ extension PanelViewController {
             case .date: return 150
             // Fixed: one centered letter. It is a gutter, not data — nothing to widen it for.
             case .git: return 20
+            // A track plus "100.0%" beside it. Wide enough that the proportions it exists to show
+            // are actually readable — measured, a real `~` needs every point of it, since 86 of its
+            // 93 rows are floored slivers and the percentage is what carries them.
+            case .sizeBar: return 120
             }
         }
 
@@ -58,6 +76,9 @@ extension PanelViewController {
             case .size: return 60
             case .date: return 110
             case .git: return 20
+            // Below this the track is shorter than the label beside it and the bar stops being a
+            // comparison at all.
+            case .sizeBar: return 80
             }
         }
     }
@@ -108,17 +129,31 @@ extension PanelViewController {
         tabs[activeTabIndex].columnLayout = currentColumnLayout
     }
 
+    /// The width every currently-installed contextual column has carved out of Name — the Git
+    /// gutter's, the size bar's, or both at once in a repository being measured.
+    ///
+    /// Summed rather than asked of a single column, which is the bug the second contextual column
+    /// introduced: with only the gutter to consider this was one ternary, and left that way it would
+    /// have under-reclaimed by the bar's 137 pt every time both were up — making Name ratchet
+    /// narrower on every toggle of the mode inside a repository.
+    private var contextualColumnFootprint: Double {
+        var total = 0.0
+        if isGitColumnInstalled { total += Double(gitColumnFootprint) }
+        if isSizeBarColumnInstalled { total += Double(sizeBarColumnFootprint) }
+        return total
+    }
+
     /// The table's live column geometry, in display order — recorded as it would be with **no**
     /// contextual column present, which is the only form a stored layout ever takes.
     ///
-    /// Two things follow from that. The gutter itself is left out: recording it would make an
-    /// otherwise identical layout differ between a repository and a plain folder, and each crossing
-    /// would rewrite the tab's stored columns for no user-visible reason. And the Name column gets
-    /// the gutter's footprint added back, because while the gutter is installed Name is physically
-    /// that much narrower (`setGitColumnInstalled` charges it there) — storing the carved width
-    /// would make Name ratchet narrower on every trip through a repository.
+    /// Two things follow from that. The contextual columns themselves are left out: recording them
+    /// would make an otherwise identical layout differ between a repository and a plain folder, and
+    /// each crossing would rewrite the tab's stored columns for no user-visible reason. And the Name
+    /// column gets their footprint added back, because while they are installed Name is physically
+    /// that much narrower (`setGitColumnInstalled` / `setSizeBarColumnInstalled` charge it there) —
+    /// storing the carved width would make Name ratchet narrower on every trip through a repository.
     private var currentColumnLayout: [ColumnLayout] {
-        let reclaimed = isGitColumnInstalled ? Double(gitColumnFootprint) : 0
+        let reclaimed = contextualColumnFootprint
         return tableView.tableColumns.compactMap {
             guard let column = Column(rawValue: $0.identifier.rawValue), !column.isContextual else {
                 return nil
@@ -137,12 +172,14 @@ extension PanelViewController {
         isApplyingColumnLayout = true
         defer {
             isApplyingColumnLayout = false
-            // Re-attach the Git gutter for the tab being switched to, after the layout pass: it is
-            // absent from every stored layout, so the reordering below would otherwise shuffle it
-            // to the far end of the table, one column at a time.
+            // Re-attach the contextual columns for the tab being switched to, after the layout pass:
+            // they are absent from every stored layout, so the reordering below would otherwise
+            // shuffle them to the far end of the table, one column at a time.
             updateGitColumn()
+            updateSizeBarColumn()
         }
         setGitColumnInstalled(false)
+        setSizeBarColumnInstalled(false)
 
         var targetIndex = 0
         for item in layout {

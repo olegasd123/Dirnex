@@ -24,6 +24,10 @@ extension PanelViewController {
             // gone stale while the tab was inactive. A fresh tab gets both from `navigate`.
             updateGitStatus()
             updateTagStatus()
+            // Same reasoning, and the mode is per tab: switching to a tab that had bars on must
+            // re-queue the walks that were abandoned when it went inactive, while a tab that had
+            // them off must not inherit the outgoing tab's column.
+            updateSizeVisualization()
         } else {
             navigate(to: panel.path)
         }

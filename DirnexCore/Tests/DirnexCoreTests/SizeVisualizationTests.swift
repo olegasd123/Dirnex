@@ -247,7 +247,10 @@ struct SizeVisualizationTests {
 
         #expect(viz.bar(for: rows[0])?.fraction == 1.0)
         // Everything else lands under an eighth of the bar — which is exactly why ncdu grew its
-        // eighth-block graph style, and why the app draws a continuous width instead of cells.
+        // eighth-block graph style. Pass 10 measured what that costs and found drawing at
+        // continuous width does *not* rescue it: the real range here is ~10⁶, so 86 of ~'s 93 rows
+        // still compute to under half a point at an 80 pt bar. `SizeBar.inkWidth` floors them
+        // instead (see `SizeBarTests`); the fractions below stay tiny but must never reach zero.
         for row in rows.dropFirst() {
             let fraction = try #require(viz.bar(for: row)?.fraction)
             #expect(fraction < 0.125)

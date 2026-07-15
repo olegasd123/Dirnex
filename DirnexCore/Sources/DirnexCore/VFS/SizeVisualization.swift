@@ -32,6 +32,34 @@ public struct SizeBar: Sendable, Hashable {
         self.fraction = fraction
         self.share = share
     }
+
+    /// How much bar to actually draw in a column `width` points wide, never less than `minimum`
+    /// points for a row that holds any bytes at all.
+    ///
+    /// **The floor is not a rounding nicety — it is the difference between "negligible" and "empty",
+    /// and measurement says it fires constantly.** Probed against real directories at an 80 pt bar:
+    /// in `~`, **86 of 93 rows** compute to under half a point, and in this repo 12 of 15 do. Without
+    /// a floor a real 17 GB folder beside a 1 TB one renders as *literally nothing* — indistinguishable
+    /// from an empty directory, and from the `nil` bar that means "not walked yet". Three different
+    /// facts collapsing onto the same pixels is the one outcome the type is built to avoid (see the
+    /// note on unknown-is-not-zero above).
+    ///
+    /// **Zero bytes draws zero ink**, deliberately: an empty folder is not negligible, it is empty,
+    /// and that is the one row for which nothing is the honest picture.
+    ///
+    /// This does *not* make the long tail legible, and no width rule could — pass 9 expected
+    /// continuous drawing to dissolve the problem ("~8x finer than eighth-blocks"), but the measured
+    /// dynamic range in `~` is ~10⁶ between Movies and the smallest dotfile, against which 8x is
+    /// nothing. Every floored row draws the same stub, which reads correctly as "all of these are
+    /// noise"; the row's *own* size column, and `share`, carry the low end. A log or sqrt scale would
+    /// make the tail visible by making the bar mean something other than proportion — the one thing a
+    /// bar cannot be allowed to lie about — so it is rejected rather than deferred.
+    public func inkWidth(in width: Double, minimum: Double) -> Double {
+        guard bytes > 0, width > 0 else { return 0 }
+        // `fraction` is already 0...1 by construction, but it is built from backend-supplied bytes,
+        // so the clamp is kept at the boundary for the same reason the core's sum saturates.
+        return min(width, max(min(minimum, width), fraction * width))
+    }
 }
 
 /// The per-row bar lookup a panel performs while rendering size-visualization mode.

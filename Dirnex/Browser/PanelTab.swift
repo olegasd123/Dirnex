@@ -44,6 +44,14 @@ final class PanelTab {
     /// lands. UI-only and session-scoped like the Git pair above: derived from the directory on
     /// switching to the tab, never persisted. Managed by `PanelViewController+Tags`.
     var tagSnapshot: FinderTagSnapshot?
+    /// Whether this tab shows ncdu-style size bars, and the projection they are drawn from (PLAN.md
+    /// §M6). Per tab rather than app-wide because the mode *spends* something to be on — measured,
+    /// ~16 s of background walking for one `~` — so it belongs to the tab you pointed at a tree, not
+    /// to every tab at once. UI-only and session-scoped like the pairs above; the projection is
+    /// rebuilt on every render pass, since both its denominators cover only the rows currently
+    /// visible. Managed by `PanelViewController+SizeViz`.
+    var isSizeVisualizationEnabled = false
+    var sizeVisualization: SizeVisualization?
     /// An explicit chip label overriding the path-derived one — set when a search is saved (or a
     /// saved search is re-run) so a results tab reads as its friendly name ("JMeter search")
     /// rather than the raw query (`"jmeter"`). `nil` for an ordinary tab. Session-scoped like

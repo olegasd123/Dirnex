@@ -441,6 +441,14 @@ extension PanelViewController: NSMenuItemValidation {
             // tags to show there, and unchecking the box would blame the user's setting for it.
             menuItem.state = AppPreferences.shared.showTags ? .on : .off
             return true
+        case #selector(toggleSizeVisualization(_:)):
+            // Tracks the tab's own flag rather than `areSizeBarsVisible`, for the reason above: on
+            // an SFTP volume or in search results the bars are suppressed because there is nothing
+            // sane to walk, and that is not the user having switched the mode off.
+            menuItem.state = isSizeVisualizationEnabled ? .on : .off
+            // Disabled where it cannot apply, so the greying explains the suppression that the
+            // checkmark alone would leave looking like a bug.
+            return panel.path.backend == .local && !isSearchResults
         case #selector(toggleQuickViewPanel(_:)):
             // "Quick View Panel" checkmark tracks the window-wide Quick View state.
             menuItem.state = (host?.isQuickViewEnabled ?? false) ? .on : .off

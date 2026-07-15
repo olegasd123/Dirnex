@@ -15,6 +15,16 @@ extension PanelViewController: NSTableViewDelegate {
         guard let tableColumn,
               let column = Column(rawValue: tableColumn.identifier.rawValue) else { return nil }
 
+        // The bar column first, and *including* its `..` row: it has no text field at all, so it
+        // gets a cell of its own rather than a `FileCellView` (which is built around one — mark
+        // styling, the hidden dim, the F2 editor). Handled ahead of `parentRowCell` because
+        // `makeView(withIdentifier:)` recycles by identifier: letting two classes share the bar
+        // column's identifier would hand each cast the other's cell.
+        if column == .sizeBar { return sizeBarCell(
+            forRow: row,
+            in: tableView,
+            identifier: tableColumn.identifier
+        ) }
         if isParentRow(row) { return parentRowCell(for: column, in: tableView) }
         guard let index = entryIndex(forRow: row) else { return nil }
 
@@ -46,6 +56,9 @@ extension PanelViewController: NSTableViewDelegate {
             cell.textField?.stringValue = status?.code ?? ""
             cell.textField?.alignment = .center
             cell.accentColor = status.map(GitStatusStyle.color(for:))
+        case .sizeBar:
+            // Handled above — it isn't a `FileCellView` at all.
+            break
         }
         cell.applyStyle()
         // Inline rename (F2): the name cell for the entry being renamed becomes an
@@ -58,6 +71,30 @@ extension PanelViewController: NSTableViewDelegate {
                 cell.endNameEditing()
             }
         }
+        return cell
+    }
+
+    /// The bar column's cell for any row, `..` included.
+    ///
+    /// **The `..` row never has a bar**, and not merely because it would look odd: it is synthesized
+    /// by the app, `Panel` has never heard of it, and so the core's projection has no entry to ask
+    /// about. It is also not a sibling — it is the folder *containing* every row here, so a share of
+    /// this directory is meaningless for it.
+    private func sizeBarCell(
+        forRow row: Int,
+        in tableView: NSTableView,
+        identifier: NSUserInterfaceItemIdentifier
+    ) -> NSView {
+        let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? SizeBarCellView
+            ?? SizeBarCellView(identifier: identifier)
+        guard !isParentRow(row), let index = entryIndex(forRow: row) else {
+            cell.dimmed = false
+            cell.barView.bar = nil
+            return cell
+        }
+        let entry = panel.model[index]
+        cell.dimmed = entry.isHidden
+        cell.barView.bar = sizeBar(for: entry)
         return cell
     }
 

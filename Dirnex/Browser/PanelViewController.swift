@@ -166,8 +166,9 @@ final class PanelViewController: NSViewController {
     var loadToken = 0
     /// FSEvents watcher for the directory on screen — live-refreshes the pane when the
     /// folder changes underneath us. Replaced on every navigation; `nil` for backends
-    /// without the `.watch` capability.
-    private var watcher: DirectoryWatcher?
+    /// without the `.watch` capability. Internal (like `gitWatcher` below) because the code that
+    /// drives it lives in `PanelViewController+Watch`; a stored property cannot.
+    var watcher: DirectoryWatcher?
     /// FSEvents watcher for the *repository root* of the directory on screen, and the root it
     /// covers. Distinct from `watcher`, which re-lists this folder: what Git says about these rows
     /// also changes with the index and `HEAD` at the root — a `git add` in a terminal — and no
@@ -302,6 +303,7 @@ final class PanelViewController: NSViewController {
         observeShowHiddenPreference()
         observeGitStatusChanges()
         observeFinderTagChanges()
+        observeDirectorySizeChanges()
         activateTab()
     }
 
@@ -334,6 +336,9 @@ final class PanelViewController: NSViewController {
         // from a history trail, so leaving one starts fresh. An SFTP location *is* re-listable, so
         // it keeps a normal back/forward trail like a local directory.
         let wasVirtual = panel.path.backend != .local && !panel.path.backend.isSFTP
+        // Captured before the load: once `setListing` lands, `panel.path` is the destination and the
+        // directory whose scan queue we are abandoning is no longer nameable.
+        let departed = panel.path
         Task {
             do {
                 let listing = try await DirectoryLoader.list(backend, at: path)
@@ -360,11 +365,14 @@ final class PanelViewController: NSViewController {
                 } else {
                     recordVisit(path, tab: tabIndex, recordHistory: recordHistory)
                 }
+                // The directory we just left has a scan queued against it that nobody will render.
+                DirectorySizeProvider.shared.cancelScan(for: departed)
                 reloadEverything()
                 refreshTabBar()
                 startWatching(path)
                 updateGitStatus()
                 updateTagStatus()
+                updateSizeVisualization()
                 persistState()
                 host?.panelDidNavigate(self)
             } catch {
@@ -374,47 +382,12 @@ final class PanelViewController: NSViewController {
         }
     }
 
-    // MARK: - Live refresh (FSEvents)
-
-    /// Watch `path` for changes, tearing down the previous watcher. The onChange closure
-    /// runs on a background queue, so it hops to the main actor before touching the pane.
-    /// Internal so a tab switch can re-establish the watcher for the newly active tab.
-    func startWatching(_ path: VFSPath) {
-        // A virtual results listing has no directory on disk to watch — its `.search` path isn't
-        // a real location, and the results are a static snapshot.
-        guard path.backend == .local, backend.capabilities.contains(.watch) else {
-            watcher = nil
-            return
-        }
-        watcher = DirectoryWatcher(path: path) { [weak self] in
-            Task { @MainActor in self?.directoryDidChange(path) }
-        }
-    }
-
-    /// A watched directory changed on disk. Re-list it and hand the fresh snapshot to
-    /// `Panel`, which preserves the cursor and marks by identity. Guarded so a late
-    /// event from a directory we've since navigated away from is ignored.
-    private func directoryDidChange(_ watchedPath: VFSPath) {
-        guard panel.path == watchedPath else { return }
-        let token = loadToken
-        Task {
-            guard let listing = try? await DirectoryLoader.list(backend, at: watchedPath) else { return }
-            guard token == loadToken, panel.path == watchedPath else { return }
-            if deferRefreshIfRenaming() { return }
-            reconcileCursorFromTable()
-            panel.setListing(listing)
-            renderRefresh()
-            // Re-derives the repository too, so a `git init` (or a deleted `.git`) right here turns
-            // the gutter on or off as it happens, rather than on the next navigation.
-            updateGitStatus()
-            // Tags need no watcher of their own: this event *is* the tag change (see +Tags).
-            updateTagStatus()
-        }
-    }
-
     // MARK: - Rendering
 
     func reloadEverything() {
+        // Before `reloadData`, which asks for the bars row by row: the projection has to describe
+        // the row set about to be drawn, not the one that was.
+        rebuildSizeVisualization()
         tableView.reloadData()
         syncCursorToTable()
         updateChrome()
@@ -425,6 +398,7 @@ final class PanelViewController: NSViewController {
     /// leaves the user's scroll position (and reading spot) where it was. Internal so a
     /// tab switch can re-render the newly active tab without disturbing its scroll.
     func renderRefresh() {
+        rebuildSizeVisualization()
         tableView.reloadData()
         syncCursorToTable(scroll: false)
         updateChrome()

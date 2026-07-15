@@ -30,9 +30,27 @@ enum DirectoryLoader {
     /// Returns `nil` only if the top-level walk fails outright; unreadable subtrees are
     /// skipped inside `DirectorySizer`, not fatal. Runs at `.utility` — sizing is a
     /// background nicety and must never contend with an interactive listing.
+    ///
+    /// **Detached, so it outlives its caller's cancellation** — deliberate for Space-on-dir, where
+    /// the walk the user explicitly asked for should finish and land in the cache even if they
+    /// arrow onward. Size-visualization mode wants the opposite and uses `cancellableSize`.
     static func size(_ backend: any VFSBackend, of path: VFSPath) async -> Int64? {
         await Task.detached(priority: .utility) {
             try? DirectorySizer.size(of: path, using: backend)
         }.value
+    }
+
+    /// The same walk, but abandonable **mid-walk** rather than merely discarded on completion.
+    ///
+    /// Size-visualization mode's auto-scan needs this and `size` cannot give it: a detached task
+    /// does not inherit cancellation, so a `/System` walk started by a mode the user has since
+    /// switched off would grind on to completion with nowhere to put its answer. Run as a *child*
+    /// task (this is not detached), it inherits cancellation from the scan queue's task group, and
+    /// `DirectorySizer` checks the flag at every directory it pops.
+    ///
+    /// Returns `nil` when cancelled, exactly as it does when the walk fails — both mean "no total",
+    /// and the cache stores neither.
+    static func cancellableSize(_ backend: any VFSBackend, of path: VFSPath) async -> Int64? {
+        try? DirectorySizer.size(of: path, using: backend) { Task.isCancelled }
     }
 }

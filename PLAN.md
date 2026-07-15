@@ -902,7 +902,7 @@ remain, all deferrable to M6-ish polish.
 - [x] Terminal drawer: bottom pane following active panel's cwd; "cd sync back" via
       ~~shell integration snippet~~ `proc_pidinfo` (no snippet exists, and none should — see
       pass 7); open in iTerm/Terminal/WezTerm as alternative
-- [ ] Size visualization mode: toggle panel to ncdu-style bars, computed async, cached
+- [x] Size visualization mode: toggle panel to ncdu-style bars, computed async, cached
 - [ ] Share sheet, "Open With" submenu, Services integration
 - [ ] Automation: AppleScript/Shortcuts verbs (reveal, copy, run-op); user actions —
       shell scripts receiving selection as argv/env, surfaced in palette and F-key bar
@@ -1696,6 +1696,82 @@ forces and the user should settle: does toggling the mode auto-scan every child 
 where you wait for the scan — or scan lazily/on-demand?** Extending `DirectoryWatcher` to deliver
 event paths would also keep invalidation surgical instead of dropping a whole line per ping. Then
 Share sheet / "Open With" / Services, and the automation slice.
+
+Progress (2026-07-16, M6 pass 10 — the size-visualization app layer; **the box closes `[x]`, VERIFIED
+LIVE**): the toggle (⌃B), the bar column, and the scan that fills it. **The user settled pass 9's
+policy question: auto-scan, ncdu's model** — and it was the only live option, because the core's
+"unknown is not zero" rule means a lazy mode opens on a column that is empty for every folder in it.
+**Per tab** (not an app-wide preference like Show Tags): it is what "toggle *panel* to bars" says, it
+is the dual-pane payoff, and above all this is the one mode in the app that *spends* something to be
+on. Probing again ran ahead of the Swift (the pass-1 method), and it **overturned two of pass 9's own
+conclusions**:
+- **Continuous width does NOT rescue the dynamic range — pass 9's central claim about pass 10 was
+  wrong.** It reasoned that drawing in AppKit is "~8x finer than eighth-blocks, so pass 10 needs only
+  a minimum-ink rule". Measured against real directories at an 80 pt bar: in `~`, **86 of 93 rows
+  compute to under half a point** (12 of 15 in this repo; `/Applications`, at 6 of 38, is the only
+  humane one). The range in `~` is ~10⁶, and 8x is nothing against it. So the floor is not a rounding
+  nicety that buys legibility — **it is the difference between "negligible" and "empty"**, and it
+  fires constantly. `SizeBar.inkWidth(in:minimum:)` went to the *core* with tests (bytes → width is
+  the core's rule), and **zero bytes draws zero ink** deliberately: an empty folder is not
+  negligible, it is empty. The tail stays illegible whatever we do — which is *why* pass 9's `share`
+  is drawn as a number beside the bar; ncdu keeps the percentage for exactly this reason. A log/sqrt
+  scale is **rejected, not deferred**: it would make the tail visible by making bar length mean
+  something other than proportion, and a test pins the compression so nobody "fixes" it later.
+- **FINDING: pass 9's "serialized" queue buried the one row the chart is about.** Display order is
+  alphabetical and uncorrelated with walk cost, so serialized, `Movies` — **79 % of home** — landed at
+  **35.7 s of a 35.7 s scan**, dead last, queued behind `Library` (17.0 s) and `Dev` (10.7 s). Movies
+  itself walks in 0.03 s: the wait was head-of-line blocking, not work. Widening the queue —
+  1→35.7 s/35.7 s, 4→17.9 s/**3.4 s**, 8→16.3 s/**1.8 s**, 16→15.7 s/**0.3 s** (total/t-to-Movies) —
+  is not bought for throughput (total plateaus at ~15.7 s, which is `Library` alone and unsplittable)
+  but so the chart is *right* within ~2 s instead of re-scaling 8x at the very end. The fear that
+  bounded it was measured too, and was mostly unfounded: `DirectorySizer.size` blocks a cooperative-
+  pool thread and Swift's pool does not over-commit, yet an interactive listing's **worst case stayed
+  at 2.9 ms at width 8** (baseline max 3.5 ms) against M1's 150 ms budget; only width 16 — this
+  machine's entire core count — perturbed it at all (12.9 ms). Width is `cores/2`, clamped [2, 8].
+- **`DirectorySizeProvider`** — shaped like `GitStatusProvider`/`FinderTagProvider` (off-main, cached,
+  published by notification), shared because the unit of caching is one directory's total. Drains
+  **newest-request-first** so navigating never waits behind a folder you left; publishes are
+  **coalesced to ~10/s**, which is what keeps a 68-directory scan from becoming 68 re-sorts and makes
+  the cost independent of row count. Walks use a new `DirectoryLoader.cancellableSize` — a *child*
+  task, not detached, so cancellation reaches `DirectorySizer`'s own `isCancelled` mid-walk (the
+  existing detached `size` deliberately keeps outliving its caller for Space-on-dir).
+- **Two bugs the live run caught that nothing else would have**, both invisible to tests and lint:
+  (1) **the first toggle did nothing at all** — installed its column, then no bars and no scan. The
+  projection is built inside the render pass, and `updateSizeVisualization` skipped the render when
+  the cache came back empty, which is exactly a first toggle; the pending list is read *from* the
+  projection that was therefore never built. (2) Fixing that exposed the next: `requestScan` runs on
+  every render, and an in-flight child still has no total, so it is still "pending" — the provider
+  would have re-queued the whole in-flight batch ten times a second. The provider now tracks
+  `inFlight` and de-duplicates.
+- Bar column is **contextual like the Git gutter but on a different condition** (the gutter follows
+  the *directory*, this follows the *tab*), sits **immediately after Size** — the adjacency that is
+  the whole reason the core measures logical bytes — and is **charged to Name**, never added on top.
+  That generalized `currentColumnLayout`'s reclaim from one hardcoded ternary to a sum: left alone it
+  would have under-reclaimed by 137 pt whenever both columns were up, ratcheting Name narrower on
+  every toggle inside a repository. Verified live: pixel-identical headers across repeated toggles.
++14 tests → **678 core tests** (was 669) and **38 app tests** (was 33); `swift test` green, swiftformat
++ swiftlint-strict clean. The type-body gotcha re-fired twice and was paid down rather than
+suppressed: `SizeBarTests` is its own file (`SizeVisualizationTests` was at its 250-line limit), and
+`PanelViewController` crossed both file *and* type-body limits, so the FSEvents block moved to
+`PanelViewController+Watch` along the seam its own `MARK` already drew. **VERIFIED LIVE** against the
+real `~`: bars streamed in progressively, and with hidden rows shown the app rendered **Movies 1,08 TB
+at 79.2 % filling the bar** and **Library 10.3 %** — matching the independent probe's 79.1802 % and
+10.3339 % exactly, with `.lmstudio` observed *settling* 3.2 % → 2.8 % as `Library` landed (the
+documented "share of what is known so far"). Toggling hidden rows re-scaled Movies 94.5 % → 79.2 %
+(visible-rows-only denominators, live); **Zero KB folders drew no ink while 6 KB ones drew the floor**;
+the `..` row drew nothing; the cursor row's bar used the emphasized fill; and the mode stayed in one
+pane while the other browsed normally. Switching the mode off **keeps the computed sizes** — they are
+Space-on-dir's too, not this mode's to erase. GOTCHA (cost ~20 minutes, and it is a trap for every
+future live pass): **`xcodebuild` writes to `~/Library/Developer/Xcode/DerivedData/`, while the repo's
+own `build/` directory is a stale copy** — `open build/.../Dirnex.app` silently ran a build from the
+previous day, whose View menu was missing the new command *and* pass 8's terminal drawer. Two stale
+instances were also already running. Launch from the DerivedData path, and check `ps` first.
+**NEXT (M6 pass 11):** Share sheet / "Open With" / Services, then the automation slice (AppleScript/
+Shortcuts verbs + user shell scripts on the selection) that M6's exit criteria actually name, then the
+iCloud sync-status column. Deferred and still worth doing: extending `DirectoryWatcher` to deliver
+event paths, which would keep size invalidation surgical instead of dropping a whole root-to-leaf line
+per ping (the conservative rule is correct, just wasteful); and ncdu's `r` — an explicit
+refresh/rescan, for which `DirectorySizeCache.removeAll` already exists unused.
 
 ### M7 — Release readiness (M)
 

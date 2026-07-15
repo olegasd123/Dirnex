@@ -203,11 +203,14 @@ extension PanelViewController {
         tableView.moveColumn(tableView.tableColumns.count - 1, toColumn: nameIndex + 1)
     }
 
-    /// Widen or narrow the Name column by `delta`, to make room for the gutter or reclaim it.
-    /// `NSTableColumn` clamps to its own `minWidth`, so a pane already squeezed to the floor keeps
-    /// a legible name and lets the Size/Date pair shift instead — the lesser of the two evils, and
-    /// only at widths where nothing readable was on offer anyway.
-    private func resizeNameColumn(by delta: CGFloat) {
+    /// Widen or narrow the Name column by `delta`, to make room for a contextual column or reclaim
+    /// it. `NSTableColumn` clamps to its own `minWidth`, so a pane already squeezed to the floor
+    /// keeps a legible name and lets the Size/Date pair shift instead — the lesser of the two evils,
+    /// and only at widths where nothing readable was on offer anyway.
+    ///
+    /// Internal rather than private because the size-bar column charges Name in exactly the same way
+    /// (`PanelViewController+SizeViz`); it lives here because the Git gutter was the first to need it.
+    func resizeNameColumn(by delta: CGFloat) {
         let identifier = NSUserInterfaceItemIdentifier(Column.name.rawValue)
         let index = tableView.column(withIdentifier: identifier)
         guard index >= 0 else { return }

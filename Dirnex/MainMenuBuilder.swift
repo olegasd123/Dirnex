@@ -62,7 +62,7 @@ enum MainMenuBuilder {
         MenuSpec(title: "View", items: [
             .command("view.commandPalette"), .separator,
             .command("view.toggleSidebar"), .command("view.toggleHidden"),
-            .command("view.toggleTags"), .separator,
+            .command("view.toggleTags"), .command("view.sizeVisualization"), .separator,
             .command("view.quickLook"), .command("view.quickView"), .separator,
             .command("view.terminal")
         ]),

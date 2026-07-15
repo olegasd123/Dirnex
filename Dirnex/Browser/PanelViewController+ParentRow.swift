@@ -52,6 +52,10 @@ extension PanelViewController {
         // points at may not even be in this repository.
         case .size, .date, .git:
             cell.textField?.stringValue = ""
+        // Unreachable: the bar column is answered by `sizeBarCell` before the parent row is ever
+        // considered, because its cell is not a `FileCellView`. Listed for exhaustiveness.
+        case .sizeBar:
+            cell.textField?.stringValue = ""
         }
         cell.applyStyle()
         return cell

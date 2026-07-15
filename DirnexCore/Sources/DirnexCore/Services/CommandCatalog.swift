@@ -211,6 +211,19 @@ public enum CommandCatalog {
             keywords: ["finder", "tags", "labels", "colors", "colours", "dots", "column"]
         ),
         Command(
+            id: "view.sizeVisualization",
+            title: "Size Visualization",
+            category: .view,
+            keywords: [
+                "ncdu", "bars", "graph", "chart", "disk", "usage", "space", "du", "biggest",
+                "largest", "what is taking up"
+            ],
+            // ⌃B for "bars", on the ⌃-letter layer the app's own panel modes already use (⌃Q quick
+            // view, ⌃T tags, ⌃D hotlist). No conflict with the terminal drawer's reasoning: that one
+            // fled to ⌃` precisely because its keystrokes belong to a shell, and this mode's do not.
+            shortcut: CommandShortcut(key: "b", modifiers: .control)
+        ),
+        Command(
             id: "view.quickLook",
             title: "Quick Look",
             category: .view,
