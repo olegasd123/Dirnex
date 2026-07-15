@@ -213,16 +213,24 @@ extension PanelViewController {
         alert.addButton(withTitle: "Cancel")
         alert.enableEscapeToCancel()
 
-        let field = NSTextField(frame: NSRect(x: 0, y: 26, width: 260, height: 24))
+        let field = NSTextField(frame: NSRect(x: 0, y: 32, width: 260, height: 24))
         field.placeholderString = "Tag name"
         let colors = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         for color in FinderTagColor.allCases {
             colors.addItem(withTitle: color.title)
             colors.lastItem?.image = TagDotStyle.menuImage(for: color)
         }
+        // The closed button draws the selected item's dot hard against its name; the open list gets
+        // its gap for free from the menu's icon column. Padding the dot image would fix the button
+        // and widen the list, which is already right — so the button is given an item of its own to
+        // display instead, and only that copy carries the padding.
+        (colors.cell as? NSPopUpButtonCell)?.usesItemFromMenu = false
+        colors.target = self
+        colors.action = #selector(newTagColorPicked(_:))
+        showSelectedColor(on: colors)
         // An `NSAlert` accessory is laid out by frame, not by constraints — a live-found gotcha
         // from the SMB pass: constraints here leave the view zero-sized and invisible.
-        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 50))
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 56))
         accessory.addSubview(field)
         accessory.addSubview(colors)
         alert.accessoryView = accessory
@@ -245,5 +253,34 @@ extension PanelViewController {
             commit()
         }
         alert.window.makeFirstResponder(field)
+    }
+
+    @objc private func newTagColorPicked(_ sender: NSPopUpButton) {
+        showSelectedColor(on: sender)
+    }
+
+    /// Mirror the selection onto the popup's display item — see `presentNewTagPrompt`. The item is
+    /// rebuilt on every pick, since the cell shows this copy and nothing else once
+    /// `usesItemFromMenu` is off.
+    private func showSelectedColor(on popup: NSPopUpButton) {
+        let choice = popup.indexOfSelectedItem
+        guard let cell = popup.cell as? NSPopUpButtonCell,
+              let selected = popup.selectedItem,
+              choice >= 0, choice < FinderTagColor.allCases.count
+        else { return }
+        let display = NSMenuItem(title: selected.title, action: nil, keyEquivalent: "")
+        display.image = paddedDot(for: FinderTagColor.allCases[choice])
+        cell.menuItem = display
+    }
+
+    /// A dot with empty room after it, so the button's own drawing has a gap to butt the name up
+    /// against. The dot is drawn at its natural size; only the canvas grows.
+    private func paddedDot(for color: FinderTagColor, gap: CGFloat = 5) -> NSImage {
+        let dot = TagDotStyle.menuImage(for: color)
+        let size = NSSize(width: dot.size.width + gap, height: dot.size.height)
+        return NSImage(size: size, flipped: false) { _ in
+            dot.draw(in: NSRect(origin: .zero, size: dot.size))
+            return true
+        }
     }
 }
