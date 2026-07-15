@@ -37,6 +37,17 @@ struct PanelsSettingsView: View {
             }
 
             Section {
+                Toggle("Show Finder tags", isOn: $preferences.showTags)
+            } footer: {
+                Text(
+                    "Adds a column of tag dots beside the names. Also in the View menu. Archives and "
+                        + "remote volumes have no tags, so it stays hidden there."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle(
                     "Switch focus to folders opened from search results",
                     isOn: $preferences.focusOpenedSearchDirectory

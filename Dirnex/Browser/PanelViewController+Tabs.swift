@@ -23,6 +23,7 @@ extension PanelViewController {
             // this re-points the pane's single repository watcher at it and refreshes what may have
             // gone stale while the tab was inactive. A fresh tab gets both from `navigate`.
             updateGitStatus()
+            updateTagStatus()
         } else {
             navigate(to: panel.path)
         }

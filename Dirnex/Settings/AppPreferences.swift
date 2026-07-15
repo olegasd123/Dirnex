@@ -43,6 +43,35 @@ final class AppPreferences: ObservableObject {
         showHidden.toggle()
     }
 
+    /// Panels ▸ show the Finder-tags column (PLAN.md §M6 "Finder tags: column…"). Default **on**,
+    /// so someone who tags files sees them without having to find a setting first.
+    ///
+    /// This is a preference rather than the Git gutter's contextual rule ("install it only where it
+    /// has something to say"), because that rule's justification does not transfer. A repository is
+    /// a coarse, stable property of a whole subtree, so the gutter appears once on the way in and
+    /// stays; tagged files are *scattered*, so the same rule would install and remove the column —
+    /// and re-truncate every filename, since the column is paid for out of Name — on nearly every
+    /// step between sibling folders. A stable column with an off switch trades a blank 36 pt for
+    /// people who don't tag against constant jitter for everyone, which is the better bargain: the
+    /// non-tagger turns it off once, and it stays off.
+    @Published var showTags: Bool {
+        didSet {
+            guard showTags != oldValue else { return }
+            defaults.set(showTags, forKey: Keys.showTags)
+            NotificationCenter.default.post(name: Self.showTagsDidChange, object: self)
+        }
+    }
+
+    /// Posted (on the main actor) when `showTags` flips, so every open pane installs or removes the
+    /// column live. `object` is the `AppPreferences` that changed.
+    static let showTagsDidChange = Notification.Name("Dirnex.showTagsDidChange")
+
+    /// Flip the app-wide tags-column state — the shared entry point for the View menu item, the
+    /// palette command, and the Settings toggle.
+    func toggleShowTags() {
+        showTags.toggle()
+    }
+
     /// Operations ▸ ask for confirmation before moving items to the Trash (default off —
     /// Trash is recoverable, matching Finder). Permanent delete always confirms regardless.
     @Published var confirmTrash: Bool {
@@ -62,6 +91,9 @@ final class AppPreferences: ObservableObject {
         self.defaults = defaults
         restoreSession = defaults.object(forKey: Keys.restoreSession) as? Bool ?? true
         showHidden = defaults.bool(forKey: Keys.showHidden)
+        // Defaults on, so `object(forKey:)` rather than `bool(forKey:)` — the latter answers
+        // `false` for a key that was never written, which would ship the feature turned off.
+        showTags = defaults.object(forKey: Keys.showTags) as? Bool ?? true
         confirmTrash = defaults.bool(forKey: Keys.confirmTrash)
         focusOpenedSearchDirectory = defaults.bool(forKey: Keys.focusOpenedSearchDirectory)
     }
@@ -69,6 +101,7 @@ final class AppPreferences: ObservableObject {
     private enum Keys {
         static let restoreSession = "Dirnex.pref.restoreSession"
         static let showHidden = "Dirnex.pref.showHidden"
+        static let showTags = "Dirnex.pref.showTags"
         static let confirmTrash = "Dirnex.pref.confirmTrash"
         static let focusOpenedSearchDirectory = "Dirnex.pref.focusOpenedSearchDirectory"
     }

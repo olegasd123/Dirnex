@@ -138,81 +138,11 @@ extension PanelViewController {
 
     // MARK: - The status gutter
 
-    /// Install or remove the gutter to match the pane's repository state.
+    /// Install or remove the gutter to match the pane's repository state. The mechanics of a
+    /// contextual column — the width it costs Name, where it sits — are shared with the tags
+    /// gutter and live in `PanelViewController+ContextualColumns`; all this decides is *whether*.
     func updateGitColumn() {
-        setGitColumnInstalled(isInGitRepository)
-    }
-
-    /// Whether the gutter is on the table right now — which is also the question "is the Name column
-    /// currently `gitColumnFootprint` narrower than the layout says", so `currentColumnLayout` can
-    /// give it back.
-    var isGitColumnInstalled: Bool {
-        tableView.column(withIdentifier: NSUserInterfaceItemIdentifier(Column.git.rawValue)) >= 0
-    }
-
-    /// What installing the gutter actually costs the table: its own width **plus one intercell
-    /// spacing**, which `NSTableView` adds per column. The spacing is the whole trap here — it is
-    /// **17 pt** at this table's `.plain` style, not the 2–3 pt the name suggests (measured against
-    /// a real table, after charging Name the column width alone visibly failed to hold Size and
-    /// Date still). Read live rather than hardcoded, so a style change can't quietly reintroduce
-    /// the drift.
-    var gitColumnFootprint: CGFloat {
-        Column.git.defaultWidth + tableView.intercellSpacing.width
-    }
-
-    /// Add or remove the Git column. Internal so `applyColumnLayout` can lift the gutter out while
-    /// it reorders the user's real columns.
-    ///
-    /// The gutter is **paid for out of the Name column**, never added on top of the table: appending
-    /// its width to the total would push Size and Date sideways every time the user walked into or
-    /// out of a repository, moving columns they had placed deliberately for a reason that has
-    /// nothing to do with them. Name is the right column to charge because it is already the one
-    /// that absorbs slack (`firstColumnOnlyAutoresizingStyle`) — it is the flexible one by design,
-    /// and a filename with 20 pt less room is a truncation, not a rearranged pane.
-    func setGitColumnInstalled(_ installed: Bool) {
-        let identifier = NSUserInterfaceItemIdentifier(Column.git.rawValue)
-        let existing = tableView.column(withIdentifier: identifier)
-        guard installed != (existing >= 0) else { return }
-        // Adding or removing a column posts the same resize/move notifications a user's header drag
-        // does. Without this guard, walking into a repository would be recorded as the user having
-        // rearranged their columns — and persisted.
-        let wasApplyingLayout = isApplyingColumnLayout
-        isApplyingColumnLayout = true
-        defer { isApplyingColumnLayout = wasApplyingLayout }
-
-        guard installed else {
-            tableView.removeTableColumn(tableView.tableColumns[existing])
-            // Hand the space back, so leaving a repository is the exact inverse of entering one.
-            resizeNameColumn(by: gitColumnFootprint)
-            return
-        }
-        resizeNameColumn(by: -gitColumnFootprint)
-        let column = NSTableColumn(identifier: identifier)
-        column.title = Column.git.title
-        column.headerToolTip = "Git status"
-        column.width = Column.git.defaultWidth
-        column.minWidth = Column.git.minWidth
-        column.maxWidth = Column.git.defaultWidth
-        column.resizingMask = []
-        tableView.addTableColumn(column)
-        // Immediately after the name, where it reads as a badge on the file. Stranded past the
-        // date it would be a column of letters with nothing to do with what the eye is scanning.
-        let nameIdentifier = NSUserInterfaceItemIdentifier(Column.name.rawValue)
-        let nameIndex = tableView.column(withIdentifier: nameIdentifier)
-        guard nameIndex >= 0 else { return }
-        tableView.moveColumn(tableView.tableColumns.count - 1, toColumn: nameIndex + 1)
-    }
-
-    /// Widen or narrow the Name column by `delta`, to make room for the gutter or reclaim it.
-    /// `NSTableColumn` clamps to its own `minWidth`, so a pane already squeezed to the floor keeps
-    /// a legible name and lets the Size/Date pair shift instead — the lesser of the two evils, and
-    /// only at widths where nothing readable was on offer anyway.
-    private func resizeNameColumn(by delta: CGFloat) {
-        let identifier = NSUserInterfaceItemIdentifier(Column.name.rawValue)
-        let index = tableView.column(withIdentifier: identifier)
-        guard index >= 0 else { return }
-        let column = tableView.tableColumns[index]
-        column.width += delta
+        setContextualColumn(.git, installed: isInGitRepository)
     }
 
     // MARK: - Rendering

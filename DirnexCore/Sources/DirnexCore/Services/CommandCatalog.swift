@@ -72,6 +72,15 @@ public enum CommandCatalog {
             keywords: ["compare", "diff", "contents", "filemerge", "kaleidoscope", "bbedit"]
         ),
         Command(
+            id: "file.tags",
+            title: "Tags…",
+            category: .file,
+            keywords: ["finder", "tag", "label", "colour", "color", "mark"],
+            // ⌃T next to ⌃D's hotlist and ⌃Q's quick view — the control layer is where this app's
+            // own popups live, and ⌘T is already New Tab.
+            shortcut: CommandShortcut(key: "t", modifiers: .control)
+        ),
+        Command(
             id: "file.rename",
             title: "Rename…",
             category: .file,
@@ -194,6 +203,12 @@ public enum CommandCatalog {
             category: .view,
             keywords: ["dotfiles", "invisible", "dot", "hide", "reveal"],
             shortcut: CommandShortcut(key: ".", modifiers: [.command, .shift])
+        ),
+        Command(
+            id: "view.toggleTags",
+            title: "Show Tags",
+            category: .view,
+            keywords: ["finder", "tags", "labels", "colors", "colours", "dots", "column"]
         ),
         Command(
             id: "view.quickLook",

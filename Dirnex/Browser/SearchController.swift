@@ -24,6 +24,12 @@ final class SearchController: NSViewController {
     private let kindPopup = NSPopUpButton()
     private let sizePopup = NSPopUpButton()
     private let datePopup = NSPopUpButton()
+    /// The tag chips (PLAN.md §M6 "Finder tags: … filter chips in search"). An `NSTokenField`
+    /// because a tag *is* a token: it rounds each name into a chip you can delete as one, which is
+    /// what the plan's word describes, and it completes against the names already in use rather
+    /// than asking the user to spell them from memory. Several tags narrow (they AND) — see
+    /// `SpotlightQuery.tags`.
+    private let tagField = NSTokenField()
     private let scopePopup = NSPopUpButton()
     private let findButton = NSButton()
 
@@ -85,6 +91,15 @@ final class SearchController: NSViewController {
     private func makeControlsGrid() -> NSView {
         configure(nameField, placeholder: "part of the file name")
         configure(contentField, placeholder: "text inside the file")
+        configure(tagField, placeholder: "Work, Red — all must match")
+        // Explicitly, through the `NSTokenField`-typed reference: `configure` takes an `NSTextField`,
+        // and assigning the delegate through that would go via the superclass's setter.
+        tagField.delegate = self
+        // Comma, the separator the field already shows between chips, so typing reads the way the
+        // result looks. Completion is immediate rather than on a delay: the list is a handful of
+        // names held in memory, so there is nothing to wait for.
+        tagField.tokenizingCharacterSet = CharacterSet(charactersIn: ",")
+        tagField.completionDelay = 0
         for (title, _) in kindOptions { kindPopup.addItem(withTitle: title) }
         for (title, _) in sizeOptions { sizePopup.addItem(withTitle: title) }
         for (title, _) in dateOptions { datePopup.addItem(withTitle: title) }
@@ -98,6 +113,7 @@ final class SearchController: NSViewController {
         let grid = NSGridView(views: [
             [label("Name contains:"), nameField],
             [label("Content contains:"), contentField],
+            [label("Tags:"), tagField],
             [label("Kind:"), kindPopup],
             [label("Size:"), sizePopup],
             [label("Modified:"), datePopup],
@@ -156,7 +172,26 @@ final class SearchController: NSViewController {
             contentContains: contentField.stringValue,
             kinds: kind.map { [$0] } ?? [],
             minSizeBytes: sizeOptions[max(0, sizePopup.indexOfSelectedItem)].bytes,
-            modifiedWithin: dateOptions[max(0, datePopup.indexOfSelectedItem)].age
+            modifiedWithin: dateOptions[max(0, datePopup.indexOfSelectedItem)].age,
+            tags: enteredTags
+        )
+    }
+
+    /// The tag names in the field — chips the user has committed **and** whatever they are still
+    /// typing.
+    ///
+    /// Read from `stringValue` rather than `objectValue` precisely to get that second half.
+    /// `objectValue` holds only tokenized chips, so a tag typed without a trailing comma would be
+    /// invisible here — which would not merely drop it from the search: with a tag as the only term,
+    /// `isEmpty` would keep the Find button **disabled**, and the user could not run the search at
+    /// all. `stringValue` reports the field live as it is typed (the same property the name/content
+    /// fields already rely on), joining committed chips with the tokenizing comma.
+    private var enteredTags: Set<String> {
+        Set(
+            tagField.stringValue
+                .components(separatedBy: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
         )
     }
 
@@ -180,10 +215,30 @@ final class SearchController: NSViewController {
     }
 }
 
-// MARK: - Live enable as the user types
+// MARK: - Live enable as the user types, and tag completion
 
-extension SearchController: NSTextFieldDelegate {
+/// `NSTokenFieldDelegate` refines `NSTextFieldDelegate`, so the one conformance serves both the
+/// plain fields' live enabling and the tag field's completion.
+extension SearchController: NSTokenFieldDelegate {
     func controlTextDidChange(_ notification: Notification) {
         updateFindEnabled()
+    }
+
+    /// Complete a half-typed chip against the tags we know about: the seven macOS ships with, plus
+    /// every name seen while browsing this session (`FinderTagProvider.knownTagNames`).
+    ///
+    /// Prefix-matched and case-insensitive, which is the system's own rule for identifying a tag —
+    /// typing `work` should offer `Work`, because to macOS they are the same tag.
+    func tokenField(
+        _ tokenField: NSTokenField,
+        completionsForSubstring substring: String,
+        indexOfToken tokenIndex: Int,
+        indexOfSelectedItem selectedIndex: UnsafeMutablePointer<Int>?
+    ) -> [Any]? {
+        let prefix = substring.trimmingCharacters(in: .whitespaces)
+        guard !prefix.isEmpty else { return [] }
+        return FinderTagProvider.shared.knownTagNames
+            .filter { $0.lowercased().hasPrefix(prefix.lowercased()) }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 }

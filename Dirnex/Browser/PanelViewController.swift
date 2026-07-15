@@ -301,6 +301,7 @@ final class PanelViewController: NSViewController {
         super.viewDidLoad()
         observeShowHiddenPreference()
         observeGitStatusChanges()
+        observeFinderTagChanges()
         activateTab()
     }
 
@@ -363,6 +364,7 @@ final class PanelViewController: NSViewController {
                 refreshTabBar()
                 startWatching(path)
                 updateGitStatus()
+                updateTagStatus()
                 persistState()
                 host?.panelDidNavigate(self)
             } catch {
@@ -405,6 +407,8 @@ final class PanelViewController: NSViewController {
             // Re-derives the repository too, so a `git init` (or a deleted `.git`) right here turns
             // the gutter on or off as it happens, rather than on the next navigation.
             updateGitStatus()
+            // Tags need no watcher of their own: this event *is* the tag change (see +Tags).
+            updateTagStatus()
         }
     }
 

@@ -40,6 +40,10 @@ final class PanelTab {
     /// `PanelViewController+Git`.
     var gitRepositoryRoot: VFSPath?
     var gitSnapshot: GitStatusSnapshot?
+    /// The Finder tags this tab's rows are painted from (PLAN.md §M6), `nil` until the first scan
+    /// lands. UI-only and session-scoped like the Git pair above: derived from the directory on
+    /// switching to the tab, never persisted. Managed by `PanelViewController+Tags`.
+    var tagSnapshot: FinderTagSnapshot?
     /// An explicit chip label overriding the path-derived one — set when a search is saved (or a
     /// saved search is re-run) so a results tab reads as its friendly name ("JMeter search")
     /// rather than the raw query (`"jmeter"`). `nil` for an ordinary tab. Session-scoped like

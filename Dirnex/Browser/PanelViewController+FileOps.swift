@@ -313,6 +313,11 @@ extension PanelViewController: NSMenuItemValidation {
         case #selector(saveCurrentSearch(_:)):
             // Only meaningful on a results pane that still carries the query behind it.
             return canSaveCurrentSearch
+        case #selector(showTagsMenu(_:)):
+            // Only local files carry tags. Gated on the *targets*, not the pane, so tagging works
+            // from a results tab (virtual pane, real local hits) — and, like ⌃D, ⌃T must reach a
+            // field editor rather than being stolen to open a popup while a name is being typed.
+            return canEditTags && !(view.window?.firstResponder is NSText)
         case #selector(undoLastOperation(_:)):
             return validateUndoItem(menuItem)
         case #selector(goToParentDirectory(_:)):
@@ -413,6 +418,12 @@ extension PanelViewController: NSMenuItemValidation {
         case #selector(toggleShowHidden(_:)):
             // "Show Hidden Files" checkmark tracks the app-wide state.
             menuItem.state = AppPreferences.shared.showHidden ? .on : .off
+            return true
+        case #selector(toggleShowTags(_:)):
+            // "Show Tags" checkmark tracks the app-wide state — the preference itself, not
+            // `isTagColumnVisible`: inside an archive the column is suppressed because there are no
+            // tags to show there, and unchecking the box would blame the user's setting for it.
+            menuItem.state = AppPreferences.shared.showTags ? .on : .off
             return true
         case #selector(toggleQuickViewPanel(_:)):
             // "Quick View Panel" checkmark tracks the window-wide Quick View state.

@@ -898,7 +898,7 @@ remain, all deferrable to M6-ish polish.
 - [x] Git awareness: branch in path bar, status column (M/A/?/ignored) via a debounced
       `git status --porcelain` provider; optional .gitignore-aware folder sizes (the one
       optional slice, still deferred)
-- [ ] Finder tags: column, edit from panel, filter chips in search
+- [x] Finder tags: column, edit from panel, filter chips in search
 - [ ] Terminal drawer: bottom pane following active panel's cwd; "cd sync back" via
       shell integration snippet; open in iTerm/Terminal/WezTerm as alternative
 - [ ] Size visualization mode: toggle panel to ncdu-style bars, computed async, cached
@@ -1169,6 +1169,95 @@ contextual-vs-always-on is the open question: unlike Git, tags aren't scoped to 
 permanently-blank column for people who don't tag would be the Git gutter's mistake in reverse),
 **editing from the panel** (a tag menu over the selection, offering the seven stock tags + the names
 already in use), and the **filter chips** in the search sheet.
+
+Progress (2026-07-15, M6 pass 4 — the Finder-tags app layer): **the box is closed, VERIFIED LIVE.**
+Four new app files, one generalized out of the Git pass, and no core change beyond two catalog
+commands — the pass-3 core was already the right shape.
+
+**The open question, answered by the user: a View toggle (`Show Tags`), defaulting on** — not the Git
+gutter's contextual rule. The rule was tempting (it is right there, tested, one line to reuse) but its
+*justification does not transfer*, which is the whole finding: a repository is a coarse, stable
+property of a whole subtree, so the gutter appears once on the way in and stays; tagged files are
+**scattered**, so the identical rule would install and remove the column — and re-truncate every
+filename, since a gutter is paid for out of Name — on nearly every step between sibling folders. A
+precedent is an argument, not a licence. The preference is still ANDed with "could these rows carry
+tags at all" (local files, and search hits, which are local files in a virtual pane): inside an
+archive or on SFTP the column could only ever be blank, which is what the preference exists to avoid.
+The checkmark tracks the *preference*, never that derived state — unchecking the box inside a zip
+would blame the user's setting for the filesystem's limits.
+- **`PanelViewController+ContextualColumns.swift`** — the Git pass's install/footprint/carve
+  machinery, lifted out and generalized, because **a second gutter would have silently broken the
+  first**: `currentColumnLayout` reclaimed `gitColumnFootprint` specifically, so with two installed it
+  would refund half of what it charged and Name would ratchet narrower on every capture — the exact
+  bug the reclaim exists to prevent, just slower. Now sums over all installed gutters. Insertion keeps
+  `Column.allCases` order among them (Name │ git │ tags │ Size │ Date) whichever arrives first, so
+  installing one never reshuffles another. `Column` gained `headerToolTip` (both gutters are too
+  narrow to title).
+- **`FinderTagProvider.swift`** — `GitStatusProvider`'s shape (off-main, LRU 8, 300 ms debounce or
+  run-now past 2 s stale, serialized per key, published by notification) for the reason the core
+  *measured*: ~10 µs per `getxattr` is ~1 s across a 100k-row directory. **What differs and why:** its
+  unit of caching is the *repository* because one `git status` answers for a whole tree; there is no
+  such command for tags, so the unit is the **directory** and the caller passes the paths. The pane
+  passes its **whole listing, not its visible rows** — two panes on one folder can have different
+  hidden/filter settings, and a scan of the narrower one would evict rows the other still shows,
+  leaving tagged files looking untagged. `knownTagNames` accumulates as you browse (there is no API
+  for "the user's tags"; the system's list is Finder's own synced plist, not a contract) and feeds
+  both the editor menu and the search completion — verified live: `Urgent`, met in one tab, was
+  offered in another. **`FinderTagSnapshot.==` is hand-rolled and must be**: `FinderTag`'s own `==`
+  compares names case-insensitively and **ignores colour** — correct for identity, wrong for "did the
+  pixels change" — so the synthesized version would answer "equal" when Finder recoloured a tag (which
+  pass 3 documented it doing *by itself*) and the column would keep painting the old dot.
+- **`PanelViewController+Tags.swift`** — per-tab snapshot, install, row lookup. **No watcher of its
+  own, unlike Git**: the Git side had to watch the *repository root* because `git add` in a terminal
+  changes what rows say while touching nothing under the visible folder; a tag has no elsewhere — it
+  is an attribute **on the file** — so the pane's existing directory watcher already fires for it.
+  Verified live (a new file appeared and rescanned with the rest).
+- **`TagCellView.swift`** — custom-drawn dots; the content *is* the colour, so it borrows neither
+  `FileCellView`'s text field nor the Git letter's `accentColor`. Two judgement calls: a **colourless
+  tag draws a hollow ring** where Finder draws nothing — Finder can afford that because its dots sit
+  beside the name, so absence reads as "no colour", whereas in a column of its own it would read
+  "untagged", a lie about a file the user did tag; and on the cursor's emphasized row every dot is
+  **ringed in the selection's text colour**, or a blue tag vanishes into blue.
+- **`PanelViewController+TagEditing.swift`** — ⌃T (free; ⌘T is New Tab, and ⌃D/⌃Q are where this app's
+  popups already live) drops a menu over the cursor row: stock seven + names in use, `.on`/`.mixed`
+  per how many targets carry each, toggle across the selection, New Tag…, Remove All Tags. Targets are
+  filtered **per entry** (`.local`), not per pane — which is what lets tagging work from a search
+  results tab, and makes a mixed selection tag what it can. **The menu offers a colour only when
+  *introducing* a name**, per pass 3's finding that colour belongs to the name system-wide: offering
+  per-file colour would be offering an edit macOS silently reverts.
+- **Search chips** — an `NSTokenField` (a tag *is* a token; it rounds each name into a deletable chip
+  and completes against `knownTagNames`). Read via **`stringValue`, not `objectValue`**: the latter
+  holds only *tokenized* chips, so a tag typed without a trailing comma would not merely be dropped
+  from the search — with a tag as the only term, `isEmpty` would leave **Find disabled** and the
+  search unrunnable. Flagged as a risk while writing, then confirmed live both ways.
+
+**BUG FOUND LIVE, and it is the Git pass's own lesson repeating:** ⌘A-then-⌃T dropped the menu at the
+*bottom* of the pane, clipped and scrolling. I had anchored on `tableView.selectedRow` — but marks are
+independent of the cursor here, so marking everything leaves the table with **no selected row**,
+`selectedRow` answers -1, and the `visibleRect` fallback resolves to the pane's lowest edge (the table
+is flipped, so `maxY` is the bottom). Fixed to anchor on the **model's** cursor, which always exists
+and is the only source that knows about the `..` row. Same root as pass 2's `reloadData` bug: *the
+table is a renderer; the model is the truth.*
+
+**VERIFIED LIVE** end-to-end, with macOS itself as the independent judge on both ends — the fixtures
+were tagged by **Apple's own writer** (`URLResourceValues.tagNames`, available on this macOS 26 box
+though not on Dirnex's 14 floor) and our writes were read back through **Apple's own getter**, which
+saw exactly what we wrote. Confirmed: every dot case (stock, multi, 3-dot cap from five, hollow ring
+for a colourless `Quokka`, nothing for untagged, white ring on the cursor row); a tag added from the
+menu landing on disk as `Green\n2` with **`kMDItemFSLabel = 2`** — the last-*coloured*-tag-wins rule
+pass 3 documented, maintained by our hand-written label; a purple `Milestone` across a 6-file marked
+set **preserving the existing `Quokka\n0` verbatim** (the exact data loss `tagNames` would have
+caused, which is why the core writes by hand); the mixed `−` state; completion offering a custom name
+learned by browsing; the chip narrowing `mdfind` to the one file carrying `Urgent`; **dots in the
+results panel and ⌃T working there**; the column vanishing inside a zip with ⌃T greyed out; the
+toggle taking both panes live; and **both gutters coexisting in the Dirnex repo itself** (Name │ `M`/`!`
+│ dots │ Size │ Date). The layout invariant was checked in the persisted store, not by eye: after
+repeated toggles and tab switches Name stayed **exactly 279.5** and no `tags` entry ever entered a
+stored layout. 588 core + 33 app tests green, swiftformat + swiftlint-strict clean. Test artifacts
+removed. Gotcha, recurring: the 4-line hookup tipped `PanelViewController.swift` to **501/500 lines**
+(`file_length`) — paid for by tightening my own comment rather than widening a `private` across a
+file split, which is the trap that costs more than it saves.
+**NEXT (M6 pass 5):** the terminal drawer, or size-visualization mode — the next two `[ ]` items.
 
 ### M7 — Release readiness (M)
 

@@ -46,6 +46,7 @@ enum MainMenuBuilder {
             .command("file.newTab"), .command("file.closeTab"), .separator,
             .command("file.copy"), .command("file.move"), .command("file.pack"),
             .command("file.syncDirectories"), .command("file.compareByContents"), .separator,
+            .command("file.tags"), .separator,
             .command("file.rename"), .command("file.multiRename"), .separator,
             .command("file.newFolder"), .separator,
             .command("file.trash"), .command("file.deletePermanently")
@@ -61,6 +62,7 @@ enum MainMenuBuilder {
         MenuSpec(title: "View", items: [
             .command("view.commandPalette"), .separator,
             .command("view.toggleSidebar"), .command("view.toggleHidden"),
+            .command("view.toggleTags"), .separator,
             .command("view.quickLook"), .command("view.quickView")
         ]),
         MenuSpec(title: "Go", items: [

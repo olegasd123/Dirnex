@@ -6,26 +6,41 @@ extension PanelViewController {
     /// in their own files can build cells and sort indicators for it.
     enum Column: String, CaseIterable {
         case name, size, date
-        /// The Git status gutter (PLAN.md §M6). Unlike the others it is *contextual*: it exists
+        /// The Git status gutter (PLAN.md §M6). Unlike name/size/date it is *contextual*: it exists
         /// only while the pane is inside a repository — see `PanelViewController+Git`.
         case git
+        /// The Finder-tags dots (PLAN.md §M6). Contextual for a different reason than `git`: it is
+        /// gated on the `showTags` preference and on the pane's rows being able to carry tags at
+        /// all — see `PanelViewController+Tags`.
+        case tags
 
         var title: String {
             switch self {
             case .name: return "Name"
             case .size: return "Size"
             case .date: return "Date Modified"
-            // One letter wide, so a header title could only ever be an ellipsis; the tooltip in
-            // `installGitColumn` names it instead.
-            case .git: return ""
+            // Both gutters are too narrow for a header title to be anything but an ellipsis, so
+            // they carry a `headerToolTip` instead.
+            case .git, .tags: return ""
             }
         }
 
-        /// Whether the column is only installed for certain directories rather than always present.
-        /// A permanently blank "Git" column in every folder that isn't a repository — which is most
-        /// of them — would be pure clutter, so this one comes and goes with the repository.
+        /// The tooltip naming a column whose header is too narrow to title, `nil` when the title
+        /// already says it.
+        var headerToolTip: String? {
+            switch self {
+            case .git: return "Git status"
+            case .tags: return "Finder tags"
+            case .name, .size, .date: return nil
+            }
+        }
+
+        /// Whether the column comes and goes rather than being a fixture the user arranges. Both
+        /// gutters are: a "Git" column in every folder that isn't a repository, or a tags column
+        /// for someone who doesn't tag, would be pure clutter. Contextual columns are never stored
+        /// in a tab's layout and are paid for out of Name — see `PanelViewController+ContextualColumns`.
         var isContextual: Bool {
-            self == .git
+            self == .git || self == .tags
         }
 
         /// The sort this column's header applies, or `nil` when it isn't sortable.
@@ -34,7 +49,7 @@ extension PanelViewController {
             case .name: return .name
             case .size: return .size
             case .date: return .modified
-            case .git: return nil
+            case .git, .tags: return nil
             }
         }
 
@@ -49,6 +64,9 @@ extension PanelViewController {
             case .date: return 150
             // Fixed: one centered letter. It is a gutter, not data — nothing to widen it for.
             case .git: return 20
+            // Three 8 pt dots and the gaps between them, plus a little breathing room — the most
+            // `TagCellView` ever draws.
+            case .tags: return 36
             }
         }
 
@@ -58,6 +76,7 @@ extension PanelViewController {
             case .size: return 60
             case .date: return 110
             case .git: return 20
+            case .tags: return 36
             }
         }
     }
@@ -111,14 +130,14 @@ extension PanelViewController {
     /// The table's live column geometry, in display order — recorded as it would be with **no**
     /// contextual column present, which is the only form a stored layout ever takes.
     ///
-    /// Two things follow from that. The gutter itself is left out: recording it would make an
-    /// otherwise identical layout differ between a repository and a plain folder, and each crossing
-    /// would rewrite the tab's stored columns for no user-visible reason. And the Name column gets
-    /// the gutter's footprint added back, because while the gutter is installed Name is physically
-    /// that much narrower (`setGitColumnInstalled` charges it there) — storing the carved width
-    /// would make Name ratchet narrower on every trip through a repository.
+    /// Two things follow from that. The gutters themselves are left out: recording one would make
+    /// an otherwise identical layout differ between a repository and a plain folder, and each
+    /// crossing would rewrite the tab's stored columns for no user-visible reason. And the Name
+    /// column gets **every installed gutter's** footprint added back, because while a gutter is
+    /// installed Name is physically that much narrower (`setContextualColumn` charges it there) —
+    /// storing the carved width would make Name ratchet narrower on every trip through a repository.
     private var currentColumnLayout: [ColumnLayout] {
-        let reclaimed = isGitColumnInstalled ? Double(gitColumnFootprint) : 0
+        let reclaimed = Double(installedContextualFootprint)
         return tableView.tableColumns.compactMap {
             guard let column = Column(rawValue: $0.identifier.rawValue), !column.isContextual else {
                 return nil
@@ -137,12 +156,13 @@ extension PanelViewController {
         isApplyingColumnLayout = true
         defer {
             isApplyingColumnLayout = false
-            // Re-attach the Git gutter for the tab being switched to, after the layout pass: it is
-            // absent from every stored layout, so the reordering below would otherwise shuffle it
+            // Re-attach the gutters for the tab being switched to, after the layout pass: they are
+            // absent from every stored layout, so the reordering below would otherwise shuffle them
             // to the far end of the table, one column at a time.
             updateGitColumn()
+            updateTagColumn()
         }
-        setGitColumnInstalled(false)
+        removeContextualColumns()
 
         var targetIndex = 0
         for item in layout {
