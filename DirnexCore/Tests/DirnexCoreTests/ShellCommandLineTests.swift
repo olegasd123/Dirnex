@@ -51,8 +51,34 @@ struct ShellCommandLineTests {
         let command = ShellCommandLine.changeDirectory(to: "/Users/me", kind: .zsh)
         // ^U kills to the line start, ^K to the end: bash's ^U alone leaves the tail of a line
         // abandoned with the cursor in the middle, which would then run with our cd appended.
-        #expect(command.hasPrefix("\u{15}\u{0B}"))
-        #expect(command == "\u{15}\u{0B} cd -- '/Users/me'\n")
+        #expect(command.hasPrefix(" \u{15}\u{0B}"))
+        #expect(command == " \u{15}\u{0B} cd -- '/Users/me'\n")
+    }
+
+    /// The kill keys must stay *ahead* of anything we type, or they would clear our own command
+    /// instead of the user's abandoned one.
+    @Test("changeDirectory puts nothing but the anti-ding space before the kill keys")
+    func changeDirectoryClearsBeforeTyping() {
+        for kind in [ShellKind.zsh, .bash, .fish, .other] {
+            let command = ShellCommandLine.changeDirectory(to: "/tmp", kind: kind)
+            let killEnd = command.firstIndex(of: "\u{0B}")
+            #expect(killEnd != nil)
+            #expect(command.prefix(upTo: killEnd ?? command.startIndex) == " \u{15}")
+        }
+    }
+
+    /// Regression: `bash` binds `^U` to readline's `unix-line-discard`, which rings the terminal
+    /// bell instead of killing when the cursor sits at column zero — every idle prompt, which is
+    /// precisely where the panel-follow `cd` is typed. SwiftTerm turns that BEL into
+    /// `NSSound.beep()`, so every pane switch beeped like a rejected shortcut. The space gives
+    /// readline something to kill; without it this sequence is audible.
+    @Test("changeDirectory never opens with a bare ^U, which makes bash ding at an empty prompt")
+    func changeDirectoryDoesNotDingBash() {
+        for kind in [ShellKind.zsh, .bash, .fish, .other] {
+            let command = ShellCommandLine.changeDirectory(to: "/tmp", kind: kind)
+            #expect(!command.hasPrefix("\u{15}"))
+            #expect(command.hasPrefix(" \u{15}"))
+        }
     }
 
     @Test("changeDirectory offers history the leading space and ends the line")
@@ -72,7 +98,7 @@ struct ShellCommandLineTests {
     @Test("fish gets a plain cd, whose -- handling is not the shell's to promise")
     func fishOmitsOptionTerminator() {
         let command = ShellCommandLine.changeDirectory(to: "/tmp", kind: .fish)
-        #expect(command == "\u{15}\u{0B} cd '/tmp'\n")
+        #expect(command == " \u{15}\u{0B} cd '/tmp'\n")
         #expect(!command.contains("--"))
     }
 

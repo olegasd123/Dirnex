@@ -49,6 +49,15 @@ public enum ShellCommandLine {
     ///   of it would watch us run `rm -rf / cd -- '/x'`. `^U` kills to the start of the line and
     ///   `^K` to the end; either alone is enough in `zsh`, but `bash`'s `^U` only kills *backwards*
     ///   from the cursor, so a line abandoned with the cursor in the middle needs both.
+    /// - **The space in front of `^U` is what keeps the drawer quiet**, and it is load-bearing for
+    ///   `bash` alone. Readline binds `^U` to `unix-line-discard`, which *rings the bell* rather
+    ///   than killing when the cursor is already at column zero — which is every idle prompt, i.e.
+    ///   exactly the state the panel-follow `cd` is typed into. SwiftTerm renders that BEL as
+    ///   `NSSound.beep()`, so browsing with the drawer open beeped on every pane switch, sounding
+    ///   for all the world like a rejected keyboard shortcut. A character in front of `^U` means
+    ///   there is always something to kill, so readline kills instead of dinging — and the space
+    ///   goes with it. (`zsh` binds `^U` to `kill-whole-line`, which never dings; the beep only
+    ///   ever sounded for `bash` users. Verified in a pty against both shells.)
     /// - **The leading space** asks the shell to keep our synthetic command out of the user's
     ///   history (`HIST_IGNORE_SPACE` in zsh, `HISTCONTROL=ignorespace` in bash). Neither is on by
     ///   default, so this is a courtesy that lands for the people who opted in, not a guarantee.
@@ -66,6 +75,7 @@ public enum ShellCommandLine {
         return "\(clearLine) \(command)\n"
     }
 
-    /// `^U` (kill to line start) followed by `^K` (kill to line end).
-    private static let clearLine = "\u{15}\u{0B}"
+    /// A space — so `bash`'s `^U` always has something to kill and never dings — then `^U` (kill to
+    /// line start) and `^K` (kill to line end).
+    private static let clearLine = " \u{15}\u{0B}"
 }

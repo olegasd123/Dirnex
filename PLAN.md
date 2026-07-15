@@ -1540,6 +1540,27 @@ FOLLOW-UP (user, same day): the prompt sat flush against the drawer's left borde
 column zero against its own bounds and has **no padding API**, so the view is inset 6 pt and the
 container paints the strip — asking the *terminal* for `nativeBackgroundColor` rather than copying a
 colour, since that background moves twice (Dark Mode via `textBackgroundColor`, and OSC 11).
+FOLLOW-UP (user, same day): **the drawer beeped on every pane switch** — "like pressing a
+non-existent shortcut", which is exactly what it was: `NSSound.beep()`, reached the long way round.
+`ShellCommandLine`'s `^U^K` opens the follow-`cd`, and **`bash` binds `^U` to readline's
+`unix-line-discard`, which *rings the bell* instead of killing when the cursor is at column zero** —
+i.e. at every idle prompt, which is the only state we ever type into. The BEL reaches SwiftTerm,
+whose `bell` delegate is `NSSound.beep()`. Fixed by **prefixing one space**, so `^U` always has
+something to kill; the space dies with the line. Probed in a real pty before and after, across
+`bash`/`zsh` × emacs/vi × empty/half-typed, driving the **actual bytes the shipping code emits**:
+the whole matrix has exactly one BEL, `bash` + bare `^U` + empty prompt, and it is gone. **The two
+obvious "cleaner" fixes are both wrong, and the pty said so.** `^A^K` (the idiomatic clear-line)
+is a **security regression**: in `bash` *vi* mode neither `^A` nor `^K` is bound, so both insert
+**literally**, nothing is cleared, and a half-typed `echo CANARY` **executed** with our `cd` appended
+— precisely the `rm -rf /` hazard the sequence exists to prevent. `^U` alone leaves the tail of a
+line abandoned mid-cursor. Only `^U` is bound in vi-insert, so the fix had to keep it. **Pre-existing
+and NOT fixed** (separate from the beep, and invisible to a user in emacs mode): in vi-insert `^K`
+inserts literally, so the `cd` never lands and the shell prints `bash: \x0b: command not found` —
+today's `^U^K` is equally broken there. +2 tests → **634 core**; the exact-sequence expectations in
+`ShellCommandLineTests`/`ShellWorkingDirectoryTests` pin the space, one of them explicitly as the
+beep regression. LESSON, the same one as the sliver: **pass 8's live verification watched the `cd`
+appear and never noticed the sound**; a screenshot cannot hear, and the drawer is the one surface
+that talks back in audio.
 **NEXT (M6 pass 9):** size-visualization mode (ncdu-style bars, async, cached) — the next `[ ]`
 item; then Share sheet / "Open With" / Services, and the automation slice that M6's exit criteria
 name ("a user-defined convert-to-webp script runs from the palette").
