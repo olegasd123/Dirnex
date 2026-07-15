@@ -61,6 +61,20 @@ public enum FinderTagColor: Int, Sendable, Hashable, CaseIterable, Codable {
     public var systemTagName: String? {
         self == .none ? nil : title
     }
+
+    /// The seven colours in the order Finder *shows* them — which is emphatically not `allCases`.
+    ///
+    /// `allCases` runs in raw-value order, i.e. Apple's storage indices (Grey 1 … Orange 7), and
+    /// that ordering is meaningless to look at: it opens on Grey and buries Red at the end. This is
+    /// the order the `FavoriteTagNames` list in `com.apple.finder` carries, and the one the sidebar
+    /// and any tag menu should list — it is a rainbow, so it reads as one, and it is what a user's
+    /// muscle memory is already trained on.
+    ///
+    /// `.none` is deliberately absent: it is a real stored *value* (a custom tag that has no
+    /// colour), never a colour anyone picks from a list of colours.
+    public static let displayOrder: [FinderTagColor] = [
+        .red, .orange, .yellow, .green, .blue, .purple, .grey
+    ]
 }
 
 // MARK: - Tag
@@ -91,6 +105,15 @@ public struct FinderTag: Sendable, Hashable, Codable {
     public init(name: String, color: FinderTagColor = .none) {
         self.name = name
         self.color = color
+    }
+
+    /// The seven tags macOS ships with, in Finder's display order (`FinderTagColor.displayOrder`).
+    ///
+    /// These are the only tags that exist without anyone having made them, which is what makes them
+    /// the right thing to *offer* — in the sidebar's Tags section, or the ⌃T menu — before a single
+    /// file has been scanned. Everything past these seven has to be discovered by looking at files.
+    public static let systemTags: [FinderTag] = FinderTagColor.displayOrder.compactMap { color in
+        color.systemTagName.map { FinderTag(name: $0, color: color) }
     }
 
     // Name-as-identity, case-insensitive: the colour is deliberately excluded. Two tags spelled

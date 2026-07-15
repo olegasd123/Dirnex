@@ -13,6 +13,10 @@ protocol SidebarViewControllerDelegate: AnyObject {
     func sidebar(_ sidebar: SidebarViewController, didActivateServer server: ServerConnection)
     /// A saved-server's "Edit…" was chosen — re-open the connect prompt prefilled from it.
     func sidebar(_ sidebar: SidebarViewController, didEditServer server: ServerConnection)
+    /// A tag row was picked — search for the files carrying it and show the hits in a virtual
+    /// results panel (PLAN.md §M6 "Finder tags: … filter chips in search"), like Finder's own
+    /// sidebar tags.
+    func sidebar(_ sidebar: SidebarViewController, didActivateTag tag: FinderTag)
     /// A click landed on the sidebar's empty space or a non-selectable header. Keep keyboard
     /// focus on the active file pane rather than letting the source list steal it — the pane's
     /// file commands (F5/F6/F8) are dispatched through the responder chain and go dead the moment
@@ -39,6 +43,9 @@ final class SidebarViewController: NSViewController {
         case volume(MountedVolume)
         case savedSearch(SavedSearch)
         case server(ServerConnection)
+        case tag(FinderTag)
+        /// The "All Tags…" row: reveals the tags found by browsing, past the stock seven.
+        case allTags
 
         var isHeader: Bool {
             if case .header = self { return true }
@@ -46,11 +53,12 @@ final class SidebarViewController: NSViewController {
         }
 
         /// The path a click navigates to, when the row is a real location. `nil` for headers, saved
-        /// searches, and servers — a saved search runs a query and a server connects/mounts, so each
-        /// is dispatched through its own delegate call instead of pointing at a directory.
+        /// searches, servers, and tags — a saved search runs a query, a server connects/mounts, and
+        /// a tag searches, so each is dispatched through its own delegate call instead of pointing
+        /// at a directory.
         var path: VFSPath? {
             switch self {
-            case .header, .savedSearch, .server: return nil
+            case .header, .savedSearch, .server, .tag, .allTags: return nil
             case let .place(place): return place.path
             case let .volume(volume): return volume.path
             }
@@ -65,9 +73,24 @@ final class SidebarViewController: NSViewController {
             if case let .server(connection) = self { return connection }
             return nil
         }
+
+        var tag: FinderTag? {
+            if case let .tag(tag) = self { return tag }
+            return nil
+        }
     }
 
     weak var delegate: SidebarViewControllerDelegate?
+
+    /// Whether the Tags section is listing every tag it knows of, or just the stock seven. Off until
+    /// "All Tags…" is clicked; per window, and deliberately not persisted — it is a disclosure, not
+    /// a setting. Stored here because a Swift extension cannot hold state, and the section itself
+    /// lives in `SidebarViewController+Tags`.
+    var showsAllTags = false
+    /// The tag names the Tags section was last built from, so a scan that discovers nothing new
+    /// doesn't rebuild the sidebar. Tags are re-scanned on every directory change, so this is the
+    /// difference between rebuilding on a real change and rebuilding constantly.
+    var renderedTagNames: Set<String> = []
 
     // A focus-preserving subclass: empty-space / header clicks don't steal keyboard focus from
     // the active file pane (which would disable the responder-chain file commands). `tableView` and
@@ -133,6 +156,7 @@ final class SidebarViewController: NSViewController {
         observeSavedSearchChanges()
         observeServerConnectionChanges()
         observeServerConnectionActivity()
+        observeTagChanges()
         rebuild()
     }
 
@@ -145,7 +169,8 @@ final class SidebarViewController: NSViewController {
 
     /// Re-enumerate favorites and volumes and reload, keeping the visual selection on the
     /// same path if that row still exists (a drive unmounting shouldn't jump the highlight).
-    private func rebuild() {
+    /// `internal` so the Tags extension can rebuild after "All Tags…" expands the section.
+    func rebuild() {
         let selectedPath = selectedRow()?.path
 
         var rows: [Row] = []
@@ -172,6 +197,8 @@ final class SidebarViewController: NSViewController {
             rows.append(.header("Servers"))
             rows.append(contentsOf: servers.map(Row.server))
         }
+        // Tags close the sidebar, where Finder puts them, and only when View ▸ Show Tags is on.
+        rows.append(contentsOf: tagRows())
         self.rows = rows
         tableView.reloadData()
 
@@ -263,6 +290,10 @@ final class SidebarViewController: NSViewController {
             delegate?.sidebar(self, didActivateSavedSearch: savedSearch)
         } else if let server = rows[index].server {
             delegate?.sidebar(self, didActivateServer: server)
+        } else if let tag = rows[index].tag {
+            delegate?.sidebar(self, didActivateTag: tag)
+        } else if case .allTags = rows[index] {
+            expandAllTags()
         } else if let path = rows[index].path {
             delegate?.sidebar(self, didActivate: path)
         }
@@ -340,6 +371,10 @@ extension SidebarViewController: NSTableViewDelegate {
             cell.onEject = nil
             cell.onDelete = { [weak self] in self?.confirmRemoveServer(named: connection.name) }
             return cell
+        case let .tag(tag):
+            return tagCell(for: tag)
+        case .allTags:
+            return allTagsCell()
         }
     }
 

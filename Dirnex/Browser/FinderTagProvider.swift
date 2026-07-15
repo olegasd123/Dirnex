@@ -53,17 +53,43 @@ final class FinderTagProvider {
     private var running: Set<VFSPath> = []
     private var repeatRequested: Set<VFSPath> = []
 
-    /// Every tag name seen this session, plus the seven macOS ships with. The tag editor offers
-    /// these and the search sheet completes against them.
+    /// Every tag seen this session, plus the seven macOS ships with, keyed by the lowercased name —
+    /// the case-folded identity the system itself uses. The tag editor offers these, the sidebar's
+    /// Tags section lists them, and the search sheet completes against them.
     ///
     /// There is no public API for "the user's tags": the system's own list lives in a synced
-    /// preferences plist that is Finder's business, not a contract. So this accumulates names as
+    /// preferences plist that is Finder's business, not a contract. So this accumulates tags as
     /// directories are scanned, which is honest about what it knows — it grows as the user browses
     /// rather than pretending to be authoritative, and the stock seven are always offered because
     /// they always exist.
-    private(set) var knownTagNames: Set<String> = Set(
-        FinderTagColor.allCases.compactMap(\.systemTagName)
+    ///
+    /// **Keyed by name, holding a colour** — because that is the shape of the truth the core
+    /// established: a colour belongs to the *name*, system-wide, not to the file, and Finder keeps
+    /// exactly such a name → colour database of its own. A file's stored copy is evidence about the
+    /// name, which is why the latest sighting wins.
+    private var known: [String: FinderTag] = Dictionary(
+        uniqueKeysWithValues: FinderTag.systemTags.map { ($0.name.lowercased(), $0) }
     )
+
+    /// The stock names, case-folded. A file carrying a malformed `Red` (no colour — a shape the core
+    /// found real files in the wild carry) must not repaint the sidebar's Red as colourless, so the
+    /// seven are seeded once and never overwritten by a sighting.
+    private static let stockNames = Set(FinderTag.systemTags.map { $0.name.lowercased() })
+
+    /// Every known tag with its colour: the stock seven in Finder's order, then the custom ones
+    /// sorted by name. This is what a list of tags should show.
+    var knownTags: [FinderTag] {
+        let custom = known.values
+            .filter { !Self.stockNames.contains($0.name.lowercased()) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return FinderTag.systemTags + custom
+    }
+
+    /// Just the names, in the spelling they were seen in — for the search sheet's chip completion,
+    /// which matches by name because names are all Spotlight indexes.
+    var knownTagNames: Set<String> {
+        Set(known.values.map(\.name))
+    }
 
     // MARK: - Snapshots
 
@@ -120,9 +146,7 @@ final class FinderTagProvider {
         running.remove(directory)
 
         store(snapshot, for: directory)
-        for tags in snapshot.tagsByPath.values {
-            knownTagNames.formUnion(tags.map(\.name))
-        }
+        record(snapshot)
         NotificationCenter.default.post(
             name: Self.didChangeNotification,
             object: self,
@@ -130,6 +154,20 @@ final class FinderTagProvider {
         )
         if repeatRequested.remove(directory) != nil {
             requestRefresh(for: directory, entries: requested[directory] ?? entries)
+        }
+    }
+
+    /// Learn the tags a scan turned up. Only tagged files appear in a snapshot, so this is cheap
+    /// even after a scan of a hundred thousand rows.
+    ///
+    /// Unlike the snapshots, this is **never evicted**: a tag's existence is a fact about the user,
+    /// not about a directory, and forgetting `Zebra` because they browsed nine folders since would
+    /// make the tag list flicker in and out. It is bounded by how many tags one person has.
+    private func record(_ snapshot: FinderTagSnapshot) {
+        for tags in snapshot.tagsByPath.values {
+            for tag in tags where !Self.stockNames.contains(tag.name.lowercased()) {
+                known[tag.name.lowercased()] = tag
+            }
         }
     }
 

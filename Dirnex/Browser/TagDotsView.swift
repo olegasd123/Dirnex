@@ -15,7 +15,7 @@ import DirnexCore
 ///   peeks out from behind it to the right, showing only a crescent. So `[Red, Blue]` reads as a
 ///   whole blue dot with a red sliver on its right. It is the same precedence the core found in the
 ///   legacy label byte, where the *last* coloured tag wins — the newest tag is the one macOS shows.
-/// - **They overlap by roughly two thirds**, so four tags cost barely more room than two.
+/// - **They overlap**, so four tags cost far less room than four separate dots would.
 final class TagDotsView: NSView {
     /// The row's tags, in stored order. Setting them resizes and redraws.
     var tags: [FinderTag] = [] {
@@ -32,10 +32,10 @@ final class TagDotsView: NSView {
     }
 
     private let dotDiameter: CGFloat = 9
-    /// How far each dot behind the front one peeks out. About a third of the diameter, matching
-    /// Finder: enough to read the colour, little enough that a heavily tagged file stays a cluster
-    /// rather than a row of beads pushing the filename out of its own column.
-    private let dotStep: CGFloat = 3.5
+    /// How far each dot behind the front one peeks out. A little over half the diameter: enough to
+    /// read the colour comfortably, little enough that a heavily tagged file stays a cluster rather
+    /// than a row of beads pushing the filename out of its own column.
+    private let dotStep: CGFloat = 5.5
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -134,10 +134,11 @@ enum TagDotStyle {
     /// without competing with the tags that chose a colour.
     static let colorlessStroke: NSColor = .tertiaryLabelColor
 
-    /// A dot as a menu-item image, for the tag editor's items. Same look as the name cell's, so a
-    /// colour reads identically in both places.
-    static func menuImage(for color: FinderTagColor) -> NSImage {
-        let size = NSSize(width: 10, height: 10)
+    /// A dot as a standalone image, for the tag editor's menu items and the sidebar's Tags rows.
+    /// Same look as the name cell's, so a colour reads identically everywhere it appears; the
+    /// sidebar asks for a larger one because its rows are taller than a menu's.
+    static func menuImage(for color: FinderTagColor, diameter: CGFloat = 10) -> NSImage {
+        let size = NSSize(width: diameter, height: diameter)
         return NSImage(size: size, flipped: false) { rect in
             let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5))
             circle.lineWidth = 1

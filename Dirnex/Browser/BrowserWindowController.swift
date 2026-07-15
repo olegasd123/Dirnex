@@ -429,6 +429,14 @@ extension BrowserWindowController: SidebarViewControllerDelegate {
         (activePanel ?? leftPanel).connect(to: server)
     }
 
+    /// A tag row searches for the files carrying it and shows them in the active pane, the way a
+    /// saved search does — a tag is a query, not a place.
+    func sidebar(_ sidebar: SidebarViewController, didActivateTag tag: FinderTag) {
+        let target = activePanel ?? leftPanel
+        target.runTagSearch(tag)
+        target.focusTable()
+    }
+
     /// "Edit…" on a saved server re-opens the connect prompt prefilled from it, in the active pane.
     func sidebar(_ sidebar: SidebarViewController, didEditServer server: ServerConnection) {
         (activePanel ?? leftPanel).editServer(server)

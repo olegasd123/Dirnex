@@ -49,6 +49,19 @@ extension PanelViewController {
         performSearch(savedSearch.query, scope: savedSearch.scope, title: savedSearch.name)
     }
 
+    /// Find every file carrying `tag`, from the sidebar's Tags section (PLAN.md §M6 "Finder tags:
+    /// … filter chips in search").
+    ///
+    /// Searches **everywhere**, like Finder's sidebar tags and unlike ⌥F7's "This Folder" — a tag is
+    /// a thing you put on files so you can find them again wherever you left them, so scoping it to
+    /// whatever folder happens to be open would defeat the point of having tagged them.
+    ///
+    /// Matched by name only, because a name is all Spotlight indexes (`SpotlightQuery.tags`) — which
+    /// costs nothing here, since a tag *is* its name to macOS and the colour is only how it is drawn.
+    func runTagSearch(_ tag: FinderTag) {
+        performSearch(SpotlightQuery(tags: [tag.name]), scope: nil, title: tag.name)
+    }
+
     /// Run `query` within `scope` (its subtree), or everywhere when `scope` is `nil`, off the
     /// main thread, then install the hits as a virtual results tab. `title`, when given, is the
     /// tab's chip label (a saved search's name); a fresh ⌥F7 search leaves it `nil` and the chip

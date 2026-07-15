@@ -1315,6 +1315,50 @@ right-click outside it collapsing to the clicked row with **every red mark clear
 app tests, swiftformat + swiftlint-strict clean, artifacts removed.
 **NEXT (M6 pass 6):** the terminal drawer, or size-visualization mode — the next two `[ ]` items.
 
+Progress (2026-07-15, M6 pass 6 — the sidebar's Tags section): user asked for Finder's Tags list in
+the sidebar, gated on View ▸ Show Tags. VERIFIED LIVE. The Finder-tags box was already `[x]`; this is
+a follow-on that needed **no new panel code at all** — a tag row is a *search*, not a place, so a
+click runs `SpotlightQuery(tags:)` through the same `performSearch` a saved search uses and lands a
+results tab titled with the tag. Sections now read Searches / Favorites / Volumes / Servers / **Tags**
+(last, where Finder puts it). New `SidebarViewController+Tags.swift`, mirroring the `+Searches` /
+`+Servers` split — the main file was 453 lines against the 500 limit, so only the `Row` cases and the
+two stored properties an extension cannot hold (`showsAllTags`, `renderedTagNames`) landed there, and
+`rebuild()` had to widen to internal (Swift `private` doesn't cross files — the recurring gotcha).
+- **`FinderTagColor.displayOrder` (core, +2 tests → 590).** The section needed the order Finder
+  *shows* (Red, Orange, Yellow, Green, Blue, Purple, Grey); `allCases` is raw-value order, which is
+  Apple's storage indices — it opens on Grey and buries Red. The core had already documented the
+  distinction in prose and an existing test even spelled the display order out as a **local literal**
+  to assert the indices aren't it; that literal is now the property, so the test pins the real thing.
+  `FinderTag.systemTags` (the stock seven, in that order) is the list both the sidebar and ⌃T offer.
+- **The ⌃T menu was listing them Grey-first**, while its own comment claimed "that is the order Finder
+  lists them" — false since pass 4, and invisible because nobody reads a menu's order as a bug. Now
+  shares `FinderTag.systemTags`, so the comment is true and the two surfaces agree.
+- **The provider learns *colours*, not just names.** `knownTagNames: Set<String>` became a private
+  `[String: FinderTag]` keyed by the lowercased name — which is the shape of the truth the core
+  established (a colour belongs to the *name*, system-wide; Finder keeps exactly such a database), so
+  the latest sighting wins. Without it every custom tag in the sidebar would draw as a hollow ring;
+  with it, live, `Zebra` came out purple. `knownTagNames` survives as a computed property (the search
+  sheet's chip completion still wants names), and the stock seven are seeded and **never overwritten**
+  by a sighting — a file carrying a malformed colourless `Red` (a shape the core found in the wild)
+  must not repaint the sidebar's Red.
+- **"All Tags…" appears only when there is something behind it.** Finder can always offer it because
+  it knows every tag you own; we know the ones we have *seen* (no public API — the system's list is
+  Finder's synced plist, and the core deliberately doesn't read it), so an unconditional row would do
+  nothing when clicked on a fresh launch. Expansion is one-way: the row it replaces is the only thing
+  that would collapse it, and nobody who asked to see their tags wants to hide them again.
+- **Rebuild only on a real change.** The scan notification fires for every directory change in either
+  pane on every tab, and almost none discover a new tag; rebuilding regardless would drop the
+  sidebar's selection constantly. Same "is this real?" gate the server-activity observer applies.
+
+**VERIFIED LIVE** (fixtures: real `xattr`-written tags in `~/Documents`, an indexed location — `/tmp`
+is not indexed, so `mdfind` finds nothing there): the section renders as a pixel match for Finder's;
+no "All Tags…" while only stock tags were known (home held `Green, Purple` — both stock, correctly not
+custom); browsing to the fixtures made "All Tags…" appear with no relaunch; expanding showed `Zebra`
+**purple**; clicking Red opened a "Red" results tab with the 3 fixtures **plus a Red file elsewhere on
+the machine** (proving it searches everywhere, like Finder's sidebar tags, not the open folder);
+unchecking View ▸ Show Tags removed the section, re-checking restored it. 590 core + 33 app tests,
+swiftformat + swiftlint-strict clean, fixtures removed.
+
 ### M7 — Release readiness (M)
 
 - [ ] Sparkle 2 updates + appcast infrastructure; notarized DMG pipeline in CI

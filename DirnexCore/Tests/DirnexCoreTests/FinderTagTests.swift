@@ -25,8 +25,21 @@ struct FinderTagColorTests {
     /// enumeration than the real thing does.
     @Test("indices are not Finder's display order")
     func notDisplayOrder() {
-        let displayOrder: [FinderTagColor] = [.red, .orange, .yellow, .green, .blue, .purple, .grey]
-        #expect(displayOrder.map(\.rawValue) != Array(1...7))
+        #expect(FinderTagColor.displayOrder.map(\.rawValue) != Array(1...7))
+    }
+
+    /// The order itself, pinned: it is what the sidebar and the tag menu list, and the whole reason
+    /// it exists is that reaching for `allCases` instead is both easy and wrong.
+    @Test("display order is Finder's rainbow, and covers every colour exactly once")
+    func displayOrder() {
+        #expect(
+            FinderTagColor.displayOrder == [.red, .orange, .yellow, .green, .blue, .purple, .grey]
+        )
+        // Every real colour, none twice, and never `.none` — which is a stored value, not a choice.
+        #expect(Set(FinderTagColor.displayOrder).count == FinderTagColor.displayOrder.count)
+        #expect(
+            Set(FinderTagColor.displayOrder) == Set(FinderTagColor.allCases).subtracting([.none])
+        )
     }
 
     @Test("every colour but none names a stock system tag")
@@ -42,6 +55,21 @@ struct FinderTagColorTests {
 
 @Suite("FinderTag")
 struct FinderTagTests {
+    // MARK: - The stock tags
+
+    @Test("the stock tags are the seven system ones, in Finder's order, each in its own colour")
+    func systemTags() {
+        #expect(FinderTag.systemTags.map(\.name) == [
+            "Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Grey"
+        ])
+        #expect(FinderTag.systemTags.map(\.color) == FinderTagColor.displayOrder)
+        // Each carries the colour it is named after — the property that lets the sidebar draw a
+        // swatch from the tag alone.
+        for tag in FinderTag.systemTags {
+            #expect(tag.color.systemTagName == tag.name)
+        }
+    }
+
     // MARK: - Identity
 
     /// macOS folds case to identify a tag while storing the user's spelling: writing `red` stores

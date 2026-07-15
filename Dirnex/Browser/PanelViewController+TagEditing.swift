@@ -120,24 +120,20 @@ extension PanelViewController {
         return counts
     }
 
-    /// What the menu lists: the stock seven, plus every name seen this session, plus whatever the
-    /// targets carry. In stock order first (that is the order Finder lists them, and muscle memory
-    /// is worth more here than alphabetical), then the custom names sorted.
+    /// What the menu lists: the stock seven, plus every tag seen this session, plus whatever the
+    /// targets carry. In stock order first — Finder's rainbow, since muscle memory is worth more
+    /// here than alphabetical — then the custom names sorted. The same list, in the same order, that
+    /// the sidebar's Tags section shows.
     ///
-    /// A tag's colour comes from the targets' own copy when they have one, so a custom purple
-    /// `Zebra` shows purple; a name known only by sight this session falls back to colourless.
+    /// A tag's colour comes from the targets' own copy when they have one, else from what the
+    /// provider learned by scanning; a name it has somehow never seen falls back to colourless.
     private func offeredTags(including current: [FinderTag: Int]) -> [FinderTag] {
-        let stock = FinderTagColor.allCases.compactMap { color in
-            color.systemTagName.map { FinderTag(name: $0, color: color) }
-        }
-        var seen = Set(stock)
-        let custom = (
-            FinderTagProvider.shared.knownTagNames.map { FinderTag(name: $0) } + current.keys
-        )
-        .filter { seen.insert($0).inserted }
-        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        // Prefer the spelling and colour the files themselves carry over the bare name.
-        return (stock + custom).map { tag in
+        var seen = Set(FinderTag.systemTags)
+        let custom = (FinderTagProvider.shared.knownTags + current.keys)
+            .filter { seen.insert($0).inserted }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        // Prefer the spelling and colour the files themselves carry over the learned one.
+        return (FinderTag.systemTags + custom).map { tag in
             current.keys.first { $0 == tag } ?? tag
         }
     }
