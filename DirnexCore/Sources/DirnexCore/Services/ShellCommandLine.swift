@@ -43,21 +43,37 @@ public enum ShellCommandLine {
     ///
     /// Three deliberate pieces sit in front of the command:
     ///
-    /// - **`^U^K` clears whatever is already typed, and is a safety measure, not tidiness.** The
-    ///   line editor may hold a half-typed command; appending `cd …` to it and pressing Return
-    ///   would execute *their* words plus ours. Someone who had typed `rm -rf /` and thought better
-    ///   of it would watch us run `rm -rf / cd -- '/x'`. `^U` kills to the start of the line and
-    ///   `^K` to the end; either alone is enough in `zsh`, but `bash`'s `^U` only kills *backwards*
-    ///   from the cursor, so a line abandoned with the cursor in the middle needs both.
-    /// - **The space in front of `^U` is what keeps the drawer quiet**, and it is load-bearing for
-    ///   `bash` alone. Readline binds `^U` to `unix-line-discard`, which *rings the bell* rather
-    ///   than killing when the cursor is already at column zero — which is every idle prompt, i.e.
-    ///   exactly the state the panel-follow `cd` is typed into. SwiftTerm renders that BEL as
-    ///   `NSSound.beep()`, so browsing with the drawer open beeped on every pane switch, sounding
-    ///   for all the world like a rejected keyboard shortcut. A character in front of `^U` means
-    ///   there is always something to kill, so readline kills instead of dinging — and the space
-    ///   goes with it. (`zsh` binds `^U` to `kill-whole-line`, which never dings; the beep only
-    ///   ever sounded for `bash` users. Verified in a pty against both shells.)
+    /// - **`^C` clears whatever is already typed, and is a safety measure, not tidiness.** The line
+    ///   editor may hold a half-typed command; appending `cd …` to it and pressing Return would
+    ///   execute *their* words plus ours. Someone who had typed `rm -rf /` and thought better of it
+    ///   would watch us run `rm -rf / cd -- '/x'`.
+    /// - **`^C` is the only thing that can clear it, because it is not a keystroke.** Every
+    ///   line-editor key we might use is a bet on the user's keymap, and the bet loses: `^K`, `^A`
+    ///   and `^E` are all `self-insert` in *both* `bash`'s `vi-insert` and `zsh`'s `viins` (dumped
+    ///   from the real shells), so they type themselves into the line rather than editing it — a
+    ///   `^K` left `bash` reporting `$'\v': command not found` and the `cd` never landed. `^U` is
+    ///   no better: `bash` binds it to `unix-line-discard`, but `zsh`'s `viins` binds it to
+    ///   `vi-kill-line`, which kills back only to *wherever insert mode was entered* — so a user
+    ///   who typed a command, pressed `ESC` and then `A` to append has an insert point at the end
+    ///   of their line, `^U` kills nothing, and their abandoned words **execute** with our `cd`
+    ///   glued on. There is no forward-kill bound in either shell's vi keymap to fall back to.
+    ///   `^C` sidesteps the whole question: it is `VINTR`, handled by the *terminal line
+    ///   discipline* below the editor, so the keymap is irrelevant — and every shell answers
+    ///   `SIGINT` at a prompt by abandoning the line and starting a fresh one **in insert mode**,
+    ///   which is exactly the state a plain-text `cd` needs. Nothing else covers a user idling in
+    ///   vi *command* mode, where `cd -- '/x'` is read as editor commands, not text. Verified in a
+    ///   pty across `bash`/`zsh` × emacs/vi × five prompt states: `^C` is the only sequence clean
+    ///   in all of them, and it never dings (so no space is needed to stop `bash`'s `^U` ringing
+    ///   the bell at column zero — there is no `^U` left to ring it).
+    /// - **It costs one prompt line per move, and that is the deliberate trade.** `SIGINT` makes
+    ///   the shell redraw its prompt, so a followed `cd` leaves the abandoned prompt above it
+    ///   rather than typing on it. Correctness for vi users — whose drawer otherwise never follows
+    ///   at all — is worth more than a tidy scrollback, and the cost only lands on *real* moves:
+    ///   `ShellWorkingDirectory.command(toFollow:)` emits nothing when the shell is already there.
+    /// - **The `SIGINT` can only ever reach the shell**, never a running command, because
+    ///   `TerminalDrawerViewController` writes only when `ShellWorkingDirectory.isAtPrompt` says
+    ///   the shell *is* the terminal's foreground process group. That gate already existed to keep
+    ///   us from typing into somebody's `vim`; it is what makes sending a signal safe.
     /// - **The leading space** asks the shell to keep our synthetic command out of the user's
     ///   history (`HIST_IGNORE_SPACE` in zsh, `HISTCONTROL=ignorespace` in bash). Neither is on by
     ///   default, so this is a courtesy that lands for the people who opted in, not a guarantee.
@@ -75,7 +91,7 @@ public enum ShellCommandLine {
         return "\(clearLine) \(command)\n"
     }
 
-    /// A space — so `bash`'s `^U` always has something to kill and never dings — then `^U` (kill to
-    /// line start) and `^K` (kill to line end).
-    private static let clearLine = " \u{15}\u{0B}"
+    /// `^C` — `VINTR`, which the terminal's line discipline turns into `SIGINT` before the shell's
+    /// line editor ever sees a byte, so it abandons the line whatever keymap the user is in.
+    private static let clearLine = "\u{03}"
 }

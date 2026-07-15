@@ -49,35 +49,55 @@ struct ShellCommandLineTests {
     @Test("changeDirectory clears the line first, so a half-typed command cannot be executed")
     func changeDirectoryClearsTypedText() {
         let command = ShellCommandLine.changeDirectory(to: "/Users/me", kind: .zsh)
-        // ^U kills to the line start, ^K to the end: bash's ^U alone leaves the tail of a line
-        // abandoned with the cursor in the middle, which would then run with our cd appended.
-        #expect(command.hasPrefix(" \u{15}\u{0B}"))
-        #expect(command == " \u{15}\u{0B} cd -- '/Users/me'\n")
+        // ^C is SIGINT by way of the terminal's line discipline, so the shell abandons the line
+        // whatever its editor had in it.
+        #expect(command.hasPrefix("\u{03}"))
+        #expect(command == "\u{03} cd -- '/Users/me'\n")
     }
 
-    /// The kill keys must stay *ahead* of anything we type, or they would clear our own command
+    /// The clear must stay *ahead* of anything we type, or it would discard our own command
     /// instead of the user's abandoned one.
-    @Test("changeDirectory puts nothing but the anti-ding space before the kill keys")
+    @Test("changeDirectory puts nothing at all before the clear")
     func changeDirectoryClearsBeforeTyping() {
         for kind in [ShellKind.zsh, .bash, .fish, .other] {
             let command = ShellCommandLine.changeDirectory(to: "/tmp", kind: kind)
-            let killEnd = command.firstIndex(of: "\u{0B}")
-            #expect(killEnd != nil)
-            #expect(command.prefix(upTo: killEnd ?? command.startIndex) == " \u{15}")
+            #expect(command.first == "\u{03}")
+            #expect(command.filter { $0 == "\u{03}" }.count == 1)
+        }
+    }
+
+    /// Regression, the reason this is `^C` and not the idiomatic clear-line keys: **a keystroke is
+    /// a bet on the user's keymap, and in vi mode the bet loses.** `^K`, `^A` and `^E` are all
+    /// `self-insert` in both `bash`'s `vi-insert` and `zsh`'s `viins` (dumped from the real
+    /// shells), so they land in the line as text — a `^K` had `bash` answering every pane switch
+    /// with `$'\v': command not found` while the `cd` never arrived. `^U` is bound in `bash` but is
+    /// `vi-kill-line` in `zsh`'s `viins`, which kills back only to where insert mode was entered
+    /// and so clears *nothing* after `ESC` `A` — executing the user's abandoned words. Nothing we
+    /// send may depend on a binding.
+    @Test("changeDirectory sends no key that vi mode would type into the line instead of obeying")
+    func changeDirectorySendsNoKeymapDependentKey() {
+        for kind in [ShellKind.zsh, .bash, .fish, .other] {
+            let command = ShellCommandLine.changeDirectory(to: "/tmp", kind: kind)
+            // ^U, ^K, ^A, ^E — every key the "obvious" clear-line sequences reach for.
+            for key in ["\u{15}", "\u{0B}", "\u{01}", "\u{05}"] {
+                #expect(!command.contains(key))
+            }
         }
     }
 
     /// Regression: `bash` binds `^U` to readline's `unix-line-discard`, which rings the terminal
     /// bell instead of killing when the cursor sits at column zero — every idle prompt, which is
     /// precisely where the panel-follow `cd` is typed. SwiftTerm turns that BEL into
-    /// `NSSound.beep()`, so every pane switch beeped like a rejected shortcut. The space gives
-    /// readline something to kill; without it this sequence is audible.
-    @Test("changeDirectory never opens with a bare ^U, which makes bash ding at an empty prompt")
+    /// `NSSound.beep()`, so every pane switch beeped like a rejected shortcut. `^C` retires the
+    /// problem rather than tiptoeing around it: with no `^U` in the sequence there is nothing that
+    /// can ring, which a pty confirms for vi *command* mode too — where the old space-plus-`^U`
+    /// still beeped 5–8 times a move.
+    @Test("changeDirectory sends no ^U, so bash cannot ding at an empty prompt")
     func changeDirectoryDoesNotDingBash() {
         for kind in [ShellKind.zsh, .bash, .fish, .other] {
             let command = ShellCommandLine.changeDirectory(to: "/tmp", kind: kind)
-            #expect(!command.hasPrefix("\u{15}"))
-            #expect(command.hasPrefix(" \u{15}"))
+            #expect(!command.contains("\u{15}"))
+            #expect(command.hasPrefix("\u{03}"))
         }
     }
 
@@ -98,7 +118,7 @@ struct ShellCommandLineTests {
     @Test("fish gets a plain cd, whose -- handling is not the shell's to promise")
     func fishOmitsOptionTerminator() {
         let command = ShellCommandLine.changeDirectory(to: "/tmp", kind: .fish)
-        #expect(command == " \u{15}\u{0B} cd '/tmp'\n")
+        #expect(command == "\u{03} cd '/tmp'\n")
         #expect(!command.contains("--"))
     }
 

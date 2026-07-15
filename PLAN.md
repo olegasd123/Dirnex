@@ -1561,6 +1561,34 @@ today's `^U^K` is equally broken there. +2 tests → **634 core**; the exact-seq
 beep regression. LESSON, the same one as the sliver: **pass 8's live verification watched the `cd`
 appear and never noticed the sound**; a screenshot cannot hear, and the drawer is the one surface
 that talks back in audio.
+FOLLOW-UP (user, same day): **the vi-mode `cd`, which pass 8 logged as "pre-existing and NOT fixed"
+— now fixed, and it was worse than logged.** Dumping both keymaps out of the real shells settles the
+design question: **neither `bash`'s `vi-insert` nor `zsh`'s `viins` binds any forward kill** — `^K`,
+`^A`, `^E` are all `self-insert` in both — so there was never a keystroke to find. Two things the
+beep pass missed, both live in shipped code: (1) **`zsh` binds `^U` to `vi-kill-line`, which kills
+back only to *where insert mode was entered*.** A user who types a command, hits `ESC`, then `A` to
+append has their insert point at end-of-line, so `^U` clears **nothing** and their abandoned words
+**execute** with our `cd` glued on — the exact `rm -rf /` hazard the clear-line exists to prevent,
+and the same verdict pass 8 handed `^A^K`. Dropping `^K` does not save it. (2) **`^U^K` rings 5–8
+BELs in vi *command* mode**, so pass 8's beep fix never held for vi users. Measured over
+bash/zsh × emacs/vi × 6 prompt states: old `^U^K` lands **8/18**, executes user text once, **26
+BELs**. **Fix: `^C` alone, and the insight is that it is not a keystroke** — it is `VINTR`, turned
+into `SIGINT` by the *terminal line discipline* below the editor, so the keymap cannot matter; and
+every shell answers `SIGINT` at a prompt with a fresh line **in insert mode**, the only thing that
+also rescues a user idling in vi *command* mode (where `cd -- '/x'` is read as editor commands).
+**18/18 land, 0 executions, 0 BELs**, driving the bytes `swiftc` actually emits. The
+flush hazard is real but does not bite — `SIGINT` flushes the tty input queue, yet the `cd` is
+queued *behind* the signal and survived **96/96** across same-write/split-write/delayed. It is safe
+to send a signal at all only because `isAtPrompt` (`tcgetpgrp == shell`) already gates every write,
+so it can never reach somebody's `vim`. **COST, chosen deliberately by the user over leaving vi
+broken:** `SIGINT` redraws the prompt, so a followed `cd` leaves the abandoned prompt above it —
+3 pane switches render **7 rows instead of 4** (2 lines per move, not 1), for emacs users too. Only
+real moves pay it (`command(toFollow:)` stays silent when the shell is already there). Exact-sequence
+tests re-pinned to `^C`; the ding regression now asserts no `^U` exists to ring at all; +1 test that
+no keymap-dependent key is ever sent → **635 core**. `fish` reasoned-through but unverified (not
+installed). LESSON: **the idiomatic clear-line keys are all bets on a keymap we do not own** — three
+passes reached for `^A^K`, `^U^K`, `^U`, and a pty called each one; the only reliable way into a line
+editor you do not control is the channel underneath it.
 **NEXT (M6 pass 9):** size-visualization mode (ncdu-style bars, async, cached) — the next `[ ]`
 item; then Share sheet / "Open With" / Services, and the automation slice that M6's exit criteria
 name ("a user-defined convert-to-webp script runs from the palette").

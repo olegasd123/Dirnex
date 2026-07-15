@@ -93,7 +93,7 @@ struct ShellWorkingDirectoryTests {
             kind: .zsh,
             resolve: resolve
         )
-        #expect(command == " \u{15}\u{0B} cd -- '/Users/me/src'\n")
+        #expect(command == "\u{03} cd -- '/Users/me/src'\n")
     }
 
     @Test("a shell already in the right place is told nothing, which is what keeps history clean")
@@ -125,7 +125,7 @@ struct ShellWorkingDirectoryTests {
             kind: .bash,
             resolve: resolve
         )
-        #expect(command == " \u{15}\u{0B} cd -- '/Users/me'\n")
+        #expect(command == "\u{03} cd -- '/Users/me'\n")
     }
 
     @Test("a panel that is not on disk asks the shell for nothing")
