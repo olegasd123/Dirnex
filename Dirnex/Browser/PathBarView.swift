@@ -39,6 +39,11 @@ final class PathBarView: NSView, NSTextFieldDelegate {
 
     private let crumbStack = NSStackView()
     private let editField = NSTextField()
+    /// The Git branch of the location on screen, trailing the crumbs. It rides *inside* the crumb
+    /// stack (after the greedy spacer) rather than being pinned to the view: an `NSStackView`
+    /// collapses a hidden arranged view, whereas a hidden pinned one keeps reserving its width —
+    /// which would leave a branch-shaped hole in the path bar of every folder that isn't a repo.
+    private let branchChip = GitBranchChipView()
 
     /// The location each crumb button navigates to, indexed by the button's `tag`. Populated
     /// alongside the buttons so a click resolves to a full `VFSPath` — crucial for an archive
@@ -131,7 +136,9 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         rebuildContents(for: path, archiveAncestry: archiveAncestry)
     }
 
-    private func rebuildCrumbs(for path: VFSPath, rootTitle: String = "Macintosh HD") {
+    /// Internal, not private: `rebuildContents` drives it from `PathBarView+Location`, and Swift's
+    /// `private` does not reach across files.
+    func rebuildCrumbs(for path: VFSPath, rootTitle: String = "Macintosh HD") {
         installCrumbs(path.ancestorsFromRoot.map { ancestor in
             Crumb(title: ancestor.isRoot ? rootTitle : ancestor.lastComponent, target: ancestor)
         })
@@ -368,117 +375,14 @@ extension PathBarView {
             button.setContentCompressionResistancePriority(resistance, for: .horizontal)
             crumbStack.addArrangedSubview(button)
         }
-        appendTrailingSpacer()
-    }
-
-    func clearCrumbStack() {
-        for view in crumbStack.arrangedSubviews {
-            crumbStack.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-        crumbTargets = []
-    }
-
-    /// A greedy trailing spacer keeps the crumbs packed to the left.
-    func appendTrailingSpacer() {
-        let spacer = NSView()
-        spacer.translatesAutoresizingMaskIntoConstraints = false
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        crumbStack.addArrangedSubview(spacer)
-    }
-}
-
-// MARK: - Virtual location (search results) & archive trail
-
-extension PathBarView {
-    /// Dispatch the location render by backend: clickable breadcrumbs for a local directory or a
-    /// browsed archive (whose trail spans the archive's local ancestors, then its inner path), a
-    /// non-clickable label for a search-results snapshot.
-    func rebuildContents(for path: VFSPath, archiveAncestry: [VFSPath] = []) {
-        if path.backend == .local {
-            rebuildCrumbs(for: path)
-        } else if path.backend.isArchive {
-            rebuildArchiveLabel(for: path, ancestry: archiveAncestry)
-        } else if let location = path.backend.sftpLocation {
-            // A remote SFTP location is re-listable, so it gets clickable breadcrumbs rooted at the
-            // account (`oleg@mac › Users › oleg › Dev`), like a local path — not the dead-end
-            // "results" label a search snapshot gets.
-            rebuildCrumbs(for: path, rootTitle: "\(location.username)@\(location.host)")
-        } else {
-            rebuildVirtualLabel(for: path)
-        }
-    }
-
-    /// Render a virtual location (Spotlight results) as a single, non-clickable label — there is
-    /// no ancestor chain to walk into, so the breadcrumb affordance would only mislead.
-    func rebuildVirtualLabel(for path: VFSPath) {
-        installVirtualLabel("🔍  Results for \(path.lastComponent)")
-    }
-
-    /// Render a browsed archive as a full, clickable breadcrumb trail — styled exactly like a
-    /// local path (`Macintosh HD › Users › oleg › Downloads › pkg.zip › folder`). The trail
-    /// carries the archive's real on-disk ancestors, then crosses into the archive at its own
-    /// filename, then walks the inner tree. Every crumb navigates: a local ancestor exits the
-    /// archive to that folder, the archive-name crumb re-enters its root, an inner crumb jumps
-    /// within it — the same affordance the local path bar gives.
-    func rebuildArchiveLabel(for path: VFSPath, ancestry: [VFSPath] = []) {
-        installCrumbs(Self.archiveCrumbs(for: path, ancestry: ancestry))
-    }
-
-    /// The crumb chain for a browsed archive, outermost local folder → current inner directory.
-    ///
-    /// For a nested archive (§M4), `ancestry` carries the enclosing members outermost-first. The
-    /// backends the chain crosses are `ancestry[i].backend` for each outer frame plus `path.backend`
-    /// for the current (innermost) one; member `ancestry[i].path`'s last component is the next
-    /// inner-archive file, so it doubles as frame `i+1`'s archive-name crumb, and that crumb's
-    /// target is frame `i+1`'s root — every target is a directly navigable location.
-    ///
-    /// `static` and pure (no view state) so it's unit-testable without instantiating the view.
-    static func archiveCrumbs(for path: VFSPath, ancestry: [VFSPath]) -> [Crumb] {
-        // The outermost archive's real on-disk path — the local file the whole chain roots at.
-        guard let outerOnDisk = ancestry.first?.backend.archivePath ?? path.backend.archivePath else {
-            let name = (path.backend.archivePath as NSString?)?.lastPathComponent ?? "Archive"
-            return [Crumb(title: name, target: path)]
-        }
-
-        // 1. The archive file's containing folders, so the trail reads as a full path before it
-        //    crosses into the archive. Drop the file itself — it becomes the first archive crumb.
-        var crumbs = VFSPath.local(outerOnDisk).ancestorsFromRoot.dropLast().map { ancestor in
-            Crumb(title: ancestor.isRoot ? "Macintosh HD" : ancestor.lastComponent, target: ancestor)
-        }
-
-        // 2. Each archive in the chain, outermost → current.
-        let backends = ancestry.map(\.backend) + [path.backend]
-        for (index, backend) in backends.enumerated() {
-            // The archive-name crumb — its own filename, navigating to this archive's root.
-            let name = index == 0
-                ? (outerOnDisk as NSString).lastPathComponent
-                : (ancestry[index - 1].path as NSString).lastPathComponent
-            crumbs.append(Crumb(title: name, target: VFSPath(backend: backend, path: "/")))
-
-            // The inner directories browsed within this archive: down to (but not including) the
-            // nested-archive file for an outer frame, the full browsed location for the current one.
-            let isCurrentFrame = index == ancestry.count
-            let innerPath = isCurrentFrame ? path.path : ancestry[index].path
-            var components = innerPath.split(separator: "/", omittingEmptySubsequences: true).map(
-                String.init
-            )
-            if !isCurrentFrame { components.removeLast() } // the nested-archive file, next frame's crumb
-            var cumulative = ""
-            for component in components {
-                cumulative += "/" + component
-                crumbs.append(
-                    Crumb(title: component, target: VFSPath(backend: backend, path: cumulative))
-                )
-            }
-        }
-        return crumbs
+        appendTrailingAccessories()
     }
 
     /// Shared shell for a single non-clickable path-bar label (search results): swap the crumb
-    /// row for one bold, truncating label plus a trailing spacer.
-    private func installVirtualLabel(_ text: String) {
+    /// row for one bold, truncating label plus the trailing accessories. Lives here beside
+    /// `installCrumbs` — the other way to fill the row — because both reach into the private
+    /// `crumbStack`, which `PathBarView+Location` cannot see from its own file.
+    func installVirtualLabel(_ text: String) {
         clearCrumbStack()
         let label = NSTextField(labelWithString: text)
         label.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
@@ -491,6 +395,33 @@ extension PathBarView {
             for: .horizontal
         )
         crumbStack.addArrangedSubview(label)
-        appendTrailingSpacer()
+        appendTrailingAccessories()
+    }
+
+    func clearCrumbStack() {
+        for view in crumbStack.arrangedSubviews {
+            crumbStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        crumbTargets = []
+    }
+
+    /// Close the row: a greedy spacer that keeps the crumbs packed to the left, then the branch
+    /// chip at the far end. Both go in on every rebuild — `clearCrumbStack` empties the stack, and
+    /// the chip is a retained property being re-arranged, not a new one.
+    func appendTrailingAccessories() {
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        crumbStack.addArrangedSubview(spacer)
+        crumbStack.addArrangedSubview(branchChip)
+    }
+
+    /// Show `branch` at the trailing end of the bar, or nothing when the location isn't in a
+    /// repository. Driven by the pane's chrome refresh, so it must stay a cheap no-op when
+    /// unchanged — which it is, in the chip.
+    func setBranch(_ branch: GitBranch?) {
+        branchChip.branch = branch
     }
 }

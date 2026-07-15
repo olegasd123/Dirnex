@@ -19,6 +19,10 @@ extension PanelViewController {
         if tabs[activeTabIndex].hasLoaded {
             reloadEverything()
             refreshActiveDirectory()
+            // The tab renders its own stored Git state immediately (it is per-tab, like the cursor);
+            // this re-points the pane's single repository watcher at it and refreshes what may have
+            // gone stale while the tab was inactive. A fresh tab gets both from `navigate`.
+            updateGitStatus()
         } else {
             navigate(to: panel.path)
         }

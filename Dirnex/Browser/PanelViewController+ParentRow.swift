@@ -42,12 +42,15 @@ extension PanelViewController {
             ?? FileCellView(showsImage: column == .name, identifier: identifier)
         cell.marked = false
         cell.dimmed = false
+        cell.accentColor = nil
         switch column {
         case .name:
             cell.imageView?.image = FileIconProvider.parentIcon
             cell.textField?.stringValue = ".."
             cell.textField?.alignment = .natural
-        case .size, .date:
+        // `..` is a way out, not a file: it has no size, no date, and no Git status — the folder it
+        // points at may not even be in this repository.
+        case .size, .date, .git:
             cell.textField?.stringValue = ""
         }
         cell.applyStyle()

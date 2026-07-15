@@ -24,6 +24,7 @@ extension PanelViewController: NSTableViewDelegate {
 
         cell.marked = panel.isMarked(entry)
         cell.dimmed = entry.isHidden
+        cell.accentColor = nil
         switch column {
         case .name:
             cell.imageView?.image = FileIconProvider.icon(for: entry)
@@ -37,6 +38,12 @@ extension PanelViewController: NSTableViewDelegate {
         case .date:
             cell.textField?.stringValue = FileFormatting.dateString(for: entry)
             cell.textField?.alignment = .natural
+        case .git:
+            // Git's own letter, in the app's colour for it — blank for the unmodified majority.
+            let status = gitStatus(for: entry)
+            cell.textField?.stringValue = status?.code ?? ""
+            cell.textField?.alignment = .center
+            cell.accentColor = status.map(GitStatusStyle.color(for:))
         }
         cell.applyStyle()
         // Inline rename (F2): the name cell for the entry being renamed becomes an
@@ -60,12 +67,15 @@ extension PanelViewController: NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, didClick tableColumn: NSTableColumn) {
-        guard let column = Column(rawValue: tableColumn.identifier.rawValue) else { return }
+        // An unsortable column (the Git gutter) has no header behaviour — clicking it does nothing
+        // rather than silently re-sorting by whatever was last picked.
+        guard let column = Column(rawValue: tableColumn.identifier.rawValue),
+              let sortKey = column.sortKey else { return }
         var sort = panel.model.sort
-        if sort.key == column.sortKey {
+        if sort.key == sortKey {
             sort.ascending.toggle()
         } else {
-            sort = FileSort(key: column.sortKey, ascending: true)
+            sort = FileSort(key: sortKey, ascending: true)
         }
         panel.setSort(sort)
         reloadEverything()

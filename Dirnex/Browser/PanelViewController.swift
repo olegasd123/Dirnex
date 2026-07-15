@@ -168,6 +168,13 @@ final class PanelViewController: NSViewController {
     /// folder changes underneath us. Replaced on every navigation; `nil` for backends
     /// without the `.watch` capability.
     private var watcher: DirectoryWatcher?
+    /// FSEvents watcher for the *repository root* of the directory on screen, and the root it
+    /// covers. Distinct from `watcher`, which re-lists this folder: what Git says about these rows
+    /// also changes with the index and `HEAD` at the root — a `git add` in a terminal — and no
+    /// event under this folder reports that. `nil` outside a repository. Managed by
+    /// `PanelViewController+Git`, hence internal.
+    var gitWatcher: DirectoryWatcher?
+    var gitWatchedRoot: VFSPath?
     /// The visible cursor sits on the synthetic `..` row (which has no backing entry).
     /// Tracked in the UI only — `Panel` stays unaware of the parent row. Internal so the
     /// Quick Look extension can suppress previews while the cursor is on `..`; forwards
@@ -252,7 +259,9 @@ final class PanelViewController: NSViewController {
     }
 
     private func configureTable() {
-        for column in Column.allCases {
+        // A contextual column (the Git gutter) is installed by the code that owns its condition,
+        // not here — at setup no directory has been listed yet, so nothing is known about it.
+        for column in Column.allCases where !column.isContextual {
             let tableColumn = NSTableColumn(
                 identifier: NSUserInterfaceItemIdentifier(column.rawValue)
             )
@@ -291,6 +300,7 @@ final class PanelViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         observeShowHiddenPreference()
+        observeGitStatusChanges()
         activateTab()
     }
 
@@ -352,6 +362,7 @@ final class PanelViewController: NSViewController {
                 reloadEverything()
                 refreshTabBar()
                 startWatching(path)
+                updateGitStatus()
                 persistState()
                 host?.panelDidNavigate(self)
             } catch {
@@ -391,6 +402,9 @@ final class PanelViewController: NSViewController {
             reconcileCursorFromTable()
             panel.setListing(listing)
             renderRefresh()
+            // Re-derives the repository too, so a `git init` (or a deleted `.git`) right here turns
+            // the gutter on or off as it happens, rather than on the next navigation.
+            updateGitStatus()
         }
     }
 

@@ -33,6 +33,13 @@ final class PanelTab {
     /// a results tab (search results aren't persisted), so this is never encoded.
     var searchQuery: SpotlightQuery?
     var searchScope: VFSPath?
+    /// The Git working tree this tab's directory belongs to, and the snapshot its rows are painted
+    /// from (PLAN.md §M6) — both `nil` outside a repository, and the snapshot also `nil` until the
+    /// first `git status` lands. UI-only and session-scoped, like `cursorOnParentRow`: they are
+    /// derived from the directory on switching to the tab, never persisted. Managed by
+    /// `PanelViewController+Git`.
+    var gitRepositoryRoot: VFSPath?
+    var gitSnapshot: GitStatusSnapshot?
     /// An explicit chip label overriding the path-derived one — set when a search is saved (or a
     /// saved search is re-run) so a results tab reads as its friendly name ("JMeter search")
     /// rather than the raw query (`"jmeter"`). `nil` for an ordinary tab. Session-scoped like

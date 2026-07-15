@@ -14,6 +14,11 @@ final class FileCellView: NSTableCellView {
     /// Fades the whole cell — icon and text alike — for a hidden (dot) entry, the way
     /// Finder greys out invisibles once you reveal them. Set per render alongside `marked`.
     var dimmed = false
+    /// A colour this cell's text carries in its own right — the Git status letter (PLAN.md §M6),
+    /// where the colour *is* the information and the default label colour would throw it away.
+    /// Outranks the mark's red (a marked modified file still shows an orange `M`) but yields to
+    /// the cursor's emphasized background, which needs its own contrast. `nil` for ordinary cells.
+    var accentColor: NSColor?
 
     init(showsImage: Bool, identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
@@ -70,6 +75,8 @@ final class FileCellView: NSTableCellView {
 
         if backgroundStyle == .emphasized {
             textField.textColor = .alternateSelectedControlTextColor
+        } else if let accentColor {
+            textField.textColor = accentColor
         } else if marked {
             textField.textColor = .systemRed
         } else {

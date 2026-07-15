@@ -895,8 +895,9 @@ remain, all deferrable to M6-ish polish.
 
 ### M6 — Mac-native power features (M)
 
-- [ ] Git awareness: branch in path bar, status column (M/A/?/ignored) via a debounced
-      `git status --porcelain` provider; optional .gitignore-aware folder sizes
+- [x] Git awareness: branch in path bar, status column (M/A/?/ignored) via a debounced
+      `git status --porcelain` provider; optional .gitignore-aware folder sizes (the one
+      optional slice, still deferred)
 - [ ] Finder tags: column, edit from panel, filter chips in search
 - [ ] Terminal drawer: bottom pane following active panel's cwd; "cd sync back" via
       shell integration snippet; open in iTerm/Terminal/WezTerm as alternative
@@ -983,6 +984,80 @@ filesystem. **NEXT (M6 pass 2, the app layer):** a `GitStatusProvider` (`Process
 off-main, cached per repo root, refreshed on FSEvents + directory change — mirroring
 `SpotlightSearchRunner`/`ArchiveMounter`), the **status column** in the panel (per-tab, like the other
 columns) and the **branch in the path bar**; then the optional `.gitignore`-aware folder sizes.
+
+Progress (2026-07-15, M6 pass 2 — the app layer; **the Git box closes `[x]`**, only the item's own
+"optional" `.gitignore`-aware folder sizes deferred). Three new app files plus one split, and no core
+change at all (pass 1's 544 tests stand untouched):
+- **`GitStatusProvider.swift`** — spawns `git` off-main through pass 1's `GitCommand`, parses with
+  `GitStatusParser`, caches one snapshot per **repository root** (LRU, 8). Shared, not per-pane,
+  because the unit of caching is the repository: two panes in one working tree must get one answer
+  from one run. **Rate limiting is the whole design, not a nicety** — in a repository the FSEvents
+  never stop (a build writes thousands of files, a checkout rewrites the tree), so a request is
+  either coalesced into a 300 ms trailing window or, when the snapshot has already been stale for
+  2 s, run immediately: a pure trailing debounce starves under a long build's continuous churn and
+  would freeze the column for its duration. Runs are serialized per root (a request arriving mid-run
+  is replayed once, never spawned alongside). **Pass 1's `--no-optional-locks` turns out to be what
+  makes any of this terminate**: without it our own `git status` would rewrite `.git/index`, FSEvents
+  would report that as a change, and the pane would ask for another refresh — a spawn loop fed by
+  nothing but our own reading.
+- **BUG, caught reviewing before the live run:** the "a first look runs immediately" test asked *do
+  we have a snapshot*, but a repository `git` refuses to read (dubious ownership, a corrupt index)
+  caches none — so every event would count as a first look and spawn `git` again, precisely the storm
+  the rate limiting exists to prevent. It now asks *have we ever run this* (`lastRun`), and `forget()`
+  deliberately keeps the run stamp when it drops the snapshot; only LRU eviction clears it, which
+  correctly makes an aged-out repository a first look again.
+- **`PanelViewController+Git.swift`** — per-*tab* root + snapshot (so a tab switch restores the Git
+  view along with everything else), per-*pane* watcher. **The pane's existing directory watcher is
+  blind to exactly the changes Git status turns on**: `git add` in a terminal, a branch switch, an
+  edit in a sibling folder all change what these rows should say while touching nothing under the
+  folder on screen — the index and `HEAD` live at the root. So the Git side watches the **root**
+  instead, and every pane in that repository coalesces onto the provider's one debounced run. The
+  watched root is tracked on the pane, not read back from the tab: a tab switch can leave the tab's
+  root unchanged while the pane's watcher was torn down for the other tab (a nil-watcher hole the
+  first draft had).
+- **The gutter is a *contextual* column** (`Column.isContextual`): a permanently blank "Git" column in
+  every folder that isn't a repository — most of them — is clutter, so it exists only inside one,
+  sits right after Name, fixed at 20 pt, unsortable (`sortKey` became optional), header "" plus a
+  `headerToolTip`. That is only safe because **it never enters a stored layout**: `defaultColumnLayout`
+  excludes it and `currentColumnLayout` filters it out, or else every step into a repository would
+  look like the user rearranging their columns — and be persisted as such. `applyColumnLayout` lifts
+  it out before the reorder pass and re-installs after: that pass moves each stored column to its
+  target index in turn, which drags an unlisted column to the far end one move at a time.
+  `FileCellView.accentColor` carries the status colour — it outranks the mark's red (a marked
+  modified file still shows an orange `M`) and yields to the cursor's emphasized background.
+- **`GitBranchChipView.swift`** — glyph + name + `↑2 ↓1` only when drifted, with a tooltip spelling it
+  out. Deliberately **inert**: a click here would be an offer to switch branches, and the only thing
+  worse than no Git operations in a file manager is Git operations where a misclick rewrites the
+  worktree. It rides *inside* the crumb stack (after the greedy spacer) rather than pinned to the
+  bar's edge — `NSStackView` collapses a hidden arranged view, whereas a hidden pinned one keeps
+  reserving its width: a branch-shaped hole in the path bar of every folder that isn't a repo.
+- GOTCHAS (both recurring, both already on the list): `PathBarView` sat at 496 of the 500-line
+  `file_length` limit, so the chip forced splitting the location rendering into
+  `PathBarView+Location.swift` — which immediately hit **"Swift `private` doesn't cross files"**
+  (`installVirtualLabel` touches the private `crumbStack`), fixed by keeping it beside `installCrumbs`
+  and widening only `rebuildCrumbs` to internal. Also swiftlint's `optional_data_string_conversion`
+  rejects `String(decoding:as:)` — disabled in place with the reason: the failable initializer it
+  prefers answers `nil` for the *whole* output on one non-UTF-8 filename, blanking the column for
+  every other row, where lossy decoding costs only that row's key.
++9 app tests → **33** (the hermetic surface: how a branch reads, and the contextual-column invariant;
+the subprocess/cache half is non-hermetic and verified live, as with `SMBMounter`). 544 core + 33 app
+green, swiftformat + swiftlint-strict clean. **VERIFIED LIVE** against a purpose-built repo holding
+every shape at once with a real upstream: the root painted `build` `!` · `deep` `M` (rolled up from a
+file **four levels down**) · `scratchdir` `?` (collapsed untracked dir) · `src` `M` (precedence:
+modified beats the deleted/renamed/untracked also inside it) · `debug.log` `!`, with `..` blank and
+the chip reading `main ↑1 ↓1`; inside `src/`: `added.txt` `A`, `edited.txt` `M`, **`renamed.txt` `R`**
+— which proves pass 1's reversed `-z` rename pair end-to-end, since the printed order would have
+painted the name that no longer exists — clean files blank, `untracked.txt` `?`. Then **live, with no
+navigation**: `git add src/untracked.txt` (an index-only change, nothing under the folder on screen)
+flipped `?`→`A`, which is the root watcher earning its existence, and `git checkout -b
+feature/live-check` retitled the chip and dropped the arrows. Crossing to **Dirnex's own repo**
+re-derived root/snapshot/branch/watcher (`Dev`; `Dirnex` `M`, `DirnexTests` `?`, `DirnexCore` blank —
+matching exactly what this pass had touched); leaving for `~/Downloads` took the gutter and chip away;
+the right pane never grew a column while the left had one; and the persisted layout after all of that
+was still `name`/`size`/`date` alone. Incidental confirmation of a pass-1 decision: this Mac has **no
+Homebrew git**, so the CLT candidate is what resolved — and `/usr/bin/git`, excluded as the `xcrun`
+shim, is exactly what a naive provider would have spawned. **NEXT (M6 pass 3):** Finder tags (column,
+edit from panel, filter chips in search), then the terminal drawer / size-visualization mode.
 
 ### M7 — Release readiness (M)
 

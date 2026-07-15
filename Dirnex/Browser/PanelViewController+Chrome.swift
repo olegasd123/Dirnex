@@ -7,6 +7,7 @@ import DirnexCore
 extension PanelViewController {
     func updateChrome() {
         pathBar.setPath(panel.path, archiveAncestry: archiveBreadcrumbAncestry())
+        pathBar.setBranch(gitSnapshot?.branch)
         statusLabel.stringValue = statusText()
         // If this is the active pane and Quick View is on, the file under the cursor just
         // changed — re-drive the preview showing in the inactive pane. A no-op otherwise.
