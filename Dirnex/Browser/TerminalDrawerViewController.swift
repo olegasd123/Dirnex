@@ -68,11 +68,15 @@ final class TerminalDrawerViewController: NSViewController {
         terminalView.onOutput = { [weak self] in self?.checkShellDirectory() }
         terminalView.processDelegate = self
 
-        let container = NSView()
+        let container = TerminalContainerView()
+        container.terminalView = terminalView
         container.addSubview(terminalView)
         NSLayoutConstraint.activate([
             terminalView.topAnchor.constraint(equalTo: container.topAnchor),
-            terminalView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            terminalView.leadingAnchor.constraint(
+                equalTo: container.leadingAnchor,
+                constant: Self.terminalLeadingPadding
+            ),
             terminalView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             terminalView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
@@ -81,6 +85,14 @@ final class TerminalDrawerViewController: NSViewController {
         // shell never starts in a window it can't draw a prompt in.
         view.heightAnchor.constraint(greaterThanOrEqualToConstant: 80).isActive = true
     }
+
+    /// The gap between the drawer's left edge and the shell's first column.
+    ///
+    /// SwiftTerm draws column zero flush against its own bounds and offers no padding of its own,
+    /// so the view is inset and `TerminalContainerView` paints what's left. Left edge only: the
+    /// right is where the scroller lives, and the top and bottom are where the dividers already
+    /// separate the drawer from what it's docked between.
+    private static let terminalLeadingPadding: CGFloat = 6
 
     // MARK: - The shell
 
@@ -276,6 +288,29 @@ extension TerminalDrawerViewController: @preconcurrency LocalProcessTerminalView
     /// its choosing at the panel. The kernel can't be talked into lying about our own child's cwd,
     /// so `checkShellDirectory` asks it instead (see `ShellWorkingDirectory`).
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+}
+
+/// The drawer's container, which exists to paint the padding strip beside the terminal.
+///
+/// It asks the terminal for its background rather than holding a colour of its own, because the
+/// strip has to be indistinguishable from the console it is part of — and the console's background
+/// moves: `configureNativeColors` follows the system's `textBackgroundColor` (so, Dark Mode), and a
+/// program can repaint it out from under us with OSC 11. `nativeBackgroundColor` is where SwiftTerm
+/// tracks both; a colour copied once here would be right until the first time either happened.
+private final class TerminalContainerView: NSView {
+    weak var terminalView: DrawerTerminalView?
+
+    override func draw(_ dirtyRect: NSRect) {
+        (terminalView?.nativeBackgroundColor ?? .textBackgroundColor).setFill()
+        dirtyRect.fill()
+    }
+
+    /// A dynamic `NSColor` resolves against the appearance in force when it's *drawn*, so following
+    /// a Dark Mode switch means asking to be drawn again — nothing else invalidates us.
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
 }
 
 /// The terminal view itself, subclassed for one reason: to notice that the shell said something.

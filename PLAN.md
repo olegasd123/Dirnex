@@ -1536,6 +1536,10 @@ before I read them; `shouldSizeTerminalDrawer` now seeds 200 pt on the first ope
 first-launch-has-no-autosave trick `shouldCenterPanesDivider` uses. The drawer's height *and* its
 open/closed state persist via `NSSplitView` autosave, so a drawer left open reopens with the window
 (and spawns its shell then) exactly as the sidebar behaves.
+FOLLOW-UP (user, same day): the prompt sat flush against the drawer's left border. SwiftTerm draws
+column zero against its own bounds and has **no padding API**, so the view is inset 6 pt and the
+container paints the strip — asking the *terminal* for `nativeBackgroundColor` rather than copying a
+colour, since that background moves twice (Dark Mode via `textBackgroundColor`, and OSC 11).
 **NEXT (M6 pass 9):** size-visualization mode (ncdu-style bars, async, cached) — the next `[ ]`
 item; then Share sheet / "Open With" / Services, and the automation slice that M6's exit criteria
 name ("a user-defined convert-to-webp script runs from the palette").
