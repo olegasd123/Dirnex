@@ -30,8 +30,18 @@ extension PanelViewController {
     /// collapse, right-clicking an unmarked file while three others were marked would show a menu
     /// that acts on the three — pointing at one file and operating on others.
     private func retargetSelection(forClickedRow row: Int) {
+        // Right-clicking `..` parks the cursor on it, exactly as a left-click would: drop the marks
+        // and move the highlight onto the parent row. Without this the cursor stays on whatever file
+        // it was on, `cursorOnParentRow` stays false, and `contextMenu` hands back the *entry* menu —
+        // a menu about `..` that instead acts on the previously-selected file. Found live.
+        if isParentRow(row) {
+            panel.clearSelection()
+            cursorOnParentRow = true
+            renderRefresh()
+            return
+        }
         guard let index = entryIndex(forRow: row) else {
-            // The `..` row and the empty space below the list are not entries; leave the marks be.
+            // The empty space below the list is not an entry; leave the marks be.
             return
         }
         if panel.isMarked(panel.model[index]) { return }
