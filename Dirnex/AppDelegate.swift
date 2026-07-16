@@ -15,6 +15,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.mainMenu = MainMenuBuilder.build()
 
+        // Tell the Services system what a pane can hand a Service (PLAN.md §M6): file URLs, and
+        // nothing coming back. Without this the Services menu is built without ever asking the
+        // responder chain, so it would list nothing our selection could feed — the registration is
+        // what makes AppKit ask `PanelViewController.validRequestor` at all.
+        NSApp.registerServicesMenuSendTypes([.fileURL], returnTypes: [])
+
         // Clear any archive copy-out temp files and rewrite scratch dirs left by a previous session
         // (PLAN.md §M4 F5 copy-out / F8 delete). Safe here — nothing is extracting or rewriting yet,
         // so there's no in-flight operation to race.

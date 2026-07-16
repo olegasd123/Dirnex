@@ -57,8 +57,10 @@ extension PanelViewController {
         )
         open.target = self
         menu.addItem(open)
+        menu.addItem(openWithMenuItem())
         add(["view.quickLook"], to: menu)
         menu.addSeparator()
+        addShareItem(to: menu)
         add(["file.copy", "file.move"], to: menu)
         menu.addSeparator()
         add(["file.rename"], to: menu)
@@ -87,10 +89,35 @@ extension PanelViewController {
     private func tagsMenuItem() -> NSMenuItem {
         let item = NSMenuItem(title: "Tags", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
+        submenu.identifier = .tagsSubmenu
         submenu.delegate = self
         item.submenu = submenu
         item.isEnabled = canEditTags
         return item
+    }
+
+    /// Open With as a submenu, for the same reason Tags is one — and, like Tags, filled when it
+    /// opens rather than when the parent menu is built. Here that is not only about freshness: the
+    /// list costs a round trip to LaunchServices per distinct type in the selection, and a
+    /// right-click that never hovers Open With should not pay for it.
+    private func openWithMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Open With", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.identifier = .openWithSubmenu
+        submenu.delegate = self
+        item.submenu = submenu
+        item.isEnabled = canHandOff
+        return item
+    }
+
+    /// The system's Share item, which brings its own submenu of services and its own icons.
+    /// Skipped entirely for rows that have no local URL to share (an archive member, an SFTP file)
+    /// rather than shown disabled — a "Share…" that can never light up is just noise in the menu.
+    private func addShareItem(to menu: NSMenu) {
+        let targets = handoffTargets()
+        guard !targets.isEmpty else { return }
+        menu.addItem(shareMenuItem(for: targets))
+        menu.addSeparator()
     }
 
     /// Add one registry command per id, skipping any that has no binding — a missing selector is a
@@ -114,15 +141,25 @@ extension PanelViewController {
     }
 }
 
-/// Fills the Tags submenu when it opens. The pane is already `NSMenuDelegate`-shaped for this — the
-/// sync sheet's diff table does the same thing for its own row menu.
+/// Fills a lazily-built submenu when it opens. The pane is already `NSMenuDelegate`-shaped for this
+/// — the sync sheet's diff table does the same thing for its own row menu.
+///
+/// The pane is the delegate of **two** submenus now, and `menuNeedsUpdate` is handed the menu
+/// rather than being asked per item, so each one is identified: without that, opening Open With
+/// would fill it with the tag list.
 extension PanelViewController: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        for item in tagMenuItems() {
+        let items = menu.identifier == .openWithSubmenu ? openWithMenuItems() : tagMenuItems()
+        for item in items {
             menu.addItem(item)
         }
     }
+}
+
+extension NSUserInterfaceItemIdentifier {
+    static let tagsSubmenu = NSUserInterfaceItemIdentifier("dirnex.submenu.tags")
+    static let openWithSubmenu = NSUserInterfaceItemIdentifier("dirnex.submenu.openWith")
 }
 
 private extension NSMenu {

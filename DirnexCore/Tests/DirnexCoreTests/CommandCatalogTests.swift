@@ -95,6 +95,18 @@ struct CommandCatalogTests {
         #expect(KeyBindings().conflicts(for: "file.compareByContents").isEmpty)
     }
 
+    @Test("the M6 hand-off commands are shortcut-free File commands")
+    func coversOpenWithAndShare() {
+        let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })
+        for id in ["file.openWith", "file.share"] {
+            let command = byID[id]
+            #expect(command?.category == .file)
+            // No default shortcut (reached via menu/palette/right-click), so neither can collide.
+            #expect(command?.shortcut == nil)
+            #expect(KeyBindings().conflicts(for: id).isEmpty)
+        }
+    }
+
     @Test("the M5 connect-to-server command is a shortcut-free navigation command")
     func coversConnectServer() {
         let byID = Dictionary(uniqueKeysWithValues: CommandCatalog.all.map { ($0.id, $0) })

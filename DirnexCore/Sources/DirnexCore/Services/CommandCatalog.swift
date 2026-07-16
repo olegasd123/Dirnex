@@ -39,6 +39,18 @@ public enum CommandCatalog {
             shortcut: CommandShortcut(key: "w", modifiers: .command)
         ),
         Command(
+            id: "file.openWith",
+            title: "Open With",
+            category: .file,
+            keywords: ["open", "application", "app", "launch", "editor", "default"]
+        ),
+        Command(
+            id: "file.share",
+            title: "Share…",
+            category: .file,
+            keywords: ["share", "send", "airdrop", "mail", "message", "sheet"]
+        ),
+        Command(
             id: "file.copy",
             title: "Copy to Other Panel",
             category: .file,

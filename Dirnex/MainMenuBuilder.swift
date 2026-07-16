@@ -44,6 +44,7 @@ enum MainMenuBuilder {
     private static let layout: [MenuSpec] = [
         MenuSpec(title: "File", items: [
             .command("file.newTab"), .command("file.closeTab"), .separator,
+            .command("file.openWith"), .command("file.share"), .separator,
             .command("file.copy"), .command("file.move"), .command("file.pack"),
             .command("file.syncDirectories"), .command("file.compareByContents"), .separator,
             .command("file.tags"), .separator,
@@ -121,6 +122,22 @@ enum MainMenuBuilder {
         return item
     }
 
+    /// The Services submenu (PLAN.md §M6), in the app menu where macOS puts it.
+    ///
+    /// Nothing is added to it here: handing the menu to `NSApp.servicesMenu` is the whole wiring,
+    /// and AppKit fills it from the installed Services filtered by what the responder chain says it
+    /// can send — which for a file pane is `PanelViewController`'s `validRequestor`/`writeSelection`
+    /// answering with the marked files. It is not in the right-click menu because
+    /// `NSApp.servicesMenu` is single-valued: a second copy would take the population away from
+    /// this one rather than getting its own.
+    private static func servicesMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: "Services")
+        item.submenu = menu
+        NSApp.servicesMenu = menu
+        return item
+    }
+
     private static func appMenuItem(bindings: KeyBindingStore) -> NSMenuItem {
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
@@ -136,6 +153,8 @@ enum MainMenuBuilder {
         if let settings = commandItem(for: "app.settings", bindings: bindings) {
             appMenu.addItem(settings)
         }
+        appMenu.addItem(.separator())
+        appMenu.addItem(servicesMenuItem())
         appMenu.addItem(.separator())
         appMenu.addItem(
             withTitle: "Hide \(appName)",

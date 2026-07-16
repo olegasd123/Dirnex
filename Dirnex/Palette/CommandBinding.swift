@@ -18,6 +18,8 @@ enum CommandBinding {
     private static let selectors: [String: Selector] = [
         "file.newTab": #selector(PanelViewController.newTab(_:)),
         "file.closeTab": #selector(PanelViewController.closeCurrentTab(_:)),
+        "file.openWith": #selector(PanelViewController.showOpenWithMenu(_:)),
+        "file.share": #selector(PanelViewController.shareSelection(_:)),
         "file.copy": #selector(PanelViewController.copyToOtherPane(_:)),
         "file.move": #selector(PanelViewController.moveToOtherPane(_:)),
         "file.pack": #selector(PanelViewController.packSelection(_:)),

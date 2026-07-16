@@ -903,7 +903,7 @@ remain, all deferrable to M6-ish polish.
       ~~shell integration snippet~~ `proc_pidinfo` (no snippet exists, and none should — see
       pass 7); open in iTerm/Terminal/WezTerm as alternative
 - [x] Size visualization mode: toggle panel to ncdu-style bars, computed async, cached
-- [ ] Share sheet, "Open With" submenu, Services integration
+- [x] Share sheet, "Open With" submenu, Services integration
 - [ ] Automation: AppleScript/Shortcuts verbs (reveal, copy, run-op); user actions —
       shell scripts receiving selection as argv/env, surfaced in palette and F-key bar
 - [ ] iCloud/provider sync-status column (NSFileManager ubiquity attrs where available)
@@ -1772,6 +1772,72 @@ iCloud sync-status column. Deferred and still worth doing: extending `DirectoryW
 event paths, which would keep size invalidation surgical instead of dropping a whole root-to-leaf line
 per ping (the conservative rule is correct, just wasteful); and ncdu's `r` — an explicit
 refresh/rescan, for which `DirectorySizeCache.removeAll` already exists unused.
+
+Progress (2026-07-16, M6 pass 11 — Share sheet / Open With / Services; **the box closes `[x]`,
+VERIFIED LIVE**): the three ways a file leaves this app for another one. Probing ran ahead of the
+Swift again (the pass-1 method) and it decided the whole design — three findings, each of which the
+obvious implementation would have got wrong:
+- **LaunchServices answers per *type*, not per file, and asking is ~25x the cost of reading a type**
+  (`urlsForApplications` 6.8 ms/100 vs `contentType` 0.27 ms/100). Two files of one type return
+  **byte-identical** app lists, and the `UTType` overloads return exactly what the per-URL ones do
+  (checked both). So the core is keyed on **distinct types**: a selection collapses to its types
+  first and a thousand marked photos ask **once**. A test with a counting probe pins it, because it
+  is the one thing holding a big selection's right-click under the frame budget.
+- **The rule for a multi-file selection is intersection, and it bites immediately**: `a.txt` offers
+  14 apps, `c.png` offers 8, and together they offer **3** — TextEdit and Preview both drop out.
+  Anything less than intersection would list an app that opens half of what you picked.
+- **A default is only offered when every type agrees on one** (unanimity), and it must survive the
+  intersection. A mixed selection where the types disagree promotes **nothing**: "the app this opens
+  in" over a menu that opens the other half in something else is a lie, and Finder doesn't tell it.
+  An untypeable item (unknown extension → genuinely 0 apps; or a file deleted between listing and
+  right-click → no type at all) **collapses the answer to empty** rather than being skipped — both
+  mean "no app opens *every* item", and LaunchServices reaches the same answer on its own, just
+  slower. `OpenWithApplications` + `ApplicationRef`/`OpenWithCandidates` are pure, with the probes
+  injected exactly like `ExternalDiffTool`.
+- **App layer**: `OpenWithLauncher` (the LaunchServices probes + launch; **one** launch for the whole
+  selection, so twelve images are one Preview with twelve tabs, not twelve cold starts) and
+  `PanelViewController+OpenWith`. Open With and Share are **registry commands that pop a menu, not
+  menu-bar submenus** — ⌃T's shape: a File-menu submenu would have to find the focused pane from a
+  static builder, while a command rides the responder chain, lands in ⌘K for free, and is rebindable.
+  The right-click nests both as real submenus built from the **same items** (`openWithMenuItems`,
+  mirroring `tagMenuItems` — an `NSMenuItem` lives in one menu at a time, so items are the shareable
+  unit, not menus). All three gate on `handoffTargets` = the marked set, else the cursor, filtered to
+  `.local` — the line `tagTargets` already draws, so it works from a results tab (virtual pane, real
+  local hits) and greys inside an archive / on SFTP, which have no URL to hand over.
+- **Services** is the smallest piece and the one with a real trap: `NSApp.servicesMenu` is
+  **single-valued**, so Services lives in the app menu (where macOS puts it) and is *not* duplicated
+  into the right-click — a second copy would take the population away from the first rather than
+  getting its own. The integration is `registerServicesMenuSendTypes([.fileURL], returnTypes: [])` +
+  the pane's `validRequestor`/`writeSelection`; AppKit then **auto-appends Services to the
+  right-click menu by itself**, which the live run showed and no code here asked for.
+- Two Swift-6 gotchas, both paid down via existing precedent rather than suppressed:
+  `NSServicesMenuRequestor` carries no main-actor annotation → `@preconcurrency` conformance (the
+  Quick Look panel's fix); and `NSWorkspace.open`'s callback is `@Sendable` and fires off-main, so
+  `completion` couldn't reach it → the **`async` overload** inside a `Task` that inherits the main
+  actor (`ExternalDiffLauncher`'s shape). GOTCHA (new): the pane is now the delegate of **two**
+  submenus, and `menuNeedsUpdate` is handed the menu, not the item — without identifiers on each
+  (`.tagsSubmenu` / `.openWithSubmenu`) opening Open With fills it with the **tag list**. Also
+  `displayName`/`localizedName` answer **"TextEdit.app"**, extension and all, whenever Finder's
+  hide-extensions is off — the name must come from the bundle's own `CFBundleDisplayName`, and an app
+  test pins it.
++16 core tests → **694** (was 678) and +5 app tests → **43** (was 38); `swift test` + app
+`xcodebuild test` green, swiftformat/swiftlint-strict clean. **VERIFIED LIVE** (launched from
+DerivedData, `ps`-checked for stale instances first — last pass's trap): Open With over `notes.txt`
+listed **TextEdit (default)** promoted and separated, then Code/Cursor/Chrome/…/Xcode alphabetically
+with icons and **no ".app" suffixes**, then Other…; marking `notes.txt` + `photo.png` (marks
+outranking a cursor parked on the unopenable file) re-listed exactly **Google Chrome, LibreOfficeDev,
+Safari** — the probe's predicted intersection, to the app — with **nothing promoted**, the unanimity
+rule on screen; `weird.zzzqqq` showed **"No Applications" + Other…**; the right-click carried Open
+With ▸ / Share… / Services ▸; **Services listed real file services** (Show in Finder, Show Info in
+Finder, Parallels' Open/Reveal in Windows), proving the requestor is being asked; **TextEdit actually
+opened `notes.txt`** showing its real content; the **Share sheet** came up reading "notes · Text
+Document · 18 bytes" with AirDrop/Mail/Messages (nothing was sent); and both commands **greyed out
+inside a zip**. **NEXT (M6 pass 12):** the automation slice M6's exit criteria actually name —
+AppleScript/Shortcuts verbs (reveal, copy, run-op) + user shell scripts receiving the selection as
+argv/env, surfaced in the palette and F-key bar — then the iCloud sync-status column, which closes
+M6. Optional polish now cheap: a **Settings picker for the preferred Open With app** (persist the
+`ApplicationRef.bundleIdentifier` the core already carries for exactly this), and Finder's
+⌥-toggles-to-"Always Open With".
 
 ### M7 — Release readiness (M)
 
